@@ -1,0 +1,13 @@
+name: Evaluation
+description: Metric or experiment
+title: "[EVAL] "
+labels: ["evaluation"]
+body:
+  - type: textarea
+    id: content
+    attributes:
+      label: Evaluation Description
+      description: "Metric definition, calculation, storage, dissertation relevance."
+      placeholder: "Metric...\nCalculation...\nStorage...\nDissertation relevance..."
+    validations:
+      required: true

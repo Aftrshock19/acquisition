@@ -1,0 +1,13 @@
+name: Feature
+description: New system capability
+title: "[FEATURE] "
+labels: ["feature"]
+body:
+  - type: textarea
+    id: content
+    attributes:
+      label: Feature Description
+      description: "What, why, plan, metric impact, acceptance criteria."
+      placeholder: "What...\nWhy...\nPlan...\nMetric impact...\nAcceptance criteria..."
+    validations:
+      required: true

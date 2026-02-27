@@ -1,0 +1,13 @@
+name: UX
+description: Low-burden design improvement
+title: "[UX] "
+labels: ["ux"]
+body:
+  - type: textarea
+    id: content
+    attributes:
+      label: UX Change
+      description: "Problem, proposed change, effect on cognitive load/consistency."
+      placeholder: "Problem...\nProposed change...\nEffect..."
+    validations:
+      required: true

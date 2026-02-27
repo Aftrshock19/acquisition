@@ -1,0 +1,13 @@
+name: Flashcards
+description: Create, correct, or improve flashcards
+title: "[CARDS] "
+labels: ["flashcards"]
+body:
+  - type: textarea
+    id: content
+    attributes:
+      label: Flashcard Task
+      description: "Words affected, change type (create/correct/improve), proposed edits, and how to validate."
+      placeholder: "Words...\nChange type...\nCurrent...\nProposed...\nReason...\nValidation..."
+    validations:
+      required: true

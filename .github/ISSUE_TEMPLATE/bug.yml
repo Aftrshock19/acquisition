@@ -1,0 +1,13 @@
+name: Bug
+description: Something broken
+title: "[BUG] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: content
+    attributes:
+      label: Bug Report
+      description: "Summary, repro steps, expected vs actual, impact on metrics/data."
+      placeholder: "Summary...\nSteps to reproduce...\nExpected...\nActual...\nImpact..."
+    validations:
+      required: true
