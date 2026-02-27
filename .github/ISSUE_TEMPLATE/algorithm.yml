@@ -1,0 +1,13 @@
+name: Algorithm
+description: Scheduling or selection change
+title: "[ALGO] "
+labels: ["algorithm"]
+body:
+  - type: textarea
+    id: content
+    attributes:
+      label: Algorithm Change
+      description: "Current behaviour, proposed change, pseudocode/formula, expected metric impact, evaluation plan."
+      placeholder: "Current...\nProposed...\nPseudo/formula...\nExpected metric impact...\nEvaluation plan..."
+    validations:
+      required: true

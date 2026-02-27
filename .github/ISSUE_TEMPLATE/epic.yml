@@ -1,0 +1,13 @@
+name: Epic
+description: Large architectural or research block
+title: "[EPIC] "
+labels: ["epic"]
+body:
+  - type: textarea
+    id: content
+    attributes:
+      label: Epic Description
+      description: "Include summary, goal, scope, metrics impact, sub-issues, and definition of done."
+      placeholder: "Summary...\nGoal...\nScope (in/out)...\nMetrics...\nSub-issues...\nDoD..."
+    validations:
+      required: true

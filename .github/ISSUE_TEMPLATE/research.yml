@@ -1,0 +1,13 @@
+name: Research
+description: Literature or theory task
+title: "[RESEARCH] "
+labels: ["research"]
+body:
+  - type: textarea
+    id: content
+    attributes:
+      label: Research Task
+      description: "Question, sources, expected output, dissertation impact."
+      placeholder: "Question...\nSources...\nExpected output...\nDissertation impact..."
+    validations:
+      required: true

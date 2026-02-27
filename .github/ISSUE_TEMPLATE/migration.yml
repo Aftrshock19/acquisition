@@ -1,0 +1,13 @@
+name: Database Migration
+description: Schema change
+title: "[DB] "
+labels: ["database"]
+body:
+  - type: textarea
+    id: content
+    attributes:
+      label: Migration Details
+      description: "Schema change, tables/fields, migration + rollback, verification."
+      placeholder: "Schema change...\nTables/fields...\nMigration plan...\nRollback...\nVerification..."
+    validations:
+      required: true
