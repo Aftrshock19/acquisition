@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo } from "react";
+import { BackButton } from "@/components/BackButton";
+import { SettingsButton } from "@/components/SettingsButton";
 
 export type ClozeCard = {
   id: string;
@@ -214,25 +216,31 @@ export function ClozeSession({
 
   function SessionProgressBar() {
     return (
-      <div className="flex flex-col gap-1">
-        <div className="flex justify-between text-sm text-zinc-500 dark:text-zinc-400">
-          <span>
-            Card {completedCount} of {totalCards}
-          </span>
-          <span>{Math.round(progressPercent)}%</span>
-        </div>
-        <div
-          className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700"
-          role="progressbar"
-          aria-valuenow={completedCount}
-          aria-valuemin={0}
-          aria-valuemax={totalCards}
-        >
+      <div className="flex items-start gap-3">
+        <BackButton className="shrink-0" />
+
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex justify-between text-sm text-zinc-500 dark:text-zinc-400">
+            <span>
+              Card {completedCount} of {totalCards}
+            </span>
+            <span>{Math.round(progressPercent)}%</span>
+          </div>
           <div
-            className="h-full rounded-full bg-zinc-700 transition-[width] duration-300 ease-out dark:bg-zinc-300"
-            style={{ width: `${progressPercent}%` }}
-          />
+            className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700"
+            role="progressbar"
+            aria-valuenow={completedCount}
+            aria-valuemin={0}
+            aria-valuemax={totalCards}
+          >
+            <div
+              className="h-full rounded-full bg-zinc-700 transition-[width] duration-300 ease-out dark:bg-zinc-300"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
         </div>
+
+        <SettingsButton className="shrink-0" />
       </div>
     );
   }
