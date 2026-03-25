@@ -26,7 +26,7 @@ export async function recommendSettings(): Promise<RecommendedSettings> {
   }
 
   // Cheap heuristics: backlog size and recent accuracy
-  const [{ data: dueCount }, { data: recentEvents }] = await Promise.all([
+  const [{ count: dueCount }, { data: recentEvents }] = await Promise.all([
     supabase
       .from('user_words')
       .select('word_id', { count: 'exact', head: true })
@@ -40,7 +40,7 @@ export async function recommendSettings(): Promise<RecommendedSettings> {
       .limit(100),
   ]);
 
-  const backlog = (dueCount as unknown as { length?: number })?.length ?? 0;
+  const backlog = dueCount ?? 0;
   const events = (recentEvents ?? []) as { correct: boolean }[];
 
   let accuracy = 0.9;

@@ -7,7 +7,9 @@ import type { TodaySession } from "@/lib/srs/types";
 
 export type TodayClozeSessionProps = {
   session: TodaySession;
+  dailyLimit: number;
   retryDelayMs?: number;
+  showPosHint?: boolean;
 };
 
 function sessionToClozeCards(session: TodaySession): ClozeCard[] {
@@ -32,7 +34,9 @@ function sessionToClozeCards(session: TodaySession): ClozeCard[] {
 
 export function TodayClozeSession({
   session,
+  dailyLimit,
   retryDelayMs = 90000,
+  showPosHint = true,
 }: TodayClozeSessionProps) {
   const cards = sessionToClozeCards(session);
 
@@ -58,9 +62,10 @@ export function TodayClozeSession({
   return (
     <ClozeSession
       cards={cards}
-      dailyLimit={cards.length}
+      dailyLimit={dailyLimit}
       onReview={onReview}
       retryDelayMs={retryDelayMs}
+      showPosHint={showPosHint}
     />
   );
 }

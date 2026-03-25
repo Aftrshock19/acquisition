@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { getDailyQueue } from "@/app/actions/srs";
+import { getTodayFlashcards } from "@/app/actions/srs";
 import { TodayClozeSession } from "@/components/srs/TodayClozeSession";
 
 export default async function TodayPage() {
-  const result = await getDailyQueue("es");
+  const result = await getTodayFlashcards("es");
   const session = result.ok
     ? result.session
     : {
@@ -13,6 +13,7 @@ export default async function TodayPage() {
         signedIn: result.signedIn,
         error: result.error,
       };
+  const effectiveSettings = result.effectiveSettings;
   const hasCards =
     session.dueReviews.length > 0 || session.newWords.length > 0;
 
@@ -57,6 +58,23 @@ export default async function TodayPage() {
           <h2 className="text-xl font-semibold tracking-tight text-red-900 dark:text-red-100">Error loading words</h2>
           <p className="text-red-800 dark:text-red-200">{session.error}</p>
         </div>
+      ) : session.signedIn && !effectiveSettings.clozeEnabled ? (
+        <div className="app-card flex flex-col gap-4 p-8">
+          <h2 className="text-xl font-semibold tracking-tight">
+            Cloze cards are disabled
+          </h2>
+          <p className="text-zinc-600 dark:text-zinc-400">
+            Your flashcard settings currently exclude cloze cards, and other card types are not wired into Today yet.
+            Re-enable cloze in{" "}
+            <Link
+              href="/settings"
+              className="font-medium text-zinc-900 underline dark:text-zinc-100"
+            >
+              Settings
+            </Link>
+            .
+          </p>
+        </div>
       ) : !session.signedIn ? (
         <div className="app-card flex flex-col gap-4 p-8">
           <h2 className="text-xl font-semibold tracking-tight">
@@ -91,7 +109,12 @@ export default async function TodayPage() {
           </p>
         </div>
       ) : (
-        <TodayClozeSession session={session} retryDelayMs={90000} />
+        <TodayClozeSession
+          session={session}
+          dailyLimit={effectiveSettings.dailyLimit}
+          retryDelayMs={effectiveSettings.retryDelaySeconds * 1000}
+          showPosHint={effectiveSettings.showPosHint}
+        />
       )}
     </main>
   );

@@ -65,6 +65,20 @@ export type TodaySession = {
   error?: string;
 };
 
+export type DailySessionRow = {
+  id: string;
+  user_id: string;
+  session_date: string;
+  stage: "flashcards" | "reading" | "listening" | "complete";
+  new_words_count: number;
+  reviews_done: number;
+  reading_done: boolean;
+  listening_done: boolean;
+  completed: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ReviewState = {
   next_review: string;
   interval_days: number;

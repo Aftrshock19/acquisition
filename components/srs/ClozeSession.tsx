@@ -29,6 +29,7 @@ export type ClozeSessionProps = {
   retryDelayMs?: number;
   ignoreAccents?: boolean;
   ignorePunctuation?: boolean;
+  showPosHint?: boolean;
 };
 
 function stripDiacritics(s: string) {
@@ -71,6 +72,7 @@ export function ClozeSession({
   retryDelayMs = 90000,
   ignoreAccents = true,
   ignorePunctuation = true,
+  showPosHint = true,
 }: ClozeSessionProps) {
   const displayCards = useMemo(() => cards.slice(0, dailyLimit), [cards, dailyLimit]);
 
@@ -313,7 +315,9 @@ export function ClozeSession({
       <SessionProgressBar />
       <div className="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
         <p className="text-zinc-600 dark:text-zinc-400">{prompt}</p>
-        {current.hint ? <p className="mt-1 text-sm text-zinc-500">({current.hint})</p> : null}
+        {showPosHint && current.hint ? (
+          <p className="mt-1 text-sm text-zinc-500">({current.hint})</p>
+        ) : null}
 
         <input
           ref={inputRef}
