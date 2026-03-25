@@ -33,7 +33,7 @@ export function FlashcardSettingsPanel({
   }
 
   return (
-    <section className="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-sm dark:border-zinc-800 dark:bg-zinc-900/50">
+    <section className="app-card-muted flex flex-col gap-4 p-4 text-sm">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold tracking-tight">
           Flashcard settings
@@ -48,7 +48,9 @@ export function FlashcardSettingsPanel({
       </div>
 
       {error && (
-        <p className="text-xs text-red-500">{error}</p>
+        <p className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-600 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+          {error}
+        </p>
       )}
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
@@ -79,7 +81,7 @@ export function FlashcardSettingsPanel({
               min={10}
               max={200}
               defaultValue={userSettings.manual_daily_card_limit}
-              className="w-16 rounded-md border border-zinc-300 px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+              className="app-input w-16 px-2 py-1 text-xs"
             />
           )}
         </div>
@@ -125,7 +127,7 @@ export function FlashcardSettingsPanel({
               min={10}
               max={3600}
               defaultValue={effective.retryDelaySeconds}
-              className="w-16 rounded-md border border-zinc-300 px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+              className="app-input w-16 px-2 py-1 text-xs"
             />
             <span>s</span>
           </div>
@@ -140,18 +142,20 @@ export function FlashcardSettingsPanel({
 }
 
 function buttonClass(active: boolean) {
-  return `rounded-full border px-3 py-1 text-xs font-medium transition ${
+  return `rounded-full border px-3 py-1.5 text-xs font-medium transition ${
     active
       ? 'border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900'
-      : 'border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800'
+      : 'border-zinc-300 bg-white/80 text-zinc-700 hover:bg-white dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800'
   }`;
 }
 
 function renderSmallToggle(name: string, label: string, checked: boolean) {
   return (
-    <label className="flex items-center gap-1">
-      <input type="checkbox" name={name} defaultChecked={checked} className="h-3 w-3" />
+    <label className="rounded-full border border-zinc-200 bg-white/80 px-3 py-1.5 dark:border-zinc-800 dark:bg-zinc-900/70">
+      <span className="flex items-center gap-2">
+      <input type="checkbox" name={name} defaultChecked={checked} className="app-check h-3.5 w-3.5" />
       <span>{label}</span>
+      </span>
     </label>
   );
 }

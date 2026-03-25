@@ -10,12 +10,14 @@ export default async function SettingsPage() {
   const supabase = await createSupabaseServerClient();
   if (!supabase) {
     return (
-      <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 px-6 py-16">
+      <main className="app-shell">
         <BackButton />
-        <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          Supabase is not configured. Set environment variables and redeploy.
-        </p>
+        <section className="app-hero">
+          <h1 className="app-title">Settings</h1>
+          <p className="app-subtitle">
+            Supabase is not configured. Set environment variables and redeploy.
+          </p>
+        </section>
       </main>
     );
   }
@@ -33,14 +35,21 @@ export default async function SettingsPage() {
   const effective = resolveEffectiveSettings(settings, recommended);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 px-6 py-16">
+    <main className="app-shell">
       <BackButton />
-      <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
-      <FlashcardSettingsForm
-        userSettings={settings}
-        recommended={recommended}
-        effective={effective}
-      />
+      <section className="app-hero">
+        <h1 className="app-title">Settings</h1>
+        <p className="app-subtitle">
+          Tune daily load, card mix, and retry behavior.
+        </p>
+      </section>
+      <div className="app-card-strong p-8">
+        <FlashcardSettingsForm
+          userSettings={settings}
+          recommended={recommended}
+          effective={effective}
+        />
+      </div>
     </main>
   );
 }

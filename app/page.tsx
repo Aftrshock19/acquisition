@@ -10,37 +10,33 @@ export default async function HomePage() {
   const effective = resolveEffectiveSettings(settings, recommended);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-8 px-6 py-16">
-      <h1 className="text-3xl font-semibold tracking-tight">Acquisition</h1>
-      <p className="text-zinc-600 dark:text-zinc-400">
-        Your daily Spanish practice.
-      </p>
+    <main className="app-shell">
+      <section className="app-hero">
+        <p className="text-xs font-medium uppercase tracking-[0.22em] text-zinc-500 dark:text-zinc-400">
+          Daily language system
+        </p>
+        <h1 className="app-title">Acquisition</h1>
+        <p className="app-subtitle">Your daily Spanish practice.</p>
+      </section>
       <div className="flex flex-col gap-3">
-        <Link
-          href="/today"
-          className="rounded-lg border border-zinc-200 bg-white px-4 py-3 font-medium text-zinc-900 transition hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
-        >
+        <Link href="/today" className="app-link-card font-medium">
           Today — reviews & new words
         </Link>
-        <Link
-          href="/progress"
-          className="rounded-lg border border-zinc-200 bg-white px-4 py-3 font-medium text-zinc-900 transition hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
-        >
+        <Link href="/progress" className="app-link-card font-medium">
           Progress
         </Link>
-        <Link
-          href="/settings"
-          className="rounded-lg border border-zinc-200 bg-white px-4 py-3 font-medium text-zinc-900 transition hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
-        >
+        <Link href="/settings" className="app-link-card font-medium">
           Settings
         </Link>
       </div>
       {signedIn && (
-        <FlashcardSettingsPanel
-          variant="home"
-          userSettings={settings}
-          effective={effective}
-        />
+        <div className="app-card p-5">
+          <FlashcardSettingsPanel
+            variant="home"
+            userSettings={settings}
+            effective={effective}
+          />
+        </div>
       )}
     </main>
   );

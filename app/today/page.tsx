@@ -18,9 +18,11 @@ export default async function TodayPage() {
 
   if (session.configMissing) {
     return (
-      <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 px-6 py-16">
-        <h1 className="text-3xl font-semibold tracking-tight">Today</h1>
-        <div className="flex flex-col gap-4 rounded-xl border border-amber-200 bg-amber-50 p-8 dark:border-amber-900/50 dark:bg-amber-950/30">
+      <main className="app-shell">
+        <section className="app-hero">
+          <h1 className="app-title">Today</h1>
+        </section>
+        <div className="app-card-strong flex flex-col gap-4 border-amber-200 bg-amber-50/90 p-8 dark:border-amber-900/50 dark:bg-amber-950/30">
           <h2 className="text-xl font-semibold tracking-tight text-amber-900 dark:text-amber-100">
             Supabase not configured
           </h2>
@@ -46,15 +48,17 @@ export default async function TodayPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 px-6 py-16">
-      <h1 className="text-3xl font-semibold tracking-tight">Today</h1>
+    <main className="app-shell">
+      <section className="app-hero">
+        <h1 className="app-title">Today</h1>
+      </section>
       {session.error ? (
-        <div className="flex flex-col gap-4 rounded-xl border border-red-200 bg-red-50 p-8 dark:border-red-900/50 dark:bg-red-950/30">
+        <div className="app-card-strong flex flex-col gap-4 border-red-200 bg-red-50/90 p-8 dark:border-red-900/50 dark:bg-red-950/30">
           <h2 className="text-xl font-semibold tracking-tight text-red-900 dark:text-red-100">Error loading words</h2>
           <p className="text-red-800 dark:text-red-200">{session.error}</p>
         </div>
       ) : !session.signedIn ? (
-        <div className="flex flex-col gap-4 rounded-xl border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900/50">
+        <div className="app-card flex flex-col gap-4 p-8">
           <h2 className="text-xl font-semibold tracking-tight">
             Sign in to see your reviews
           </h2>
@@ -70,7 +74,7 @@ export default async function TodayPage() {
           </p>
         </div>
       ) : !hasCards ? (
-        <div className="flex flex-col gap-4 rounded-xl border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900/50">
+        <div className="app-card flex flex-col gap-4 p-8">
           <h2 className="text-xl font-semibold tracking-tight">
             All done for today
           </h2>
