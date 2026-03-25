@@ -2,6 +2,22 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+Copy `.env.example` to `.env.local` and set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Apply the Supabase migration (e.g. `supabase db push` or run the SQL in `supabase/migrations/` in order). Seed vocabulary with `npm run seed` (uses `data/spanish-frequency.json`; replace or expand that file with a full 1–5000 rank Spanish frequency list if desired).
+
+### Seeding words
+
+The `words` table uses columns: `lang`, `rank`, `lemma`, optional `surface`, `pos`, `freq`, and `extra` (JSONB). The seed script reads `data/spanish-frequency.json` (array of `{ rank, word, meaning? }`) and upserts with `lang: "es"`, `lemma: word`, `rank`, and `extra: { definition: meaning }` when present. Conflict is on `(lang, rank)`. For CSV or other sources, map to these columns and upsert with the same conflict key.
+
+### Generating TypeScript types from Supabase
+
+From project root, with Supabase CLI linked to your project:
+
+```bash
+npx supabase gen types typescript --project-id YOUR_PROJECT_REF > lib/supabase/database.types.ts
+```
+
+Use the generated types in server client and actions (e.g. type the Supabase client with `Database`).
+
 First, run the development server:
 
 ```bash

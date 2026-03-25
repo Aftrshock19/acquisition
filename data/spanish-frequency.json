@@ -1,0 +1,22 @@
+[
+  { "rank": 1, "word": "el", "meaning": "the (m)" },
+  { "rank": 2, "word": "de", "meaning": "of, from" },
+  { "rank": 3, "word": "que", "meaning": "that, which, who" },
+  { "rank": 4, "word": "y", "meaning": "and" },
+  { "rank": 5, "word": "a", "meaning": "to, at" },
+  { "rank": 6, "word": "en", "meaning": "in, on" },
+  { "rank": 7, "word": "un", "meaning": "a, an (m)" },
+  { "rank": 8, "word": "ser", "meaning": "to be" },
+  { "rank": 9, "word": "se", "meaning": "oneself, each other" },
+  { "rank": 10, "word": "no", "meaning": "no, not" },
+  { "rank": 11, "word": "haber", "meaning": "to have (aux)" },
+  { "rank": 12, "word": "por", "meaning": "for, by, through" },
+  { "rank": 13, "word": "con", "meaning": "with" },
+  { "rank": 14, "word": "su", "meaning": "his, her, its, their" },
+  { "rank": 15, "word": "para", "meaning": "for, to" },
+  { "rank": 16, "word": "como", "meaning": "as, like, how" },
+  { "rank": 17, "word": "estar", "meaning": "to be" },
+  { "rank": 18, "word": "tener", "meaning": "to have" },
+  { "rank": 19, "word": "le", "meaning": "him, her, you (indirect)" },
+  { "rank": 20, "word": "lo", "meaning": "it, him (m)" }
+]

@@ -1,13 +1,27 @@
-import type { cookies as CookiesFn } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 
-export type SupabaseServerClientLike = {
-  cookies?: ReturnType<typeof CookiesFn>;
-  auth?: unknown;
-};
+export async function createSupabaseServerClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) return null;
 
-export function createSupabaseServerClient(
-  cookieStore?: ReturnType<typeof CookiesFn>,
-): SupabaseServerClientLike {
-  return { cookies: cookieStore };
+  const cookieStore = await cookies();
+
+  return createServerClient(url, key, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet: { name: string; value: string; options: object }[]) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options),
+          );
+        } catch {
+          // setAll from Server Component; middleware refreshes sessions
+        }
+      },
+    },
+  });
 }
-
