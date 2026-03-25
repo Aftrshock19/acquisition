@@ -18,6 +18,7 @@ type RetryEntry = { card: ClozeCard; dueAt: number };
 export type ClozeSessionProps = {
   cards: ClozeCard[];
   dailyLimit: number;
+  initialCompletedCount?: number;
   onReview: (
     cardId: string,
     correct: boolean,
@@ -68,6 +69,7 @@ function upsertRetrySorted(list: RetryEntry[], entry: RetryEntry) {
 export function ClozeSession({
   cards,
   dailyLimit,
+  initialCompletedCount = 0,
   onReview,
   onComplete,
   retryDelayMs = 90000,
@@ -223,9 +225,18 @@ export function ClozeSession({
   }
 
   const totalCards = displayCards.length;
-  const completedCount =
+  const localCompletedCount =
     phase === "answer" ? mainIndex : Math.min(mainIndex + 1, totalCards);
-  const progressPercent = totalCards > 0 ? (100 * completedCount) / totalCards : 0;
+  const normalizedInitialCompleted = Math.max(0, Math.floor(initialCompletedCount));
+  const progressTotal = Math.max(
+    totalCards,
+    Math.min(dailyLimit, normalizedInitialCompleted + totalCards),
+  );
+  const completedCount = Math.min(
+    progressTotal,
+    normalizedInitialCompleted + localCompletedCount,
+  );
+  const progressPercent = progressTotal > 0 ? (100 * completedCount) / progressTotal : 0;
 
   function SessionProgressBar() {
     return (
@@ -235,7 +246,7 @@ export function ClozeSession({
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div className="flex justify-between text-sm text-zinc-500 dark:text-zinc-400">
             <span>
-              Card {completedCount} of {totalCards}
+              Card {completedCount} of {progressTotal}
             </span>
             <span>{Math.round(progressPercent)}%</span>
           </div>
@@ -244,7 +255,7 @@ export function ClozeSession({
             role="progressbar"
             aria-valuenow={completedCount}
             aria-valuemin={0}
-            aria-valuemax={totalCards}
+            aria-valuemax={progressTotal}
           >
             <div
               className="h-full rounded-full bg-zinc-700 transition-[width] duration-300 ease-out dark:bg-zinc-300"

@@ -47,6 +47,10 @@ export function TodayClozeSession({
   initialDebugSnapshot,
 }: TodayClozeSessionProps) {
   const cards = useMemo(() => sessionToClozeCards(session), [session]);
+  const initialCompletedCount = Math.max(
+    0,
+    initialDailySession?.reviews_done ?? initialDebugSnapshot?.dailySession?.reviews_done ?? 0,
+  );
   const [currentCard, setCurrentCard] = useState<ClozeCard | null>(cards[0] ?? null);
   const [debugSnapshot, setDebugSnapshot] = useState<FlashcardDebugSnapshot>(
     initialDebugSnapshot ?? {
@@ -95,6 +99,7 @@ export function TodayClozeSession({
       <ClozeSession
         cards={cards}
         dailyLimit={dailyLimit}
+        initialCompletedCount={initialCompletedCount}
         onReview={onReview}
         retryDelayMs={retryDelayMs}
         showPosHint={showPosHint}

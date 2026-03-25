@@ -130,6 +130,26 @@ export async function getDailyQueue(
       pos: r.pos ?? null,
       extra: r.extra ?? null,
     }));
+  let filteredDueReviews = dueReviews;
+
+  if (dueReviews.length > 0) {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: reviewedTodayRows, error: reviewedTodayError } = await supabase
+      .from("user_words")
+      .select("word_id")
+      .eq("user_id", user.id)
+      .eq("reps_today_date", today)
+      .gt("reps_today", 0)
+      .in("word_id", dueReviews.map((r) => r.word_id));
+
+    if (!reviewedTodayError && (reviewedTodayRows?.length ?? 0) > 0) {
+      const reviewedTodayIds = new Set(
+        (reviewedTodayRows as Array<{ word_id: string }>).map((row) => row.word_id),
+      );
+      filteredDueReviews = dueReviews.filter((r) => !reviewedTodayIds.has(r.word_id));
+    }
+  }
+
   const newWords: Word[] = items
     .filter((r) => r.kind === "new")
     .map((r) => ({
@@ -144,7 +164,7 @@ export async function getDailyQueue(
 
   return {
     ok: true,
-    session: { dueReviews, newWords, signedIn: true },
+    session: { dueReviews: filteredDueReviews, newWords, signedIn: true },
   };
 }
 
@@ -152,7 +172,10 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
   const { settings, signedIn } = await getUserSettings();
   const recommended = await recommendSettings();
   const effective = resolveEffectiveSettings(settings, recommended);
-  const queueLimit = Math.max(1, effective.effectiveDailyLimit);
+  const existingDailySession = await getTodayDailySession();
+  const completedToday = Math.max(0, existingDailySession?.reviews_done ?? 0);
+  const remainingDailyLimit = Math.max(0, effective.effectiveDailyLimit - completedToday);
+  const queueLimit = Math.max(1, remainingDailyLimit);
 
   const effectiveSettings = {
     dailyLimit: effective.effectiveDailyLimit,
@@ -185,7 +208,7 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     };
   }
 
-  const session = limitTodaySession(queueResult.session, effective.effectiveDailyLimit);
+  const session = limitTodaySession(queueResult.session, remainingDailyLimit);
   const dailySession = await upsertDailySession(session);
   const firstWordId = session.dueReviews[0]?.word_id ?? session.newWords[0]?.id ?? null;
   const debugSnapshot = await getFlashcardDebugSnapshot(firstWordId ?? undefined);
@@ -197,6 +220,27 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     debugSnapshot,
     effectiveSettings,
   };
+}
+
+async function getTodayDailySession(): Promise<DailySessionRow | null> {
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return null;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const sessionDate = new Date().toISOString().slice(0, 10);
+  const { data, error } = await supabase
+    .from("daily_sessions")
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("session_date", sessionDate)
+    .maybeSingle();
+
+  if (error) return null;
+  return data as DailySessionRow | null;
 }
 
 export type RecordReviewResult =
