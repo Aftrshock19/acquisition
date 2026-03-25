@@ -2,11 +2,21 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-Copy `.env.example` to `.env.local` and set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Apply the Supabase migration (e.g. `supabase db push` or run the SQL in `supabase/migrations/` in order). Seed vocabulary with `npm run seed` (uses `data/spanish-frequency.json`; replace or expand that file with a full 1–5000 rank Spanish frequency list if desired).
+Copy `.env.example` to `.env.local` and set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Apply the Supabase migrations in order (e.g. `supabase db push` or run the SQL files in `supabase/migrations/`). Seed vocabulary with `npm run seed` (uses `data/spanish-frequency.json`; replace or expand that file with a full 1–5000 rank Spanish frequency list if desired).
+
+### Database overview
+
+The Supabase database is organized into shared content tables and user-specific progress tables.
+
+- Shared content: `words`, `word_forms`, `texts`, `audio`
+- User progress: `user_words`, `review_events`, `daily_sessions`, `user_settings`
+- Identity: `auth.users`
+
+`words` is the canonical vocabulary curriculum table. `user_words` is the source of truth for each user's current state for each word. `review_events` is the append-only history of graded reviews. `daily_sessions` tracks guided day-by-day loop progress. `user_settings` stores per-user preferences. `word_forms`, `texts`, and `audio` support inflected form resolution plus matched reading/listening content.
 
 ### Seeding words
 
-The `words` table uses columns: `lang`, `rank`, `lemma`, optional `surface`, `pos`, `freq`, and `extra` (JSONB). The seed script reads `data/spanish-frequency.json` (array of `{ rank, word, meaning? }`) and upserts with `lang: "es"`, `lemma: word`, `rank`, and `extra: { definition: meaning }` when present. Conflict is on `(lang, rank)`. For CSV or other sources, map to these columns and upsert with the same conflict key.
+The `words` table uses columns including `lang`, `rank`, `lemma`, `definition`, optional `surface`, `pos`, `freq`, and `extra` (JSONB). The seed script reads `data/spanish-frequency.json` (array of `{ rank, word, meaning? }`) and upserts with `lang: "es"`, `lemma: word`, `rank`, and definition data. Conflict is on `(lang, rank)`. For CSV or other sources, map to these columns and upsert with the same conflict key.
 
 ### Generating TypeScript types from Supabase
 

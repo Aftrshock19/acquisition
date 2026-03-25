@@ -10,20 +10,28 @@ export type Word = {
   extra?: Record<string, unknown> | null;
 };
 
-/** Per-user SRS state (non-stationary half-life model) */
+/** Per-user current learning state for one user_id + word_id row. */
 export type UserWord = {
   user_id: string;
   word_id: string;
   status: "learning" | "known" | "suspended";
-  half_life_hours: number;
-  target_p: number;
-  last_review_at: string | null;
   due_at: string;
-  reps: number;
-  lapses: number;
-  ewma_surprise: number;
-  ewma_abs_surprise: number;
-  ewma_accuracy: number;
+  attempts: number;
+  correct_attempts: number;
+  accuracy: number;
+  difficulty: number;
+  last_seen_at: string | null;
+  last_graded_at: string | null;
+  reps_today: number;
+  reps_today_date: string | null;
+  half_life_hours?: number;
+  target_p?: number;
+  last_review_at?: string | null;
+  reps?: number;
+  lapses?: number;
+  ewma_surprise?: number;
+  ewma_abs_surprise?: number;
+  ewma_accuracy?: number;
   created_at: string;
   updated_at: string;
 };
