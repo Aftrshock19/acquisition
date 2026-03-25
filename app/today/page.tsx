@@ -114,6 +114,8 @@ export default async function TodayPage() {
           dailyLimit={effectiveSettings.dailyLimit}
           retryDelayMs={effectiveSettings.retryDelaySeconds * 1000}
           showPosHint={effectiveSettings.showPosHint}
+          initialDailySession={result.dailySession ?? null}
+          initialDebugSnapshot={result.debugSnapshot}
         />
       )}
     </main>

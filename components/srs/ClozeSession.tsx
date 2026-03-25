@@ -30,6 +30,7 @@ export type ClozeSessionProps = {
   ignoreAccents?: boolean;
   ignorePunctuation?: boolean;
   showPosHint?: boolean;
+  onCurrentCardChange?: (card: ClozeCard | null) => void;
 };
 
 function stripDiacritics(s: string) {
@@ -73,6 +74,7 @@ export function ClozeSession({
   ignoreAccents = true,
   ignorePunctuation = true,
   showPosHint = true,
+  onCurrentCardChange,
 }: ClozeSessionProps) {
   const displayCards = useMemo(() => cards.slice(0, dailyLimit), [cards, dailyLimit]);
 
@@ -90,6 +92,7 @@ export function ClozeSession({
   const [userInput, setUserInput] = useState("");
   const [waitSeconds, setWaitSeconds] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const startedAtRef = useRef<number>(Date.now());
   const inputRef = useRef<HTMLInputElement>(null);
@@ -104,6 +107,7 @@ export function ClozeSession({
     setUserInput("");
     setWaitSeconds(0);
     setBusy(false);
+    setSubmitError(null);
     startedAtRef.current = Date.now();
   }, [displayCards]);
 
@@ -111,9 +115,14 @@ export function ClozeSession({
     if (current && phase === "answer") {
       startedAtRef.current = Date.now();
       setUserInput("");
+      setSubmitError(null);
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [current, phase]);
+
+  useEffect(() => {
+    onCurrentCardChange?.(current);
+  }, [current, onCurrentCardChange]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -174,6 +183,8 @@ export function ClozeSession({
           upsertRetrySorted(q, { card: current, dueAt: Date.now() + retryDelayMs }),
         );
       }
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "Failed to submit review");
     } finally {
       setBusy(false);
     }
@@ -317,6 +328,11 @@ export function ClozeSession({
         <p className="text-zinc-600 dark:text-zinc-400">{prompt}</p>
         {showPosHint && current.hint ? (
           <p className="mt-1 text-sm text-zinc-500">({current.hint})</p>
+        ) : null}
+        {submitError ? (
+          <p className="mt-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">
+            {submitError}
+          </p>
         ) : null}
 
         <input

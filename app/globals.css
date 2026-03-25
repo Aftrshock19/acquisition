@@ -132,6 +132,17 @@ select {
     @apply w-full rounded-xl px-3 py-2.5 text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-500/20 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500;
   }
 
+  .app-input-no-spinner::-webkit-outer-spin-button,
+  .app-input-no-spinner::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  .app-input-no-spinner[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+
   .app-toggle {
     background: var(--surface);
     border: 1px solid var(--border);

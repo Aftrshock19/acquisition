@@ -30,6 +30,7 @@ export type TodayFlashcardsResult =
       ok: true;
       session: TodaySession;
       dailySession: DailySessionRow | null;
+      debugSnapshot: FlashcardDebugSnapshot;
       effectiveSettings: {
         dailyLimit: number;
         retryDelaySeconds: number;
@@ -45,6 +46,7 @@ export type TodayFlashcardsResult =
       signedIn?: boolean;
       error?: string;
       dailySession?: DailySessionRow | null;
+      debugSnapshot: FlashcardDebugSnapshot;
       effectiveSettings: {
         dailyLimit: number;
         retryDelaySeconds: number;
@@ -53,6 +55,12 @@ export type TodayFlashcardsResult =
         clozeEnabled: boolean;
       };
     };
+
+export type FlashcardDebugSnapshot = {
+  dailySession: DailySessionRow | null;
+  currentUserWord: Record<string, unknown> | null;
+  lastReviewEvent: Record<string, unknown> | null;
+};
 
 export async function getDailyQueue(
   lang: string,
@@ -144,6 +152,7 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
   const { settings, signedIn } = await getUserSettings();
   const recommended = await recommendSettings();
   const effective = resolveEffectiveSettings(settings, recommended);
+  const queueLimit = Math.max(1, effective.effectiveDailyLimit);
 
   const effectiveSettings = {
     dailyLimit: effective.effectiveDailyLimit,
@@ -155,8 +164,8 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
 
   const queueResult = await getDailyQueue(
     lang,
-    Math.min(MAX_NEW_WORDS, effective.effectiveDailyLimit),
-    Math.min(MAX_DUE_REVIEWS, effective.effectiveDailyLimit),
+    queueLimit,
+    queueLimit,
   );
 
   if (!queueResult.ok) {
@@ -167,67 +176,94 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
       signedIn: queueResult.signedIn ?? signedIn,
       error: queueResult.error,
       dailySession: null,
+      debugSnapshot: {
+        dailySession: null,
+        currentUserWord: null,
+        lastReviewEvent: null,
+      },
       effectiveSettings,
     };
   }
 
   const session = limitTodaySession(queueResult.session, effective.effectiveDailyLimit);
   const dailySession = await upsertDailySession(session);
+  const firstWordId = session.dueReviews[0]?.word_id ?? session.newWords[0]?.id ?? null;
+  const debugSnapshot = await getFlashcardDebugSnapshot(firstWordId ?? undefined);
 
   return {
     ok: true,
     session,
     dailySession,
+    debugSnapshot,
     effectiveSettings,
   };
 }
 
-export type RecordReviewResult = { ok: true } | { ok: false; error: string };
+export type RecordReviewResult =
+  | { ok: true; debugSnapshot: FlashcardDebugSnapshot }
+  | { ok: false; error: string };
 
 export async function recordReview(
   payload: RecordReviewPayload,
 ): Promise<RecordReviewResult> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) {
+  try {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !key) {
+      return {
+        ok: false,
+        error: "Supabase env vars NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY are missing",
+      };
+    }
+
+    const supabase = await createSupabaseServerClient();
+    if (!supabase) {
+      return {
+        ok: false,
+        error: "Supabase client could not be created on the server",
+      };
+    }
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      return { ok: false, error: "Not authenticated" };
+    }
+
+    const grade = payload.correct ? "good" : "again";
+    const { error } = await supabase.rpc("record_review", {
+      p_word_id: payload.wordId,
+      p_grade: grade,
+      p_ms_spent: payload.msSpent,
+      p_user_answer: payload.userAnswer ?? "",
+      p_expected: payload.expected ?? [],
+    });
+
+    if (error) {
+      if (isMissingUpsertUserWordError(error.message)) {
+        await fallbackRecordReview(supabase, user.id, payload);
+      } else {
+        return { ok: false, error: error.message };
+      }
+    }
+
+    await syncUserWordReviewState(supabase, user.id, payload);
+    await incrementDailySessionReviews(supabase, user.id);
+
+    const debugSnapshot = await getFlashcardDebugSnapshot(payload.wordId);
+
+    return { ok: true, debugSnapshot };
+  } catch (error) {
     return {
       ok: false,
-      error: "Supabase env vars NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY are missing",
+      error: error instanceof Error ? error.message : "Failed to record review",
     };
   }
+}
 
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) {
-    return {
-      ok: false,
-      error: "Supabase client could not be created on the server",
-    };
-  }
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return { ok: false, error: "Not authenticated" };
-  }
-
-  const grade = payload.correct ? "good" : "again";
-  const { error } = await supabase.rpc("record_review", {
-    p_word_id: payload.wordId,
-    p_grade: grade,
-    p_ms_spent: payload.msSpent,
-    p_user_answer: payload.userAnswer ?? "",
-    p_expected: payload.expected ?? [],
-  });
-
-  if (error) {
-    return { ok: false, error: error.message };
-  }
-
-  await syncUserWordReviewState(supabase, user.id, payload);
-  await incrementDailySessionReviews(supabase, user.id);
-
-  return { ok: true };
+function isMissingUpsertUserWordError(message: string) {
+  return message.includes("upsert_user_word");
 }
 
 export type RecordExposureResult = { ok: true } | { ok: false; error: string };
@@ -364,7 +400,7 @@ async function syncUserWordReviewState(
   userId: string,
   payload: RecordReviewPayload,
 ) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("user_words")
     .select(
       "attempts,correct_attempts,reps_today,reps_today_date,difficulty,last_seen_at,last_graded_at",
@@ -372,6 +408,8 @@ async function syncUserWordReviewState(
     .eq("user_id", userId)
     .eq("word_id", payload.wordId)
     .maybeSingle();
+
+  if (error) return;
 
   const current = data as
     | {
@@ -410,4 +448,108 @@ async function syncUserWordReviewState(
     })
     .eq("user_id", userId)
     .eq("word_id", payload.wordId);
+}
+
+async function fallbackRecordReview(
+  supabase: NonNullable<Awaited<ReturnType<typeof createSupabaseServerClient>>>,
+  userId: string,
+  payload: RecordReviewPayload,
+) {
+  const now = new Date();
+  const nextDue = new Date(
+    now.getTime() + (payload.correct ? 24 * 60 * 60 * 1000 : 10 * 60 * 1000),
+  ).toISOString();
+
+  // Keep fallback resilient across schema drift: only depend on core queue columns.
+  const { error: upsertError } = await supabase.from("user_words").upsert(
+    {
+      user_id: userId,
+      word_id: payload.wordId,
+      status: "learning",
+      due_at: nextDue,
+    },
+    { onConflict: "user_id,word_id" },
+  );
+  if (upsertError) {
+    throw new Error(upsertError.message);
+  }
+
+  await supabase.from("review_events").insert({
+    user_id: userId,
+    word_id: payload.wordId,
+    grade: payload.correct ? "good" : "again",
+    correct: payload.correct,
+    ms_spent: payload.msSpent,
+    user_answer: payload.userAnswer ?? "",
+    expected: payload.expected ?? [],
+  });
+}
+
+export async function getFlashcardDebugSnapshot(
+  wordId?: string,
+): Promise<FlashcardDebugSnapshot> {
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) {
+    return {
+      dailySession: null,
+      currentUserWord: null,
+      lastReviewEvent: null,
+    };
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return {
+      dailySession: null,
+      currentUserWord: null,
+      lastReviewEvent: null,
+    };
+  }
+
+  const sessionDate = new Date().toISOString().slice(0, 10);
+  const [dailySessionResult, userWordResult] = await Promise.all([
+    supabase
+      .from("daily_sessions")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("session_date", sessionDate)
+      .maybeSingle(),
+    wordId
+      ? supabase
+          .from("user_words")
+          .select("*")
+          .eq("user_id", user.id)
+          .eq("word_id", wordId)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+
+  const latestByCreated = await supabase
+    .from("review_events")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const latestByHappened = latestByCreated.error
+    ? await supabase
+        .from("review_events")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("happened_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    : null;
+
+  return {
+    dailySession: (dailySessionResult.data as DailySessionRow | null) ?? null,
+    currentUserWord: (userWordResult.data as Record<string, unknown> | null) ?? null,
+    lastReviewEvent:
+      (latestByCreated.data as Record<string, unknown> | null) ??
+      (latestByHappened?.data as Record<string, unknown> | null) ??
+      null,
+  };
 }

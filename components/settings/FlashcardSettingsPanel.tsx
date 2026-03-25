@@ -81,7 +81,7 @@ export function FlashcardSettingsPanel({
               min={10}
               max={200}
               defaultValue={userSettings.manual_daily_card_limit}
-              className="app-input w-16 px-2 py-1 text-xs"
+              className="app-input app-input-no-spinner w-16 px-2 py-1 text-xs"
             />
           )}
         </div>
