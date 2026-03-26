@@ -10,10 +10,12 @@ import type {
   RecordReviewPayload,
   RecordExposurePayload,
   DailySessionRow,
+  Grade,
 } from "@/lib/srs/types";
 import { getUserSettings } from "@/lib/settings/getUserSettings";
 import { recommendSettings } from "@/lib/settings/recommendSettings";
 import { resolveEffectiveSettings } from "@/lib/settings/resolveEffectiveSettings";
+import type { EnabledFlashcardMode } from "@/lib/settings/types";
 
 export type GetDailyQueueResult =
   | { ok: true; session: TodaySession }
@@ -36,7 +38,7 @@ export type TodayFlashcardsResult =
         retryDelaySeconds: number;
         showPosHint: boolean;
         showDefinitionFirst: boolean;
-        clozeEnabled: boolean;
+        enabledTypes: Record<EnabledFlashcardMode, boolean>;
       };
     }
   | {
@@ -52,7 +54,7 @@ export type TodayFlashcardsResult =
         retryDelaySeconds: number;
         showPosHint: boolean;
         showDefinitionFirst: boolean;
-        clozeEnabled: boolean;
+        enabledTypes: Record<EnabledFlashcardMode, boolean>;
       };
     };
 
@@ -182,7 +184,7 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     retryDelaySeconds: effective.retryDelaySeconds,
     showPosHint: effective.showPosHint,
     showDefinitionFirst: effective.showDefinitionFirst,
-    clozeEnabled: effective.effectiveTypes.cloze,
+    enabledTypes: effective.enabledModes,
   };
 
   const queueResult = await getDailyQueue(
@@ -275,24 +277,34 @@ export async function recordReview(
       return { ok: false, error: "Not authenticated" };
     }
 
-    const grade = payload.correct ? "good" : "again";
-    const { error } = await supabase.rpc("record_review", {
+    const grade = resolveGrade(payload);
+    const correct = grade !== "again";
+    const rpcArgs = {
       p_word_id: payload.wordId,
       p_grade: grade,
       p_ms_spent: payload.msSpent,
       p_user_answer: payload.userAnswer ?? "",
       p_expected: payload.expected ?? [],
+    };
+
+    let { error } = await supabase.rpc("record_review", {
+      ...rpcArgs,
+      p_card_type: payload.cardType ?? "cloze",
     });
+
+    if (isMissingCardTypeArgumentError(error?.message)) {
+      ({ error } = await supabase.rpc("record_review", rpcArgs));
+    }
 
     if (error) {
       if (isMissingUpsertUserWordError(error.message)) {
-        await fallbackRecordReview(supabase, user.id, payload);
+        await fallbackRecordReview(supabase, user.id, { ...payload, correct, grade });
       } else {
         return { ok: false, error: error.message };
       }
     }
 
-    await syncUserWordReviewState(supabase, user.id, payload);
+    await syncUserWordReviewState(supabase, user.id, { ...payload, correct, grade });
     await incrementDailySessionReviews(supabase, user.id);
 
     const debugSnapshot = await getFlashcardDebugSnapshot(payload.wordId);
@@ -306,8 +318,25 @@ export async function recordReview(
   }
 }
 
+function resolveGrade(payload: RecordReviewPayload): Grade {
+  if (payload.grade && isValidGrade(payload.grade)) return payload.grade;
+  return payload.correct ? "good" : "again";
+}
+
+function isValidGrade(value: string): value is Grade {
+  return value === "again" || value === "hard" || value === "good" || value === "easy";
+}
+
 function isMissingUpsertUserWordError(message: string) {
   return message.includes("upsert_user_word");
+}
+
+function isMissingCardTypeArgumentError(message?: string) {
+  if (!message) return false;
+  return (
+    message.includes("Could not find the function public.record_review") &&
+    message.includes("p_card_type")
+  );
 }
 
 export type RecordExposureResult = { ok: true } | { ok: false; error: string };
@@ -521,7 +550,8 @@ async function fallbackRecordReview(
   await supabase.from("review_events").insert({
     user_id: userId,
     word_id: payload.wordId,
-    grade: payload.correct ? "good" : "again",
+    card_type: payload.cardType ?? "cloze",
+    grade: payload.grade ?? (payload.correct ? "good" : "again"),
     correct: payload.correct,
     ms_spent: payload.msSpent,
     user_answer: payload.userAnswer ?? "",

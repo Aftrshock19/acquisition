@@ -1,4 +1,6 @@
-import Link from "next/link";
+"use client";
+
+import { useRouter } from "next/navigation";
 
 type BackButtonProps = {
   href?: string;
@@ -8,12 +10,24 @@ type BackButtonProps = {
 
 export function BackButton({
   href = "/",
-  label = "Go home",
+  label = "Go back",
   className = "",
 }: BackButtonProps) {
+  const router = useRouter();
+
+  function handleClick() {
+    if (window.history.length > 1) {
+      router.back();
+      return;
+    }
+
+    router.push(href);
+  }
+
   return (
-    <Link
-      href={href}
+    <button
+      type="button"
+      onClick={handleClick}
       aria-label={label}
       className={`app-icon-button ${className}`.trim()}
     >
@@ -26,6 +40,6 @@ export function BackButton({
           strokeLinejoin="round"
         />
       </svg>
-    </Link>
+    </button>
   );
 }

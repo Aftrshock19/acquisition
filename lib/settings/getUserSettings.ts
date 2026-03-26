@@ -12,6 +12,10 @@ const DEFAULT_SETTINGS: UserSettingsRow = {
   include_audio: false,
   include_mcq: false,
   include_sentences: false,
+  include_cloze_en_to_es: true,
+  include_cloze_es_to_en: false,
+  include_normal_en_to_es: true,
+  include_normal_es_to_en: false,
   retry_delay_seconds: 90,
   show_pos_hint: true,
   show_definition_first: true,
@@ -55,5 +59,13 @@ export async function getUserSettings() {
     };
   }
 
-  return { settings: data as UserSettingsRow, exists: true, signedIn: true };
+  return {
+    settings: {
+      ...DEFAULT_SETTINGS,
+      ...(data as Partial<UserSettingsRow>),
+      user_id: user.id,
+    },
+    exists: true,
+    signedIn: true,
+  };
 }

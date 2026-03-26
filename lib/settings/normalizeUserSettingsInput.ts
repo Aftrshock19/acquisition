@@ -9,6 +9,10 @@ export type RawSettingsInput = Partial<{
   include_audio: string | boolean;
   include_mcq: string | boolean;
   include_sentences: string | boolean;
+  include_cloze_en_to_es: string | boolean;
+  include_cloze_es_to_en: string | boolean;
+  include_normal_en_to_es: string | boolean;
+  include_normal_es_to_en: string | boolean;
   retry_delay_seconds: string | number;
   show_pos_hint: string | boolean;
   show_definition_first: string | boolean;
@@ -40,6 +44,18 @@ export function normalizeUserSettingsInput(raw: RawSettingsInput): Partial<UserS
   if (raw.include_audio !== undefined) out.include_audio = toBool(raw.include_audio);
   if (raw.include_mcq !== undefined) out.include_mcq = toBool(raw.include_mcq);
   if (raw.include_sentences !== undefined) out.include_sentences = toBool(raw.include_sentences);
+  if (raw.include_cloze_en_to_es !== undefined) {
+    out.include_cloze_en_to_es = toBool(raw.include_cloze_en_to_es);
+  }
+  if (raw.include_cloze_es_to_en !== undefined) {
+    out.include_cloze_es_to_en = toBool(raw.include_cloze_es_to_en);
+  }
+  if (raw.include_normal_en_to_es !== undefined) {
+    out.include_normal_en_to_es = toBool(raw.include_normal_en_to_es);
+  }
+  if (raw.include_normal_es_to_en !== undefined) {
+    out.include_normal_es_to_en = toBool(raw.include_normal_es_to_en);
+  }
 
   if (raw.show_pos_hint !== undefined) out.show_pos_hint = toBool(raw.show_pos_hint);
   if (raw.show_definition_first !== undefined) out.show_definition_first = toBool(raw.show_definition_first);
@@ -54,6 +70,28 @@ export function normalizeUserSettingsInput(raw: RawSettingsInput): Partial<UserS
     if (!any) {
       throw new Error('At least one flashcard type must be selected in manual mode');
     }
+  }
+
+  if (
+    raw.include_cloze !== undefined
+    && raw.include_cloze_en_to_es !== undefined
+    && raw.include_cloze_es_to_en !== undefined
+    && (out.include_cloze ?? false)
+    && !(out.include_cloze_en_to_es ?? false)
+    && !(out.include_cloze_es_to_en ?? false)
+  ) {
+    throw new Error('Select at least one direction for Cloze');
+  }
+
+  if (
+    raw.include_normal !== undefined
+    && raw.include_normal_en_to_es !== undefined
+    && raw.include_normal_es_to_en !== undefined
+    && (out.include_normal ?? false)
+    && !(out.include_normal_en_to_es ?? false)
+    && !(out.include_normal_es_to_en ?? false)
+  ) {
+    throw new Error('Select at least one direction for Normal');
   }
 
   return out;

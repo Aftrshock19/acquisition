@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getTodayFlashcards } from "@/app/actions/srs";
-import { TodayClozeSession } from "@/components/srs/TodayClozeSession";
+import { TodaySession } from "@/components/srs/TodaySession";
 
 export default async function TodayPage() {
   const result = await getTodayFlashcards("es");
@@ -16,6 +16,7 @@ export default async function TodayPage() {
   const effectiveSettings = result.effectiveSettings;
   const hasCards =
     session.dueReviews.length > 0 || session.newWords.length > 0;
+  const enabledTypeCount = Object.values(effectiveSettings.enabledTypes).filter(Boolean).length;
 
   if (session.configMissing) {
     return (
@@ -58,14 +59,13 @@ export default async function TodayPage() {
           <h2 className="text-xl font-semibold tracking-tight text-red-900 dark:text-red-100">Error loading words</h2>
           <p className="text-red-800 dark:text-red-200">{session.error}</p>
         </div>
-      ) : session.signedIn && !effectiveSettings.clozeEnabled ? (
+      ) : session.signedIn && enabledTypeCount === 0 ? (
         <div className="app-card flex flex-col gap-4 p-8">
           <h2 className="text-xl font-semibold tracking-tight">
-            Cloze cards are disabled
+            No flashcard types enabled
           </h2>
           <p className="text-zinc-600 dark:text-zinc-400">
-            Your flashcard settings currently exclude cloze cards, and other card types are not wired into Today yet.
-            Re-enable cloze in{" "}
+            Your settings currently disable all flashcard types. Enable at least one type in{" "}
             <Link
               href="/settings"
               className="font-medium text-zinc-900 underline dark:text-zinc-100"
@@ -109,7 +109,8 @@ export default async function TodayPage() {
           </p>
         </div>
       ) : (
-        <TodayClozeSession
+        <TodaySession
+          enabledTypes={effectiveSettings.enabledTypes}
           session={session}
           dailyLimit={effectiveSettings.dailyLimit}
           retryDelayMs={effectiveSettings.retryDelaySeconds * 1000}

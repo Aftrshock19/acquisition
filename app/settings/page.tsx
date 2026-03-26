@@ -40,7 +40,7 @@ export default async function SettingsPage() {
       <section className="app-hero">
         <h1 className="app-title">Settings</h1>
         <p className="app-subtitle">
-          Tune daily load, card mix, and retry behavior.
+          Tune daily load, card families, advanced directions, and retry behavior.
         </p>
       </section>
       <div className="app-card-strong p-8">

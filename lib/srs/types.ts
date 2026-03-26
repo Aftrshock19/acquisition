@@ -1,4 +1,7 @@
 export type Grade = "again" | "hard" | "good" | "easy";
+export type FlashcardType = "cloze" | "normal" | "audio" | "mcq" | "sentences";
+export type ClozeDirection = "en_to_es" | "es_to_en";
+export type NormalDirection = "en_to_es" | "es_to_en";
 
 export type Word = {
   id: string;
@@ -91,10 +94,12 @@ export type ExposureKind =
   | "reader_seen"
   | "listening_seen";
 
-/** Payload for recordReview: grade is derived server-side from correct (good vs again). */
+/** Payload for recordReview. grade may be explicit for self-rated cards like normal. */
 export type RecordReviewPayload = {
   wordId: string;
   correct: boolean;
+  grade?: Grade;
+  cardType?: FlashcardType;
   msSpent: number;
   userAnswer: string;
   expected: string[];

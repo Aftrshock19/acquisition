@@ -37,9 +37,15 @@ export async function updateUserSettingsAction(
     ...payload,
   };
 
-  const { error } = await supabase
+  let { error } = await supabase
     .from('user_settings')
     .upsert(row, { onConflict: 'user_id' });
+
+  if (isMissingDirectionColumnError(error?.message)) {
+    ({ error } = await supabase
+      .from('user_settings')
+      .upsert(stripDirectionFields(row), { onConflict: 'user_id' }));
+  }
 
   if (error) {
     return { ok: false, error: error.message };
@@ -50,4 +56,25 @@ export async function updateUserSettingsAction(
   revalidatePath('/today');
 
   return { ok: true };
+}
+
+function isMissingDirectionColumnError(message?: string) {
+  if (!message) return false;
+  return (
+    message.includes("include_cloze_en_to_es")
+    || message.includes("include_cloze_es_to_en")
+    || message.includes("include_normal_en_to_es")
+    || message.includes("include_normal_es_to_en")
+  );
+}
+
+function stripDirectionFields(
+  row: Partial<UserSettingsRow>,
+): Partial<UserSettingsRow> {
+  const next = { ...row };
+  delete next.include_cloze_en_to_es;
+  delete next.include_cloze_es_to_en;
+  delete next.include_normal_en_to_es;
+  delete next.include_normal_es_to_en;
+  return next;
 }

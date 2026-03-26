@@ -64,7 +64,7 @@ export async function recommendSettings(): Promise<RecommendedSettings> {
   // Very simple type rules based on rough "experience" proxy
   const totalReviews = events.length;
   if (totalReviews < 50) {
-    types = { cloze: false, normal: true, audio: false, mcq: true, sentences: false };
+    types = { cloze: true, normal: true, audio: false, mcq: true, sentences: false };
   } else if (totalReviews < 200) {
     types = { cloze: true, normal: true, audio: false, mcq: true, sentences: false };
   } else {

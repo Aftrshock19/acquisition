@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type {
   EffectiveFlashcardSettings,
+  FlashcardFamily,
   RecommendedSettings,
   UserSettingsRow,
 } from "@/lib/settings/types";
@@ -22,7 +23,14 @@ type ManualTypeKey =
   | "include_mcq"
   | "include_sentences";
 
+type DirectionKey =
+  | "include_cloze_en_to_es"
+  | "include_cloze_es_to_en"
+  | "include_normal_en_to_es"
+  | "include_normal_es_to_en";
+
 type ManualTypes = Record<ManualTypeKey, boolean>;
+type DirectionTypes = Record<DirectionKey, boolean>;
 type RecommendedTypeKey = keyof RecommendedSettings["recommendedTypes"];
 
 const MANUAL_TYPE_FIELDS: ManualTypeKey[] = [
@@ -33,23 +41,48 @@ const MANUAL_TYPE_FIELDS: ManualTypeKey[] = [
   "include_sentences",
 ];
 
+const DIRECTION_FIELDS: DirectionKey[] = [
+  "include_cloze_en_to_es",
+  "include_cloze_es_to_en",
+  "include_normal_en_to_es",
+  "include_normal_es_to_en",
+];
+
 const FLASHCARD_TYPE_OPTIONS: Array<{
   manualKey: ManualTypeKey;
   recommendedKey: RecommendedTypeKey;
   label: string;
+  description: string;
 }> = [
-  { manualKey: "include_cloze", recommendedKey: "cloze", label: "Cloze" },
+  {
+    manualKey: "include_cloze",
+    recommendedKey: "cloze",
+    label: "Cloze",
+    description: "Type the answer yourself. Direction is configured below.",
+  },
   {
     manualKey: "include_normal",
     recommendedKey: "normal",
-    label: "Normal flashcard",
+    label: "Normal",
+    description: "Reveal the answer and self-grade. Direction is configured below.",
   },
-  { manualKey: "include_audio", recommendedKey: "audio", label: "Audio" },
-  { manualKey: "include_mcq", recommendedKey: "mcq", label: "Multiple choice" },
+  {
+    manualKey: "include_mcq",
+    recommendedKey: "mcq",
+    label: "MCQ",
+    description: "Choose the best meaning from plausible options.",
+  },
   {
     manualKey: "include_sentences",
     recommendedKey: "sentences",
     label: "Sentences",
+    description: "Reinforce words in short sentence context.",
+  },
+  {
+    manualKey: "include_audio",
+    recommendedKey: "audio",
+    label: "Audio",
+    description: "Hear Spanish audio and identify the meaning.",
   },
 ];
 
@@ -70,13 +103,27 @@ export function FlashcardSettingsForm({
   const [manualDailyLimit, setManualDailyLimit] = useState<number>(
     userSettings.manual_daily_card_limit,
   );
-  const [manualTypes, setManualTypes] = useState<ManualTypes>({
-    include_cloze: userSettings.include_cloze,
-    include_normal: userSettings.include_normal,
-    include_audio: userSettings.include_audio,
-    include_mcq: userSettings.include_mcq,
-    include_sentences: userSettings.include_sentences,
-  });
+  const initialManualTypes: ManualTypes = {
+    include_cloze: Boolean(userSettings.include_cloze),
+    include_normal: Boolean(userSettings.include_normal),
+    include_audio: Boolean(userSettings.include_audio),
+    include_mcq: Boolean(userSettings.include_mcq),
+    include_sentences: Boolean(userSettings.include_sentences),
+  };
+  const [manualTypes, setManualTypes] = useState<ManualTypes>(initialManualTypes);
+  const [directionTypes, setDirectionTypes] = useState<DirectionTypes>(() =>
+    ensureDirectionsForActiveFamilies({
+      directionTypes: {
+        include_cloze_en_to_es: Boolean(userSettings.include_cloze_en_to_es),
+        include_cloze_es_to_en: Boolean(userSettings.include_cloze_es_to_en),
+        include_normal_en_to_es: Boolean(userSettings.include_normal_en_to_es),
+        include_normal_es_to_en: Boolean(userSettings.include_normal_es_to_en),
+      },
+      selectionMode: userSettings.flashcard_selection_mode,
+      manualTypes: initialManualTypes,
+      recommendedTypes: recommended.recommendedTypes,
+    }),
+  );
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -86,6 +133,9 @@ export function FlashcardSettingsForm({
     formData.set("flashcard_selection_mode", flashcardSelectionMode);
     for (const key of MANUAL_TYPE_FIELDS) {
       formData.set(key, String(manualTypes[key]));
+    }
+    for (const key of DIRECTION_FIELDS) {
+      formData.set(key, String(directionTypes[key]));
     }
     startTransition(() => {
       void updateUserSettingsAction(
@@ -106,30 +156,62 @@ export function FlashcardSettingsForm({
         (field) => manualTypes[field],
       ).length;
       if (enabledCount <= 1) {
-        setError("At least one flashcard type must stay enabled.");
+        setError("At least one flashcard family must stay enabled.");
         return;
       }
     }
 
     setManualTypes((prev) => ({ ...prev, [key]: checked }));
+    if (checked && key === "include_cloze") {
+      setDirectionTypes((prev) =>
+        prev.include_cloze_en_to_es || prev.include_cloze_es_to_en
+          ? prev
+          : { ...prev, include_cloze_en_to_es: true },
+      );
+    }
+    if (checked && key === "include_normal") {
+      setDirectionTypes((prev) =>
+        prev.include_normal_en_to_es || prev.include_normal_es_to_en
+          ? prev
+          : { ...prev, include_normal_en_to_es: true },
+      );
+    }
     setError((prev) =>
-      prev === "At least one flashcard type must stay enabled." ? null : prev,
+      prev === "At least one flashcard family must stay enabled." ? null : prev,
     );
   }
 
-  const selectedFlashcardLabels = FLASHCARD_TYPE_OPTIONS.filter((option) =>
-    flashcardSelectionMode === "manual"
-      ? manualTypes[option.manualKey]
-      : recommended.recommendedTypes[option.recommendedKey],
-  ).map((option) => option.label);
+  function handleDirectionChange(key: DirectionKey, checked: boolean) {
+    if (!checked && isLockedDirection(key)) {
+      return;
+    }
+    setDirectionTypes((prev) => ({ ...prev, [key]: checked }));
+  }
+
+  function isFamilyEnabled(family: FlashcardFamily) {
+    if (flashcardSelectionMode === "recommended") {
+      return recommended.recommendedTypes[family];
+    }
+
+    return manualTypes[`include_${family}` as ManualTypeKey];
+  }
+
+  function isLockedDirection(key: DirectionKey) {
+    const family = familyForDirection(key);
+    return (
+      isFamilyEnabled(family)
+      && isCurrentDirectionValue(directionTypes, key)
+      && !otherDirectionValue(directionTypes, key)
+    );
+  }
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-8">
-      {error && (
+      {error ? (
         <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-100">
           {error}
         </div>
-      )}
+      ) : null}
 
       <section className="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
         <h2 className="text-base font-semibold tracking-tight">
@@ -211,7 +293,8 @@ export function FlashcardSettingsForm({
           Flashcard types
         </h2>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Use recommended mix or choose exactly which types to include.
+          Choose the main card families here. Direction control for Cloze and
+          Normal lives in Advanced.
         </p>
         <div className="mt-4 grid gap-3 text-sm">
           <label
@@ -226,13 +309,23 @@ export function FlashcardSettingsForm({
               name="flashcard_selection_mode"
               value="recommended"
               checked={flashcardSelectionMode === "recommended"}
-              onChange={() => setFlashcardSelectionMode("recommended")}
+              onChange={() => {
+                setFlashcardSelectionMode("recommended");
+                setDirectionTypes((prev) =>
+                  ensureDirectionsForActiveFamilies({
+                    directionTypes: prev,
+                    selectionMode: "recommended",
+                    manualTypes,
+                    recommendedTypes: recommended.recommendedTypes,
+                  }),
+                );
+              }}
               className="app-check app-check-round"
             />
             <span className="flex flex-col">
               <span>Use recommended types</span>
               <span className="text-xs text-zinc-500">
-                ({summarizeTypes(recommended.recommendedTypes)})
+                ({summarizeFamilies(recommended.recommendedTypes)})
               </span>
             </span>
           </label>
@@ -246,47 +339,85 @@ export function FlashcardSettingsForm({
               name="flashcard_selection_mode"
               value="manual"
               checked={flashcardSelectionMode === "manual"}
-              onChange={() => setFlashcardSelectionMode("manual")}
+              onChange={() => {
+                setFlashcardSelectionMode("manual");
+                setDirectionTypes((prev) =>
+                  ensureDirectionsForActiveFamilies({
+                    directionTypes: prev,
+                    selectionMode: "manual",
+                    manualTypes,
+                    recommendedTypes: recommended.recommendedTypes,
+                  }),
+                );
+              }}
               className="app-check app-check-round"
             />
             <span>Choose my own types</span>
           </label>
         </div>
+
         <div className="mt-5 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
           {FLASHCARD_TYPE_OPTIONS.map((option) =>
             renderTypeCheckbox(
               option.manualKey,
               option.label,
+              option.description,
               manualTypes[option.manualKey],
               (checked) => handleManualTypeChange(option.manualKey, checked),
             ),
           )}
         </div>
-        <details className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800/40">
+
+        <details className="mt-5 rounded-xl border border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800/40">
           <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-zinc-800 dark:text-zinc-100">
             Advanced
           </summary>
-          <div className="border-t border-zinc-200 px-4 py-3 text-sm dark:border-zinc-700">
-            <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
-              Showing{" "}
-              {flashcardSelectionMode === "manual"
-                ? "manual selection"
-                : "recommended selection"}
-              .
+          <div className="border-t border-zinc-200 px-4 py-4 dark:border-zinc-700">
+            <p className="text-sm text-zinc-600 dark:text-zinc-300">
+              These direction settings only apply when the main card family is enabled.
             </p>
-            {selectedFlashcardLabels.length > 0 ? (
-              <ul className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                {selectedFlashcardLabels.map((label) => (
-                  <li key={label} className="text-zinc-700 dark:text-zinc-200">
-                    • {label}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-zinc-600 dark:text-zinc-300">
-                No flashcards selected.
-              </p>
-            )}
+
+            <div className="mt-4 grid gap-4">
+              <DirectionGroup
+                title="Cloze directions"
+                description="Typed recall cards."
+                enabled={isFamilyEnabled("cloze")}
+                lockEnToEs={isLockedDirection("include_cloze_en_to_es")}
+                lockEsToEn={isLockedDirection("include_cloze_es_to_en")}
+                values={{
+                  en_to_es: directionTypes.include_cloze_en_to_es,
+                  es_to_en: directionTypes.include_cloze_es_to_en,
+                }}
+                onChange={(direction, checked) =>
+                  handleDirectionChange(
+                    direction === "en_to_es"
+                      ? "include_cloze_en_to_es"
+                      : "include_cloze_es_to_en",
+                    checked,
+                  )
+                }
+              />
+
+              <DirectionGroup
+                title="Normal directions"
+                description="Reveal and self-grade cards."
+                enabled={isFamilyEnabled("normal")}
+                lockEnToEs={isLockedDirection("include_normal_en_to_es")}
+                lockEsToEn={isLockedDirection("include_normal_es_to_en")}
+                values={{
+                  en_to_es: directionTypes.include_normal_en_to_es,
+                  es_to_en: directionTypes.include_normal_es_to_en,
+                }}
+                onChange={(direction, checked) =>
+                  handleDirectionChange(
+                    direction === "en_to_es"
+                      ? "include_normal_en_to_es"
+                      : "include_normal_es_to_en",
+                    checked,
+                  )
+                }
+              />
+            </div>
           </div>
         </details>
       </section>
@@ -334,10 +465,16 @@ export function FlashcardSettingsForm({
       </section>
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-zinc-500">
-          Effective today: {effective.effectiveDailyLimit} cards ·{" "}
-          {summarizeTypes(effective.effectiveTypes)}
-        </p>
+        <div className="text-sm text-zinc-500">
+          <p>
+            Effective today: {effective.effectiveDailyLimit} cards ·{" "}
+            {summarizeFamilies(effective.effectiveTypes)}
+          </p>
+          <p className="mt-1">
+            Effective directions:{" "}
+            {summarizeDirections(effective.effectiveDirections, effective.effectiveTypes)}
+          </p>
+        </div>
         <button type="submit" disabled={pending} className="app-button">
           {pending ? "Saving…" : "Save settings"}
         </button>
@@ -346,36 +483,201 @@ export function FlashcardSettingsForm({
   );
 }
 
+function DirectionGroup({
+  title,
+  description,
+  enabled,
+  lockEnToEs,
+  lockEsToEn,
+  values,
+  onChange,
+}: {
+  title: string;
+  description: string;
+  enabled: boolean;
+  lockEnToEs: boolean;
+  lockEsToEn: boolean;
+  values: { en_to_es: boolean; es_to_en: boolean };
+  onChange: (direction: "en_to_es" | "es_to_en", checked: boolean) => void;
+}) {
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900/50">
+      <div className="flex flex-col gap-1">
+        <h3 className="font-medium text-zinc-900 dark:text-zinc-100">{title}</h3>
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">{description}</p>
+      </div>
+
+      {!enabled ? (
+        <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
+          Turn on this family above to use its direction settings.
+        </p>
+      ) : (
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="app-toggle">
+            <span className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                name={`${title}-en-to-es`}
+                checked={values.en_to_es}
+                onChange={(e) => onChange("en_to_es", e.currentTarget.checked)}
+                disabled={lockEnToEs}
+                className="app-check"
+              />
+              <span>English -&gt; Spanish</span>
+            </span>
+          </label>
+          <label className="app-toggle">
+            <span className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                name={`${title}-es-to-en`}
+                checked={values.es_to_en}
+                onChange={(e) => onChange("es_to_en", e.currentTarget.checked)}
+                disabled={lockEsToEn}
+                className="app-check"
+              />
+              <span>Spanish -&gt; English</span>
+            </span>
+          </label>
+        </div>
+      )}
+
+      {enabled && (lockEnToEs || lockEsToEn) ? (
+        <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+          At least one direction must stay on.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function renderTypeCheckbox(
   name: string,
   label: string,
+  description: string,
   checked: boolean,
   onChange: (checked: boolean) => void,
 ) {
   return (
     <label key={name} className="app-toggle">
-      <span className="flex items-center gap-2">
+      <span className="flex items-start gap-2">
         <input
           type="checkbox"
           name={name}
           checked={checked}
           onChange={(e) => onChange(e.currentTarget.checked)}
-          className="app-check"
+          className="app-check h-4 w-4 shrink-0 rounded-sm"
         />
-        <span>{label}</span>
+        <span className="flex flex-col">
+          <span>{label}</span>
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">
+            {description}
+          </span>
+        </span>
       </span>
     </label>
   );
 }
 
-function summarizeTypes(types: { [k: string]: boolean }) {
+function summarizeFamilies(types: { [k: string]: boolean }) {
   const enabled = Object.entries(types)
     .filter(([, v]) => v)
-    .map(([k]) => k.replace(/_/g, " "));
+    .map(([k]) => typeLabel(k));
   if (enabled.length === 0) return "no types";
   return enabled.join(", ");
 }
 
+function summarizeDirections(
+  directions: Record<string, boolean | undefined>,
+  families?: Partial<Record<FlashcardFamily, boolean>>,
+) {
+  const parts: string[] = [];
+
+  if (!families || families.cloze) {
+    parts.push(`Cloze (${directionSummary(
+      Boolean(directions.cloze_en_to_es ?? directions.include_cloze_en_to_es),
+      Boolean(directions.cloze_es_to_en ?? directions.include_cloze_es_to_en),
+    )})`);
+  }
+
+  if (!families || families.normal) {
+    parts.push(`Normal (${directionSummary(
+      Boolean(directions.normal_en_to_es ?? directions.include_normal_en_to_es),
+      Boolean(directions.normal_es_to_en ?? directions.include_normal_es_to_en),
+    )})`);
+  }
+
+  return parts.length > 0 ? parts.join(" · ") : "none";
+}
+
+function directionSummary(enToEs: boolean, esToEn: boolean) {
+  if (enToEs && esToEn) return "both";
+  if (enToEs) return "English -> Spanish";
+  if (esToEn) return "Spanish -> English";
+  return "off";
+}
+
+function typeLabel(key: string) {
+  return key.replace(/_/g, " ");
+}
+
 function clampLimit(value: number) {
   return Math.min(200, Math.max(10, Math.round(value)));
+}
+
+function familyForDirection(key: DirectionKey): FlashcardFamily {
+  return key.startsWith("include_cloze") ? "cloze" : "normal";
+}
+
+function otherDirectionValue(directionTypes: DirectionTypes, key: DirectionKey) {
+  switch (key) {
+    case "include_cloze_en_to_es":
+      return directionTypes.include_cloze_es_to_en;
+    case "include_cloze_es_to_en":
+      return directionTypes.include_cloze_en_to_es;
+    case "include_normal_en_to_es":
+      return directionTypes.include_normal_es_to_en;
+    case "include_normal_es_to_en":
+      return directionTypes.include_normal_en_to_es;
+  }
+}
+
+function isCurrentDirectionValue(directionTypes: DirectionTypes, key: DirectionKey) {
+  return directionTypes[key];
+}
+
+function ensureDirectionsForActiveFamilies(args: {
+  directionTypes: DirectionTypes;
+  selectionMode: "recommended" | "manual";
+  manualTypes: ManualTypes;
+  recommendedTypes: RecommendedSettings["recommendedTypes"];
+}) {
+  const { directionTypes, selectionMode, manualTypes, recommendedTypes } = args;
+  const next = { ...directionTypes };
+  const clozeEnabled =
+    selectionMode === "recommended"
+      ? recommendedTypes.cloze
+      : manualTypes.include_cloze;
+  const normalEnabled =
+    selectionMode === "recommended"
+      ? recommendedTypes.normal
+      : manualTypes.include_normal;
+
+  if (
+    clozeEnabled
+    && !next.include_cloze_en_to_es
+    && !next.include_cloze_es_to_en
+  ) {
+    next.include_cloze_en_to_es = true;
+  }
+
+  if (
+    normalEnabled
+    && !next.include_normal_en_to_es
+    && !next.include_normal_es_to_en
+  ) {
+    next.include_normal_en_to_es = true;
+  }
+
+  return next;
 }
