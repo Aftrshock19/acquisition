@@ -11,12 +11,20 @@ export default async function HomePage() {
 
   return (
     <main className="app-shell">
-      <section className="app-hero">
-        <p className="text-xs font-medium uppercase tracking-[0.22em] text-zinc-500 dark:text-zinc-400">
-          Daily language system
-        </p>
-        <h1 className="app-title">Acquisition</h1>
-        <p className="app-subtitle">Your daily Spanish practice.</p>
+      <section className="flex items-start justify-between gap-4">
+        <div className="app-hero">
+          <p className="text-xs font-medium uppercase tracking-[0.22em] text-zinc-500 dark:text-zinc-400">
+            Daily language system
+          </p>
+          <h1 className="app-title">Acquisition</h1>
+          <p className="app-subtitle">Your daily Spanish practice.</p>
+        </div>
+        <Link
+          href="/profile"
+          className="app-button-secondary shrink-0"
+        >
+          Profile
+        </Link>
       </section>
       <div className="flex flex-col gap-3">
         <Link href="/today" className="app-link-card font-medium">
@@ -24,6 +32,9 @@ export default async function HomePage() {
         </Link>
         <Link href="/progress" className="app-link-card font-medium">
           Progress
+        </Link>
+        <Link href="/Decks" className="app-link-card font-medium">
+          Decks
         </Link>
         <Link href="/settings" className="app-link-card font-medium">
           Settings

@@ -7,6 +7,24 @@ import { revalidatePath } from 'next/cache';
 
 export type UpdateUserSettingsResult = { ok: true } | { ok: false; error: string };
 
+const DEBUG_SETTINGS_KEYS = [
+  'daily_plan_mode',
+  'manual_daily_card_limit',
+  'flashcard_selection_mode',
+  'include_cloze',
+  'include_normal',
+  'include_audio',
+  'include_mcq',
+  'include_sentences',
+  'include_cloze_en_to_es',
+  'include_cloze_es_to_en',
+  'include_normal_en_to_es',
+  'include_normal_es_to_en',
+  'retry_delay_seconds',
+  'show_pos_hint',
+  'show_definition_first',
+] as const;
+
 export async function updateUserSettingsAction(
   input: RawSettingsInput,
 ): Promise<UpdateUserSettingsResult> {
@@ -37,18 +55,45 @@ export async function updateUserSettingsAction(
     ...payload,
   };
 
-  let { error } = await supabase
+  debugSettings('requested', row);
+
+  const { error } = await supabase
     .from('user_settings')
     .upsert(row, { onConflict: 'user_id' });
 
-  if (isMissingDirectionColumnError(error?.message)) {
-    ({ error } = await supabase
-      .from('user_settings')
-      .upsert(stripDirectionFields(row), { onConflict: 'user_id' }));
+  if (error) {
+    return { ok: false, error: formatSettingsSaveError(error.message) };
   }
 
-  if (error) {
-    return { ok: false, error: error.message };
+  const { data: savedSettings, error: savedSettingsError } = await supabase
+    .from('user_settings')
+    .select('*')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (savedSettingsError) {
+    return { ok: false, error: savedSettingsError.message };
+  }
+
+  debugSettings('saved', savedSettings as Partial<UserSettingsRow> | null);
+
+  if (!savedSettings) {
+    return {
+      ok: false,
+      error: 'Settings saved but could not be reloaded for verification.',
+    };
+  }
+
+  if (!didPersistRequestedSettings(payload, savedSettings as Partial<UserSettingsRow>)) {
+    console.warn('[settings:update] persisted settings mismatch', {
+      requested: pickDebugSettings(payload),
+      saved: pickDebugSettings(savedSettings as Partial<UserSettingsRow>),
+    });
+    return {
+      ok: false,
+      error:
+        'Settings did not persist correctly. Apply the latest database migration for flashcard direction settings and try again.',
+    };
   }
 
   revalidatePath('/');
@@ -68,13 +113,35 @@ function isMissingDirectionColumnError(message?: string) {
   );
 }
 
-function stripDirectionFields(
-  row: Partial<UserSettingsRow>,
-): Partial<UserSettingsRow> {
-  const next = { ...row };
-  delete next.include_cloze_en_to_es;
-  delete next.include_cloze_es_to_en;
-  delete next.include_normal_en_to_es;
-  delete next.include_normal_es_to_en;
-  return next;
+function formatSettingsSaveError(message?: string) {
+  if (isMissingDirectionColumnError(message)) {
+    return 'Flashcard direction settings could not be saved because the database is missing the latest direction columns. Run the newest Supabase migration and try again.';
+  }
+
+  return message ?? 'Failed to save settings';
+}
+
+function didPersistRequestedSettings(
+  payload: Partial<UserSettingsRow>,
+  savedSettings: Partial<UserSettingsRow>,
+) {
+  return Object.entries(payload).every(([key, value]) => savedSettings[key as keyof UserSettingsRow] === value);
+}
+
+function debugSettings(
+  stage: 'requested' | 'saved',
+  settings: Partial<UserSettingsRow> | null,
+) {
+  if (process.env.NODE_ENV === 'test') return;
+  console.log(`[settings:update] ${stage}`, pickDebugSettings(settings));
+}
+
+function pickDebugSettings(settings: Partial<UserSettingsRow> | null | undefined) {
+  if (!settings) return null;
+
+  return Object.fromEntries(
+    DEBUG_SETTINGS_KEYS
+      .filter((key) => key in settings)
+      .map((key) => [key, settings[key]]),
+  );
 }

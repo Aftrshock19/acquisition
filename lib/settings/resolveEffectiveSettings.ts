@@ -41,19 +41,29 @@ export function resolveEffectiveSettings(
     normal_es_to_en: user.include_normal_es_to_en,
   };
 
+  const enabledModes = {
+    cloze_en_to_es: effectiveTypes.cloze && effectiveDirections.cloze_en_to_es,
+    cloze_es_to_en: effectiveTypes.cloze && effectiveDirections.cloze_es_to_en,
+    normal_en_to_es: effectiveTypes.normal && effectiveDirections.normal_en_to_es,
+    normal_es_to_en: effectiveTypes.normal && effectiveDirections.normal_es_to_en,
+    audio: effectiveTypes.audio,
+    mcq: effectiveTypes.mcq,
+    sentences: effectiveTypes.sentences,
+  };
+
+  debugEffectiveSettings({
+    selectionMode: user.flashcard_selection_mode,
+    manualTypes,
+    effectiveTypes,
+    effectiveDirections,
+    enabledModes,
+  });
+
   return {
     effectiveDailyLimit,
     effectiveTypes,
     effectiveDirections,
-    enabledModes: {
-      cloze_en_to_es: effectiveTypes.cloze && effectiveDirections.cloze_en_to_es,
-      cloze_es_to_en: effectiveTypes.cloze && effectiveDirections.cloze_es_to_en,
-      normal_en_to_es: effectiveTypes.normal && effectiveDirections.normal_en_to_es,
-      normal_es_to_en: effectiveTypes.normal && effectiveDirections.normal_es_to_en,
-      audio: effectiveTypes.audio,
-      mcq: effectiveTypes.mcq,
-      sentences: effectiveTypes.sentences,
-    },
+    enabledModes,
     retryDelaySeconds: clamp(user.retry_delay_seconds, 10, 3600),
     showPosHint: user.show_pos_hint,
     showDefinitionFirst: user.show_definition_first,
@@ -62,4 +72,15 @@ export function resolveEffectiveSettings(
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function debugEffectiveSettings(value: {
+  selectionMode: UserSettingsRow["flashcard_selection_mode"];
+  manualTypes: FamilySettings;
+  effectiveTypes: FamilySettings;
+  effectiveDirections: DirectionSettings;
+  enabledModes: EffectiveFlashcardSettings["enabledModes"];
+}) {
+  if (process.env.NODE_ENV === "test") return;
+  console.log("[settings:effective]", value);
 }

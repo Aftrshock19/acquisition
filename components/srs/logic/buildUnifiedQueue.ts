@@ -97,6 +97,12 @@ export function buildUnifiedQueue(
   session: TodaySession,
   enabledModes: Record<EnabledFlashcardMode, boolean>,
 ): UnifiedQueueResult {
+  debugQueueBuild("input", {
+    enabledModes,
+    dueReviews: session.dueReviews.length,
+    newWords: session.newWords.length,
+  });
+
   const enabledList = ALL_CARD_MODES.filter((type) => enabledModes[type]);
   const enabledImplementedTypes = enabledList.filter(isImplementedCardMode);
   const enabledUnimplementedTypes = enabledList.filter(
@@ -104,6 +110,12 @@ export function buildUnifiedQueue(
   );
 
   if (enabledImplementedTypes.length === 0) {
+    debugQueueBuild("output", {
+      enabledImplementedTypes,
+      enabledUnimplementedTypes,
+      normalDirections: [],
+      clozeDirections: [],
+    });
     return {
       queue: [],
       enabledImplementedTypes,
@@ -206,6 +218,17 @@ export function buildUnifiedQueue(
     };
   });
 
+  debugQueueBuild("output", {
+    enabledImplementedTypes,
+    enabledUnimplementedTypes,
+    normalDirections: queue
+      .filter((card): card is Extract<UnifiedQueueCard, { cardType: "normal" }> => card.cardType === "normal")
+      .map((card) => ({ id: card.id, direction: card.direction })),
+    clozeDirections: queue
+      .filter((card): card is Extract<UnifiedQueueCard, { cardType: "cloze" }> => card.cardType === "cloze")
+      .map((card) => ({ id: card.id, direction: card.direction })),
+  });
+
   return {
     queue,
     enabledImplementedTypes,
@@ -256,4 +279,12 @@ function firstString(values: unknown[]) {
     }
   }
   return null;
+}
+
+function debugQueueBuild(
+  stage: "input" | "output",
+  value: Record<string, unknown>,
+) {
+  if (process.env.NODE_ENV === "test") return;
+  console.log(`[srs:queue] ${stage}`, value);
 }
