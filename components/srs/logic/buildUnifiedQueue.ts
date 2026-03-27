@@ -144,7 +144,7 @@ export function buildUnifiedQueue(
     })),
   ];
 
-  const queue = baseCards.map((card, index) => {
+  const queue: UnifiedQueueCard[] = baseCards.map((card, index) => {
     const cardMode = enabledImplementedTypes[index % enabledImplementedTypes.length];
 
     if (cardMode === "cloze_en_to_es") {
