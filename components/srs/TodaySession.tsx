@@ -514,15 +514,11 @@ export function TodaySession({
   const viewedSnapshot =
     historyIndex !== null ? historyCards[activeHistoryIndex] ?? null : null;
   const showingHistory = viewedSnapshot !== null;
-  const canGoPrevious =
-    !busy &&
-    (showingHistory ? activeHistoryIndex > 0 : historyCards.length > 0);
+  const canGoPrevious = !busy && !showingHistory && historyCards.length > 0;
   const canAdvanceLiveCard = !busy && phase === "feedback" && !showingHistory;
   const canGoNext =
     !busy &&
-    (showingHistory
-      ? activeHistoryIndex < historyCards.length - 1 || current !== null
-      : canAdvanceLiveCard);
+    (showingHistory ? current !== null : canAdvanceLiveCard);
   const flashcardNavigation = (
     <FlashcardNavigation
       canGoPrevious={canGoPrevious}
@@ -569,22 +565,13 @@ export function TodaySession({
 
   function goToPreviousReviewedCard() {
     if (!canGoPrevious) return;
-
-    setHistoryIndex((value) => {
-      if (value === null) return historyCards.length - 1;
-      return Math.max(0, value - 1);
-    });
+    setHistoryIndex(historyCards.length - 1);
   }
 
   function goToNextCard() {
     if (!canGoNext) return;
 
     if (showingHistory) {
-      if (activeHistoryIndex < historyCards.length - 1) {
-        setHistoryIndex(activeHistoryIndex + 1);
-        return;
-      }
-
       setHistoryIndex(null);
       return;
     }
