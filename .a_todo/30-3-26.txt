@@ -1,0 +1,5 @@
+nav bar
+reading page
+podcasts page/listener page
+container for books
+copy weather app podcasts

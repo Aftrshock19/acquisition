@@ -1,6 +1,7 @@
 "use client";
 
-import type { RefObject } from "react";
+import type { ReactNode, RefObject } from "react";
+import { FlashcardContainer } from "@/components/srs/cards/FlashcardContainer";
 import type { UnifiedQueueCard } from "@/components/srs/logic/buildUnifiedQueue";
 
 type ClozeCardProps = {
@@ -20,6 +21,7 @@ type ClozeCardProps = {
   onCheck: () => void;
   onNext: () => void;
   retryDelayMs: number;
+  navigation?: ReactNode;
 };
 
 export function ClozeCard({
@@ -34,6 +36,7 @@ export function ClozeCard({
   onCheck,
   onNext,
   retryDelayMs,
+  navigation,
 }: ClozeCardProps) {
   if (feedback) {
     return (
@@ -72,10 +75,10 @@ export function ClozeCard({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <p className="text-sm uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
-          {card.direction === "en_to_es" ? "Meaning" : "Word"}
-        </p>
+      <FlashcardContainer
+        title={card.direction === "en_to_es" ? "Meaning" : "Word"}
+        navigation={navigation}
+      >
         <p className="mt-2 text-zinc-700 dark:text-zinc-200">
           {card.direction === "en_to_es" ? (card.definition ?? "—") : card.lemma}
         </p>
@@ -102,7 +105,7 @@ export function ClozeCard({
           autoComplete="off"
           disabled={busy}
         />
-      </div>
+      </FlashcardContainer>
 
       <button
         type="button"

@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   getFlashcardDebugSnapshot,
   recordReview,
   type FlashcardDebugSnapshot,
 } from "@/app/actions/srs";
 import { BackButton } from "@/components/BackButton";
+import { LeftIcon } from "@/components/LeftIcon";
+import { RightIcon } from "@/components/RightIcon";
 import { SettingsButton } from "@/components/SettingsButton";
 import { AudioCard } from "@/components/srs/cards/AudioCard";
 import { ClozeCard } from "@/components/srs/cards/ClozeCard";
@@ -38,6 +40,16 @@ type Props = {
 
 type RetryEntry = { card: UnifiedQueueCard; dueAt: number };
 type SessionPhase = "prompt" | "feedback" | "waiting" | "done";
+type ReviewedCardSnapshot = {
+  card: UnifiedQueueCard;
+  source: "main" | "retry";
+  userAnswer?: string;
+  feedback?: {
+    correct: boolean;
+    expected: string;
+  };
+  grade?: Grade;
+};
 
 function stripDiacritics(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -115,8 +127,11 @@ export function TodaySession({
   );
   const [currentSource, setCurrentSource] = useState<"main" | "retry">("main");
   const [phase, setPhase] = useState<SessionPhase>(queue[0] ? "prompt" : "done");
+  const [reviewedCards, setReviewedCards] = useState<ReviewedCardSnapshot[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [clozeInput, setClozeInput] = useState("");
   const [normalRevealed, setNormalRevealed] = useState(false);
+  const [normalSubmittedGrade, setNormalSubmittedGrade] = useState<Grade | null>(null);
   const [feedback, setFeedback] = useState<{
     correct: boolean;
     expected: string;
@@ -142,8 +157,11 @@ export function TodaySession({
     setCurrent(queue[0] ?? null);
     setCurrentSource("main");
     setPhase(queue[0] ? "prompt" : "done");
+    setReviewedCards([]);
+    setHistoryIndex(null);
     setClozeInput("");
     setNormalRevealed(false);
+    setNormalSubmittedGrade(null);
     setFeedback(null);
     setWaitSeconds(0);
     setBusy(false);
@@ -157,6 +175,7 @@ export function TodaySession({
     setSubmitError(null);
     setClozeInput("");
     setNormalRevealed(false);
+    setNormalSubmittedGrade(null);
     setFeedback(null);
     setPhase("prompt");
     startedAtRef.current = Date.now();
@@ -225,10 +244,17 @@ export function TodaySession({
   function beginCard(card: UnifiedQueueCard, source: "main" | "retry") {
     setCurrent(card);
     setCurrentSource(source);
+    setHistoryIndex(null);
+  }
+
+  function appendReviewedCard(snapshot: ReviewedCardSnapshot) {
+    setReviewedCards((items) => [...items, snapshot]);
+    setHistoryIndex(null);
   }
 
   function renderNormalCard(
     card: Extract<UnifiedQueueCard, { cardType: "normal" }>,
+    navigation: ReactNode,
   ) {
     if (card.direction === "en_to_es") {
       return (
@@ -238,10 +264,14 @@ export function TodaySession({
           submitError={submitError}
           showPosHint={showPosHint}
           revealed={normalRevealed}
+          submittedGrade={normalSubmittedGrade}
+          navigation={navigation}
           onReveal={() => setNormalRevealed(true)}
           onGrade={(grade) => {
             void handleNormalGrade(grade);
           }}
+          onNext={() => advanceFromCurrentCard(retryList)}
+          retryDelayMs={retryDelayMs}
         />
       );
     }
@@ -253,10 +283,14 @@ export function TodaySession({
         submitError={submitError}
         showPosHint={showPosHint}
         revealed={normalRevealed}
+        submittedGrade={normalSubmittedGrade}
+        navigation={navigation}
         onReveal={() => setNormalRevealed(true)}
         onGrade={(grade) => {
           void handleNormalGrade(grade);
         }}
+        onNext={() => advanceFromCurrentCard(retryList)}
+        retryDelayMs={retryDelayMs}
       />
     );
   }
@@ -339,6 +373,15 @@ export function TodaySession({
         );
       }
 
+      appendReviewedCard({
+        card,
+        source: currentSource,
+        userAnswer,
+        feedback: {
+          correct,
+          expected: feedbackExpected,
+        },
+      });
       setFeedback({
         correct,
         expected: feedbackExpected,
@@ -440,7 +483,14 @@ export function TodaySession({
             dueAt: Date.now() + retryDelayMs,
           });
 
-      advanceFromCurrentCard(nextRetryList);
+      setRetryList(nextRetryList);
+      appendReviewedCard({
+        card: current,
+        source: currentSource,
+        grade,
+      });
+      setNormalSubmittedGrade(grade);
+      setPhase("feedback");
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : "Failed to submit review");
     } finally {
@@ -449,6 +499,27 @@ export function TodaySession({
   }
 
   const totalCards = queue.length;
+  const historyCards = phase === "feedback" ? reviewedCards.slice(0, -1) : reviewedCards;
+  const viewedSnapshot =
+    historyIndex !== null ? historyCards[historyIndex] ?? null : null;
+  const showingHistory = viewedSnapshot !== null;
+  const canGoPrevious =
+    !busy &&
+    (showingHistory ? historyIndex > 0 : historyCards.length > 0);
+  const canAdvanceLiveCard = !busy && phase === "feedback" && !showingHistory;
+  const canGoNext =
+    !busy &&
+    (showingHistory
+      ? historyIndex < historyCards.length - 1 || current !== null
+      : canAdvanceLiveCard);
+  const flashcardNavigation = (
+    <FlashcardNavigation
+      canGoPrevious={canGoPrevious}
+      canGoNext={canGoNext}
+      onPrevious={goToPreviousReviewedCard}
+      onNext={goToNextCard}
+    />
+  );
   const normalizedInitialCompleted = Math.max(0, Math.floor(initialCompletedCount));
   const progressTotal = Math.max(
     totalCards,
@@ -485,6 +556,31 @@ export function TodaySession({
     return <p className="text-zinc-600 dark:text-zinc-400">No cards in this session.</p>;
   }
 
+  function goToPreviousReviewedCard() {
+    if (!canGoPrevious) return;
+
+    setHistoryIndex((value) => {
+      if (value === null) return historyCards.length - 1;
+      return Math.max(0, value - 1);
+    });
+  }
+
+  function goToNextCard() {
+    if (!canGoNext) return;
+
+    if (showingHistory) {
+      if (historyIndex < historyCards.length - 1) {
+        setHistoryIndex(historyIndex + 1);
+        return;
+      }
+
+      setHistoryIndex(null);
+      return;
+    }
+
+    advanceFromCurrentCard(retryList);
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {enabledImplementedTypes.length > 1 ? (
@@ -519,7 +615,12 @@ export function TodaySession({
             progressTotal={progressTotal}
           />
 
-          {current.cardType === "cloze" ? (
+          {showingHistory ? (
+            <ReviewedFlashcardCard
+              snapshot={viewedSnapshot}
+              navigation={flashcardNavigation}
+            />
+          ) : current.cardType === "cloze" ? (
             <ClozeCard
               card={current}
               value={clozeInput}
@@ -534,12 +635,11 @@ export function TodaySession({
               }}
               onNext={() => advanceFromCurrentCard(retryList)}
               retryDelayMs={retryDelayMs}
+              navigation={flashcardNavigation}
             />
-          ) : null}
-
-          {current.cardType === "normal" ? renderNormalCard(current) : null}
-
-          {current.cardType === "audio" ? (
+          ) : current.cardType === "normal" ? (
+            renderNormalCard(current, flashcardNavigation)
+          ) : current.cardType === "audio" ? (
             <AudioCard
               card={current}
               busy={busy}
@@ -551,10 +651,9 @@ export function TodaySession({
               }}
               onNext={() => advanceFromCurrentCard(retryList)}
               retryDelayMs={retryDelayMs}
+              navigation={flashcardNavigation}
             />
-          ) : null}
-
-          {current.cardType === "mcq" ? (
+          ) : current.cardType === "mcq" ? (
             <McqCard
               card={current}
               busy={busy}
@@ -566,10 +665,9 @@ export function TodaySession({
               }}
               onNext={() => advanceFromCurrentCard(retryList)}
               retryDelayMs={retryDelayMs}
+              navigation={flashcardNavigation}
             />
-          ) : null}
-
-          {current.cardType === "sentences" ? (
+          ) : current.cardType === "sentences" ? (
             <SentenceCard
               card={current}
               busy={busy}
@@ -581,6 +679,7 @@ export function TodaySession({
               }}
               onNext={() => advanceFromCurrentCard(retryList)}
               retryDelayMs={retryDelayMs}
+              navigation={flashcardNavigation}
             />
           ) : null}
         </div>
@@ -591,6 +690,283 @@ export function TodaySession({
       {enabledUnimplementedTypes.length > 0 ? (
         <ComingSoonNotice enabledTypes={enabledUnimplementedTypes} />
       ) : null}
+    </div>
+  );
+}
+
+function FlashcardNavigation({
+  canGoPrevious,
+  canGoNext,
+  onPrevious,
+  onNext,
+}: {
+  canGoPrevious: boolean;
+  canGoNext: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  return (
+    <div className="flex w-full items-center justify-between gap-2">
+      <button
+        type="button"
+        onClick={onPrevious}
+        disabled={!canGoPrevious}
+        aria-label="Previous flashcard"
+        className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-300 bg-white text-lg font-medium text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+      >
+        <LeftIcon className="h-5 w-5" />
+      </button>
+      <button
+        type="button"
+        onClick={onNext}
+        disabled={!canGoNext}
+        aria-label="Next flashcard"
+        className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-300 bg-white text-lg font-medium text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+      >
+        <RightIcon className="h-5 w-5" />
+      </button>
+    </div>
+  );
+}
+
+function ReviewedFlashcardCard({
+  snapshot,
+  navigation,
+}: {
+  snapshot: ReviewedCardSnapshot;
+  navigation: ReactNode;
+}) {
+  const { card, feedback, grade, userAnswer } = snapshot;
+
+  return (
+    <section className="relative rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="absolute inset-x-6 top-6">{navigation}</div>
+      <div className="flex min-h-9 flex-col items-center gap-2 px-12 text-center">
+          <p className="text-sm uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
+            Previous flashcard
+          </p>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            {TYPE_LABELS[card.kind]}
+          </p>
+      </div>
+
+      {card.cardType === "cloze" ? (
+        <ReviewedClozeCard card={card} feedback={feedback} userAnswer={userAnswer} />
+      ) : null}
+
+      {card.cardType === "normal" ? (
+        <ReviewedNormalCard card={card} grade={grade} />
+      ) : null}
+
+      {card.cardType === "audio" ? (
+        <ReviewedChoiceCard
+          card={card}
+          title="Audio"
+          subtitle={card.prompt}
+          feedback={feedback}
+          userAnswer={userAnswer}
+        />
+      ) : null}
+
+      {card.cardType === "mcq" ? (
+        <ReviewedChoiceCard
+          card={card}
+          title="Multiple choice"
+          subtitle={card.prompt}
+          feedback={feedback}
+          userAnswer={userAnswer}
+        />
+      ) : null}
+
+      {card.cardType === "sentences" ? (
+        <ReviewedChoiceCard
+          card={card}
+          title="Sentence"
+          subtitle={card.prompt}
+          sentence={card.sentenceData.sentence}
+          translation={card.sentenceData.translation}
+          feedback={feedback}
+          userAnswer={userAnswer}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function ReviewedClozeCard({
+  card,
+  feedback,
+  userAnswer,
+}: {
+  card: Extract<UnifiedQueueCard, { cardType: "cloze" }>;
+  feedback?: { correct: boolean; expected: string };
+  userAnswer?: string;
+}) {
+  return (
+    <div className="mt-5 flex flex-col gap-5">
+      <div>
+        <p className="text-sm uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
+          {card.direction === "en_to_es" ? "Meaning" : "Word"}
+        </p>
+        <p className="mt-2 text-zinc-800 dark:text-zinc-100">
+          {card.direction === "en_to_es" ? (card.definition ?? "—") : card.lemma}
+        </p>
+        {card.hint ? (
+          <p className="mt-1 text-sm text-zinc-500">({card.hint})</p>
+        ) : null}
+      </div>
+
+      <div>
+        <p className="mb-2 text-sm font-medium text-zinc-600 dark:text-zinc-300">
+          Your answer
+        </p>
+        <input
+          type="text"
+          value={userAnswer ?? ""}
+          readOnly
+          className="w-full rounded-lg border border-zinc-300 bg-zinc-50 px-3 py-2 text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+        />
+      </div>
+
+      {feedback ? <ReviewedFeedback feedback={feedback} /> : null}
+    </div>
+  );
+}
+
+function ReviewedNormalCard({
+  card,
+  grade,
+}: {
+  card: Extract<UnifiedQueueCard, { cardType: "normal" }>;
+  grade?: Grade;
+}) {
+  const promptLabel = card.direction === "en_to_es" ? "Meaning" : "Word";
+  const promptValue = card.direction === "en_to_es" ? (card.definition ?? "—") : card.lemma;
+  const answerLabel = card.direction === "en_to_es" ? "Word" : "Meaning";
+  const answerValue = card.direction === "en_to_es" ? card.lemma : (card.definition ?? "—");
+
+  return (
+    <div className="mt-5 flex flex-col gap-5">
+      <div>
+        <p className="text-sm uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
+          {promptLabel}
+        </p>
+        <p className="mt-2 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+          {promptValue}
+        </p>
+        {card.hint ? (
+          <p className="mt-1 text-sm text-zinc-500">({card.hint})</p>
+        ) : null}
+      </div>
+
+      <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/50">
+        <p className="text-xs uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
+          {answerLabel}
+        </p>
+        <p className="mt-2 text-lg font-medium text-zinc-900 dark:text-zinc-100">
+          {answerValue}
+        </p>
+      </div>
+
+      {grade ? (
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-200">
+          Grade: <span className="font-medium capitalize">{grade}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ReviewedChoiceCard({
+  card,
+  title,
+  subtitle,
+  sentence,
+  translation,
+  feedback,
+  userAnswer,
+}: {
+  card: Extract<UnifiedQueueCard, { cardType: "audio" | "mcq" | "sentences" }>;
+  title: string;
+  subtitle: string;
+  sentence?: string;
+  translation?: string | null;
+  feedback?: { correct: boolean; expected: string };
+  userAnswer?: string;
+}) {
+  return (
+    <div className="mt-5 flex flex-col gap-5">
+      <div>
+        <p className="text-sm uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
+          {title}
+        </p>
+        <p className="mt-2 text-lg font-medium text-zinc-900 dark:text-zinc-100">
+          {subtitle}
+        </p>
+        {sentence ? (
+          <p className="mt-4 text-xl font-medium tracking-tight text-zinc-900 dark:text-zinc-100">
+            {sentence}
+          </p>
+        ) : null}
+        {translation ? (
+          <p className="mt-2 text-sm text-zinc-500">{translation}</p>
+        ) : null}
+        {card.hint ? (
+          <p className="mt-2 text-sm text-zinc-500">({card.hint})</p>
+        ) : null}
+      </div>
+
+      <div className="grid gap-2">
+        {card.options.map((option) => {
+          const isSelected = option === userAnswer;
+          const isCorrect = option === card.correctOption;
+
+          return (
+            <div
+              key={option}
+              className={`rounded-lg border px-4 py-3 text-sm ${
+                isCorrect
+                  ? "border-green-300 bg-green-50 text-green-900 dark:border-green-800 dark:bg-green-950/40 dark:text-green-100"
+                  : isSelected
+                    ? "border-red-300 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-100"
+                    : "border-zinc-300 bg-white text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span>{option}</span>
+                <span className="text-xs uppercase tracking-[0.12em] text-current">
+                  {isCorrect ? "Correct" : isSelected ? "Your answer" : ""}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {feedback ? <ReviewedFeedback feedback={feedback} /> : null}
+    </div>
+  );
+}
+
+function ReviewedFeedback({
+  feedback,
+}: {
+  feedback: { correct: boolean; expected: string };
+}) {
+  return (
+    <div
+      className={`rounded-xl border p-4 ${
+        feedback.correct
+          ? "border-green-300 bg-green-50 dark:border-green-800 dark:bg-green-950/40"
+          : "border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/40"
+      }`}
+    >
+      <p className="font-medium text-zinc-900 dark:text-zinc-100">
+        {feedback.correct ? "Correct" : "Incorrect"}
+      </p>
+      <p className="mt-1 text-zinc-600 dark:text-zinc-300">
+        Expected: {feedback.expected}
+      </p>
     </div>
   );
 }

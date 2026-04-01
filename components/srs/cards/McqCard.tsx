@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+import { FlashcardContainer } from "@/components/srs/cards/FlashcardContainer";
 import type { UnifiedQueueCard } from "@/components/srs/logic/buildUnifiedQueue";
 
 type McqCardProps = {
@@ -16,6 +18,7 @@ type McqCardProps = {
   onSelect: (option: string) => void;
   onNext: () => void;
   retryDelayMs: number;
+  navigation?: ReactNode;
 };
 
 export function McqCard({
@@ -27,6 +30,7 @@ export function McqCard({
   onSelect,
   onNext,
   retryDelayMs,
+  navigation,
 }: McqCardProps) {
   if (feedback) {
     return (
@@ -42,10 +46,7 @@ export function McqCard({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <p className="text-sm uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
-          Multiple choice
-        </p>
+      <FlashcardContainer title="Multiple choice" navigation={navigation}>
         <p className="mt-2 text-lg font-medium">{card.prompt}</p>
         {showPosHint && card.hint ? (
           <p className="mt-1 text-sm text-zinc-500">({card.hint})</p>
@@ -55,7 +56,7 @@ export function McqCard({
             {submitError}
           </p>
         ) : null}
-      </div>
+      </FlashcardContainer>
 
       <div className="grid gap-2">
         {card.options.map((option) => (

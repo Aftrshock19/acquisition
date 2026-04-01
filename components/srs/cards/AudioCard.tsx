@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { FlashcardContainer } from "@/components/srs/cards/FlashcardContainer";
 import type { UnifiedQueueCard } from "@/components/srs/logic/buildUnifiedQueue";
 
 type AudioCardProps = {
@@ -17,6 +18,7 @@ type AudioCardProps = {
   onSelect: (option: string) => void;
   onNext: () => void;
   retryDelayMs: number;
+  navigation?: ReactNode;
 };
 
 export function AudioCard({
@@ -28,6 +30,7 @@ export function AudioCard({
   onSelect,
   onNext,
   retryDelayMs,
+  navigation,
 }: AudioCardProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
 
@@ -49,10 +52,7 @@ export function AudioCard({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <p className="text-sm uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
-          Audio
-        </p>
+      <FlashcardContainer title="Audio" navigation={navigation}>
         <p className="mt-2 text-lg font-medium">{card.prompt}</p>
         {showPosHint && card.hint ? (
           <p className="mt-1 text-sm text-zinc-500">({card.hint})</p>
@@ -76,7 +76,7 @@ export function AudioCard({
             Play again
           </button>
         </div>
-      </div>
+      </FlashcardContainer>
 
       <div className="grid gap-2">
         {card.options.map((option) => (

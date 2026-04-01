@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+import { FlashcardContainer } from "@/components/srs/cards/FlashcardContainer";
 import type { UnifiedQueueCard } from "@/components/srs/logic/buildUnifiedQueue";
 
 type SentenceCardProps = {
@@ -16,6 +18,7 @@ type SentenceCardProps = {
   onSelect: (option: string) => void;
   onNext: () => void;
   retryDelayMs: number;
+  navigation?: ReactNode;
 };
 
 export function SentenceCard({
@@ -27,6 +30,7 @@ export function SentenceCard({
   onSelect,
   onNext,
   retryDelayMs,
+  navigation,
 }: SentenceCardProps) {
   if (feedback) {
     return (
@@ -42,10 +46,7 @@ export function SentenceCard({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <p className="text-sm uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
-          Sentence
-        </p>
+      <FlashcardContainer title="Sentence" navigation={navigation}>
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">{card.prompt}</p>
         <p className="mt-4 text-xl font-medium tracking-tight">{card.sentenceData.sentence}</p>
         {card.sentenceData.translation ? (
@@ -61,7 +62,7 @@ export function SentenceCard({
             {submitError}
           </p>
         ) : null}
-      </div>
+      </FlashcardContainer>
 
       <div className="grid gap-2">
         {card.options.map((option) => (

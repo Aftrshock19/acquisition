@@ -6,45 +6,61 @@ import { useRouter } from "next/navigation";
 
 export function LoginForm() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [signInEmail, setSignInEmail] = useState("");
+  const [signInPassword, setSignInPassword] = useState("");
+  const [signUpEmail, setSignUpEmail] = useState("");
+  const [signUpPassword, setSignUpPassword] = useState("");
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState<"signIn" | "signUp" | null>(null);
 
   async function handleSignIn(e: React.FormEvent) {
     e.preventDefault();
     setMessage(null);
-    setLoading(true);
+    setSubmitting("signIn");
     try {
       const supabase = createSupabaseBrowserClient();
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { error } = await supabase.auth.signInWithPassword({
+        email: signInEmail,
+        password: signInPassword,
+      });
       if (error) {
         setMessage({ type: "error", text: error.message });
         return;
       }
       setMessage({ type: "ok", text: "Signed in. Redirecting…" });
-      router.refresh();
-      router.push("/today");
+      router.replace("/");
+    } catch (error) {
+      setMessage({ type: "error", text: getErrorMessage(error) });
     } finally {
-      setLoading(false);
+      setSubmitting(null);
     }
   }
 
   async function handleSignUp(e: React.FormEvent) {
     e.preventDefault();
     setMessage(null);
-    setLoading(true);
+    setSubmitting("signUp");
     try {
       const supabase = createSupabaseBrowserClient();
-      const { error } = await supabase.auth.signUp({ email, password });
+      const { data, error } = await supabase.auth.signUp({
+        email: signUpEmail,
+        password: signUpPassword,
+      });
       if (error) {
         setMessage({ type: "error", text: error.message });
         return;
       }
+      if (data.session) {
+        setMessage({ type: "ok", text: "Account created. Redirecting…" });
+        router.replace("/");
+        return;
+      }
       setMessage({ type: "ok", text: "Check your email to confirm, or sign in if you already have an account." });
       router.refresh();
+    } catch (error) {
+      setMessage({ type: "error", text: getErrorMessage(error) });
     } finally {
-      setLoading(false);
+      setSubmitting(null);
     }
   }
 
@@ -55,25 +71,27 @@ export function LoginForm() {
         <input
           type="email"
           placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          value={signInEmail}
+          onChange={(e) => setSignInEmail(e.target.value)}
           required
+          autoComplete="email"
           className="app-input"
         />
         <input
           type="password"
           placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          value={signInPassword}
+          onChange={(e) => setSignInPassword(e.target.value)}
           required
+          autoComplete="current-password"
           className="app-input"
         />
         <button
           type="submit"
-          disabled={loading}
+          disabled={submitting !== null}
           className="app-button"
         >
-          {loading ? "…" : "Sign in"}
+          {submitting === "signIn" ? "…" : "Sign in"}
         </button>
       </form>
 
@@ -82,26 +100,28 @@ export function LoginForm() {
         <input
           type="email"
           placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          value={signUpEmail}
+          onChange={(e) => setSignUpEmail(e.target.value)}
           required
+          autoComplete="email"
           className="app-input"
         />
         <input
           type="password"
           placeholder="Password (min 6 characters)"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          value={signUpPassword}
+          onChange={(e) => setSignUpPassword(e.target.value)}
           required
           minLength={6}
+          autoComplete="new-password"
           className="app-input"
         />
         <button
           type="submit"
-          disabled={loading}
+          disabled={submitting !== null}
           className="app-button-secondary"
         >
-          {loading ? "…" : "Sign up"}
+          {submitting === "signUp" ? "…" : "Sign up"}
         </button>
       </form>
 
@@ -118,4 +138,8 @@ export function LoginForm() {
       )}
     </div>
   );
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Something went wrong. Please try again.";
 }

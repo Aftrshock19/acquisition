@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+import { FlashcardContainer } from "@/components/srs/cards/FlashcardContainer";
 import type { Grade } from "@/lib/srs/types";
 import type { UnifiedQueueCard } from "@/components/srs/logic/buildUnifiedQueue";
 
@@ -12,8 +14,12 @@ type NormalEnToEsCardProps = {
   submitError: string | null;
   showPosHint?: boolean;
   revealed: boolean;
+  submittedGrade?: Grade | null;
+  navigation?: ReactNode;
   onReveal: () => void;
   onGrade: (grade: Grade) => void;
+  onNext: () => void;
+  retryDelayMs: number;
 };
 
 export function NormalEnToEsCard({
@@ -22,15 +28,19 @@ export function NormalEnToEsCard({
   submitError,
   showPosHint = true,
   revealed,
+  submittedGrade,
+  navigation,
   onReveal,
   onGrade,
+  onNext,
+  retryDelayMs,
 }: NormalEnToEsCardProps) {
+  const answered = submittedGrade !== null && submittedGrade !== undefined;
+  const isAgain = submittedGrade === "again";
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <p className="text-sm uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
-          Meaning
-        </p>
+      <FlashcardContainer title="Meaning" navigation={navigation}>
         <p className="mt-2 text-2xl font-semibold tracking-tight">
           {card.definition ?? "—"}
         </p>
@@ -52,7 +62,7 @@ export function NormalEnToEsCard({
             {submitError}
           </p>
         ) : null}
-      </div>
+      </FlashcardContainer>
 
       {!revealed ? (
         <button
@@ -63,6 +73,33 @@ export function NormalEnToEsCard({
         >
           Show answer
         </button>
+      ) : answered ? (
+        <>
+          <div
+            className={`rounded-xl border p-6 ${
+              isAgain
+                ? "border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/40"
+                : "border-green-300 bg-green-50 dark:border-green-800 dark:bg-green-950/40"
+            }`}
+          >
+            <p className="font-medium text-zinc-900 dark:text-zinc-100">
+              Grade: <span className="capitalize">{submittedGrade}</span>
+            </p>
+            {isAgain ? (
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+                Will repeat in {Math.max(1, Math.round(retryDelayMs / 1000))}s
+              </p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={onNext}
+            disabled={busy}
+            className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            Next
+          </button>
+        </>
       ) : (
         <NormalGradeButtons busy={busy} onGrade={onGrade} />
       )}
@@ -70,6 +107,8 @@ export function NormalEnToEsCard({
       <p className="text-sm text-zinc-500">
         {!revealed
           ? "Reveal the answer, then choose a grade."
+          : answered
+            ? "Use Next or the right arrow to continue."
           : "Again repeats this card after the retry delay."}
       </p>
     </div>
