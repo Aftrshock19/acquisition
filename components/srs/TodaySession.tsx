@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   getFlashcardDebugSnapshot,
   recordReview,
@@ -212,34 +219,37 @@ export function TodaySession({
     return () => clearInterval(intervalId);
   }, [phase, retryList]);
 
+  const handleKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if (busy || !current) return;
+    if (event.key !== "Enter") return;
+
+    if (phase === "feedback") {
+      event.preventDefault();
+      advanceFromCurrentCard(retryList);
+      return;
+    }
+
+    if (phase !== "prompt") return;
+
+    if (current.cardType === "cloze") {
+      event.preventDefault();
+      void handleClozeCheck();
+      return;
+    }
+
+    if (current.cardType === "normal" && !normalRevealed) {
+      event.preventDefault();
+      setNormalRevealed(true);
+    }
+  });
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (busy || !current) return;
-      if (event.key !== "Enter") return;
-
-      if (phase === "feedback") {
-        event.preventDefault();
-        advanceFromCurrentCard(retryList);
-        return;
-      }
-
-      if (phase !== "prompt") return;
-
-      if (current.cardType === "cloze") {
-        event.preventDefault();
-        void handleClozeCheck();
-        return;
-      }
-
-      if (current.cardType === "normal" && !normalRevealed) {
-        event.preventDefault();
-        setNormalRevealed(true);
-      }
+      handleKeyDown(event);
     };
-
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [busy, current, phase, retryList, clozeInput, normalRevealed]);
+  }, []);
 
   function beginCard(card: UnifiedQueueCard, source: "main" | "retry") {
     setCurrent(card);
@@ -500,17 +510,18 @@ export function TodaySession({
 
   const totalCards = queue.length;
   const historyCards = phase === "feedback" ? reviewedCards.slice(0, -1) : reviewedCards;
+  const activeHistoryIndex = historyIndex ?? -1;
   const viewedSnapshot =
-    historyIndex !== null ? historyCards[historyIndex] ?? null : null;
+    historyIndex !== null ? historyCards[activeHistoryIndex] ?? null : null;
   const showingHistory = viewedSnapshot !== null;
   const canGoPrevious =
     !busy &&
-    (showingHistory ? historyIndex > 0 : historyCards.length > 0);
+    (showingHistory ? activeHistoryIndex > 0 : historyCards.length > 0);
   const canAdvanceLiveCard = !busy && phase === "feedback" && !showingHistory;
   const canGoNext =
     !busy &&
     (showingHistory
-      ? historyIndex < historyCards.length - 1 || current !== null
+      ? activeHistoryIndex < historyCards.length - 1 || current !== null
       : canAdvanceLiveCard);
   const flashcardNavigation = (
     <FlashcardNavigation
@@ -569,8 +580,8 @@ export function TodaySession({
     if (!canGoNext) return;
 
     if (showingHistory) {
-      if (historyIndex < historyCards.length - 1) {
-        setHistoryIndex(historyIndex + 1);
+      if (activeHistoryIndex < historyCards.length - 1) {
+        setHistoryIndex(activeHistoryIndex + 1);
         return;
       }
 
@@ -746,7 +757,7 @@ function ReviewedFlashcardCard({
             Previous flashcard
           </p>
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            {TYPE_LABELS[card.kind]}
+            {getCardKindLabel(card.kind)}
           </p>
       </div>
 
@@ -1074,6 +1085,10 @@ function getCardDirection(card: UnifiedQueueCard | null) {
     return card.direction;
   }
   return null;
+}
+
+function getCardKindLabel(kind: UnifiedQueueCard["kind"]) {
+  return kind === "review" ? "Review" : "New";
 }
 
 function ComingSoonNotice({ enabledTypes }: { enabledTypes: EnabledFlashcardMode[] }) {
