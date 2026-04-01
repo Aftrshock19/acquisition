@@ -40,6 +40,7 @@ export type UserSettingsRow = {
   include_normal_en_to_es: boolean;
   include_normal_es_to_en: boolean;
   retry_delay_seconds: number;
+  auto_advance_correct: boolean;
   show_pos_hint: boolean;
   show_definition_first: boolean;
   created_at: string;
@@ -59,6 +60,7 @@ export type EffectiveFlashcardSettings = {
   effectiveDirections: DirectionSettings;
   enabledModes: Record<EnabledFlashcardMode, boolean>;
   retryDelaySeconds: number;
+  autoAdvanceCorrect: boolean;
   showPosHint: boolean;
   showDefinitionFirst: boolean;
 };

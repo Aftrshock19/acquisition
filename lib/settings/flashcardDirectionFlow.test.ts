@@ -134,6 +134,25 @@ describe("flashcard direction flow", () => {
     expect(directionalCards.length).toBeGreaterThan(0);
     expect(directionalCards.every((card) => card.direction === "en_to_es")).toBe(true);
   });
+
+  it("normalizes the auto-advance setting as a boolean", () => {
+    const normalized = normalizeUserSettingsInput({
+      auto_advance_correct: "false",
+    });
+
+    expect(normalized.auto_advance_correct).toBe(false);
+  });
+
+  it("exposes auto-advance in effective settings", () => {
+    const effective = resolveEffectiveSettings(
+      makeSettings({
+        auto_advance_correct: false,
+      }),
+      RECOMMENDED,
+    );
+
+    expect(effective.autoAdvanceCorrect).toBe(false);
+  });
 });
 
 function makeSettings(overrides: Partial<UserSettingsRow> = {}): UserSettingsRow {
@@ -153,6 +172,7 @@ function makeSettings(overrides: Partial<UserSettingsRow> = {}): UserSettingsRow
     include_normal_en_to_es: true,
     include_normal_es_to_en: false,
     retry_delay_seconds: 90,
+    auto_advance_correct: true,
     show_pos_hint: true,
     show_definition_first: true,
     created_at: new Date(0).toISOString(),

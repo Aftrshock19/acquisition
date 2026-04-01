@@ -65,6 +65,7 @@ export function resolveEffectiveSettings(
     effectiveDirections,
     enabledModes,
     retryDelaySeconds: clamp(user.retry_delay_seconds, 10, 3600),
+    autoAdvanceCorrect: user.auto_advance_correct,
     showPosHint: user.show_pos_hint,
     showDefinitionFirst: user.show_definition_first,
   };

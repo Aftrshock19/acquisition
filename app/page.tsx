@@ -6,8 +6,11 @@ import { FlashcardSettingsPanel } from "@/components/settings/FlashcardSettingsP
 
 export default async function HomePage() {
   const { settings, signedIn } = await getUserSettings();
-  const recommended = await recommendSettings();
-  const effective = resolveEffectiveSettings(settings, recommended);
+  const recommended = signedIn ? await recommendSettings() : null;
+  const effective =
+    signedIn && recommended
+      ? resolveEffectiveSettings(settings, recommended)
+      : null;
 
   return (
     <main className="app-shell">
@@ -19,28 +22,36 @@ export default async function HomePage() {
           <h1 className="app-title">Acquisition</h1>
           <p className="app-subtitle">Your daily Spanish practice.</p>
         </div>
-        <Link
-          href="/profile"
-          className="app-button-secondary shrink-0"
-        >
-          Profile
-        </Link>
+        {signedIn ? (
+          <Link href="/profile" className="app-button-secondary shrink-0">
+            Profile
+          </Link>
+        ) : null}
       </section>
-      <div className="flex flex-col gap-3">
-        <Link href="/today" className="app-link-card font-medium">
-          Today — reviews & new words
+      {signedIn ? (
+        <div className="flex flex-col gap-3">
+          <Link href="/today" className="app-link-card font-medium">
+            Today
+          </Link>
+          <Link href="/progress" className="app-link-card font-medium">
+            Progress
+          </Link>
+          <Link href="/Decks" className="app-link-card font-medium">
+            Decks
+          </Link>
+          <Link href="/settings" className="app-link-card font-medium">
+            Settings
+          </Link>
+        </div>
+      ) : (
+        <Link
+          href="/login"
+          className="flex min-h-32 items-center justify-center rounded-2xl bg-zinc-900 px-8 py-6 text-center text-xl font-semibold text-white shadow-lg shadow-zinc-900/15 transition hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+        >
+          Sign in
         </Link>
-        <Link href="/progress" className="app-link-card font-medium">
-          Progress
-        </Link>
-        <Link href="/Decks" className="app-link-card font-medium">
-          Decks
-        </Link>
-        <Link href="/settings" className="app-link-card font-medium">
-          Settings
-        </Link>
-      </div>
-      {signedIn && (
+      )}
+      {signedIn && effective && (
         <div className="app-card p-5">
           <FlashcardSettingsPanel
             variant="home"

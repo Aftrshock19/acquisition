@@ -36,6 +36,7 @@ export type TodayFlashcardsResult =
       effectiveSettings: {
         dailyLimit: number;
         retryDelaySeconds: number;
+        autoAdvanceCorrect: boolean;
         showPosHint: boolean;
         showDefinitionFirst: boolean;
         enabledTypes: Record<EnabledFlashcardMode, boolean>;
@@ -52,6 +53,7 @@ export type TodayFlashcardsResult =
       effectiveSettings: {
         dailyLimit: number;
         retryDelaySeconds: number;
+        autoAdvanceCorrect: boolean;
         showPosHint: boolean;
         showDefinitionFirst: boolean;
         enabledTypes: Record<EnabledFlashcardMode, boolean>;
@@ -182,6 +184,7 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
   const effectiveSettings = {
     dailyLimit: effective.effectiveDailyLimit,
     retryDelaySeconds: effective.retryDelaySeconds,
+    autoAdvanceCorrect: effective.autoAdvanceCorrect,
     showPosHint: effective.showPosHint,
     showDefinitionFirst: effective.showDefinitionFirst,
     enabledTypes: effective.enabledModes,

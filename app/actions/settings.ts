@@ -21,6 +21,7 @@ const DEBUG_SETTINGS_KEYS = [
   'include_normal_en_to_es',
   'include_normal_es_to_en',
   'retry_delay_seconds',
+  'auto_advance_correct',
   'show_pos_hint',
   'show_definition_first',
 ] as const;
@@ -113,9 +114,17 @@ function isMissingDirectionColumnError(message?: string) {
   );
 }
 
+function isMissingAutoAdvanceColumnError(message?: string) {
+  return Boolean(message?.includes("auto_advance_correct"));
+}
+
 function formatSettingsSaveError(message?: string) {
   if (isMissingDirectionColumnError(message)) {
     return 'Flashcard direction settings could not be saved because the database is missing the latest direction columns. Run the newest Supabase migration and try again.';
+  }
+
+  if (isMissingAutoAdvanceColumnError(message)) {
+    return 'Auto-next settings could not be saved because the database is missing the latest settings column. Run the newest Supabase migration and try again.';
   }
 
   return message ?? 'Failed to save settings';

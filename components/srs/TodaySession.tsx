@@ -9,9 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import {
-  getFlashcardDebugSnapshot,
   recordReview,
-  type FlashcardDebugSnapshot,
 } from "@/app/actions/srs";
 import { BackButton } from "@/components/BackButton";
 import { LeftIcon } from "@/components/LeftIcon";
@@ -40,13 +38,13 @@ type Props = {
   session: TodaySessionData;
   dailyLimit: number;
   retryDelayMs?: number;
+  autoAdvanceCorrect?: boolean;
   showPosHint?: boolean;
   initialDailySession?: DailySessionRow | null;
-  initialDebugSnapshot?: FlashcardDebugSnapshot;
 };
 
 type RetryEntry = { card: UnifiedQueueCard; dueAt: number };
-type SessionPhase = "prompt" | "feedback" | "waiting" | "done";
+type SessionPhase = "prompt" | "feedback" | "correction" | "waiting" | "done";
 type ReviewedCardSnapshot = {
   card: UnifiedQueueCard;
   source: "main" | "retry";
@@ -111,9 +109,9 @@ export function TodaySession({
   session,
   dailyLimit,
   retryDelayMs = 90000,
+  autoAdvanceCorrect = true,
   showPosHint = true,
   initialDailySession = null,
-  initialDebugSnapshot,
 }: Props) {
   const { queue, enabledImplementedTypes, enabledUnimplementedTypes } = useMemo(
     () => buildUnifiedQueue(session, enabledTypes),
@@ -121,9 +119,7 @@ export function TodaySession({
   );
   const initialCompletedCount = Math.max(
     0,
-    initialDailySession?.reviews_done ??
-      initialDebugSnapshot?.dailySession?.reviews_done ??
-      0,
+    initialDailySession?.reviews_done ?? 0,
   );
 
   const [mainIndex, setMainIndex] = useState(0);
@@ -137,6 +133,7 @@ export function TodaySession({
   const [reviewedCards, setReviewedCards] = useState<ReviewedCardSnapshot[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [clozeInput, setClozeInput] = useState("");
+  const [sentenceCorrectionInput, setSentenceCorrectionInput] = useState("");
   const [normalRevealed, setNormalRevealed] = useState(false);
   const [normalSubmittedGrade, setNormalSubmittedGrade] = useState<Grade | null>(null);
   const [feedback, setFeedback] = useState<{
@@ -146,16 +143,10 @@ export function TodaySession({
   const [waitSeconds, setWaitSeconds] = useState(0);
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [debugSnapshot, setDebugSnapshot] = useState<FlashcardDebugSnapshot>(
-    initialDebugSnapshot ?? {
-      dailySession: initialDailySession,
-      currentUserWord: null,
-      lastReviewEvent: null,
-    },
-  );
 
   const startedAtRef = useRef<number>(Date.now());
   const clozeInputRef = useRef<HTMLInputElement>(null);
+  const sentenceCorrectionInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setMainIndex(0);
@@ -167,6 +158,7 @@ export function TodaySession({
     setReviewedCards([]);
     setHistoryIndex(null);
     setClozeInput("");
+    setSentenceCorrectionInput("");
     setNormalRevealed(false);
     setNormalSubmittedGrade(null);
     setFeedback(null);
@@ -181,20 +173,26 @@ export function TodaySession({
 
     setSubmitError(null);
     setClozeInput("");
+    setSentenceCorrectionInput("");
     setNormalRevealed(false);
     setNormalSubmittedGrade(null);
     setFeedback(null);
     setPhase("prompt");
     startedAtRef.current = Date.now();
-
-    void getFlashcardDebugSnapshot(current.id).then((snapshot) => {
-      setDebugSnapshot(snapshot);
-    });
   }, [current]);
 
   useEffect(() => {
-    if (phase === "prompt" && current?.cardType === "cloze") {
+    if (
+      (phase === "prompt" || phase === "correction") &&
+      current?.cardType === "cloze"
+    ) {
       requestAnimationFrame(() => clozeInputRef.current?.focus());
+    }
+  }, [phase, current]);
+
+  useEffect(() => {
+    if (phase === "correction" && current?.cardType === "sentences") {
+      requestAnimationFrame(() => sentenceCorrectionInputRef.current?.focus());
     }
   }, [phase, current]);
 
@@ -226,6 +224,21 @@ export function TodaySession({
     if (phase === "feedback") {
       event.preventDefault();
       advanceFromCurrentCard(retryList);
+      return;
+    }
+
+    if (phase === "correction") {
+      if (current.cardType === "cloze") {
+        event.preventDefault();
+        void handleClozeCheck();
+        return;
+      }
+
+      if (current.cardType === "sentences") {
+        event.preventDefault();
+        handleSentenceCorrectionSubmit();
+      }
+
       return;
     }
 
@@ -371,17 +384,14 @@ export function TodaySession({
       if (!result.ok) {
         throw new Error(result.error);
       }
-
-      setDebugSnapshot(result.debugSnapshot);
-
-      if (!correct) {
-        setRetryList((items) =>
-          upsertRetrySorted(items, {
+      const nextRetryList = correct
+        ? retryList
+        : upsertRetrySorted(retryList, {
             card,
             dueAt: Date.now() + retryDelayMs,
-          }),
-        );
-      }
+          });
+
+      setRetryList(nextRetryList);
 
       appendReviewedCard({
         card,
@@ -392,10 +402,31 @@ export function TodaySession({
           expected: feedbackExpected,
         },
       });
+
+      if (correct) {
+        if (autoAdvanceCorrect) {
+          advanceFromCurrentCard(nextRetryList);
+          return;
+        }
+
+        setFeedback({
+          correct,
+          expected: feedbackExpected,
+        });
+        setPhase("feedback");
+        return;
+      }
+
       setFeedback({
         correct,
         expected: feedbackExpected,
       });
+
+      if (card.cardType === "cloze" || card.cardType === "sentences") {
+        setPhase("correction");
+        return;
+      }
+
       setPhase("feedback");
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : "Failed to submit review");
@@ -405,12 +436,7 @@ export function TodaySession({
   }
 
   async function handleClozeCheck() {
-    if (
-      !current ||
-      current.cardType !== "cloze" ||
-      phase !== "prompt" ||
-      busy
-    ) {
+    if (!current || current.cardType !== "cloze" || busy) {
       return;
     }
 
@@ -423,6 +449,32 @@ export function TodaySession({
       ? current.lemma
       : current.definition ?? "—");
 
+    if (phase === "correction") {
+      if (correct) {
+        if (autoAdvanceCorrect) {
+          setFeedback(null);
+          advanceFromCurrentCard(retryList);
+          return;
+        }
+
+        setFeedback({
+          correct: true,
+          expected: feedbackExpected,
+        });
+        setPhase("feedback");
+        return;
+      }
+
+      setClozeInput("");
+      setFeedback({
+        correct: false,
+        expected: feedbackExpected,
+      });
+      return;
+    }
+
+    if (phase !== "prompt") return;
+
     await submitObjectiveReview({
       card: current,
       correct,
@@ -430,15 +482,15 @@ export function TodaySession({
       expected,
       feedbackExpected,
     });
+
+    if (!correct) {
+      setClozeInput("");
+    }
   }
 
   async function handleChoiceSelect(option: string) {
     if (!current || phase !== "prompt" || busy) return;
-    if (
-      current.cardType !== "audio" &&
-      current.cardType !== "mcq" &&
-      current.cardType !== "sentences"
-    ) {
+    if (current.cardType !== "audio" && current.cardType !== "mcq") {
       return;
     }
 
@@ -448,6 +500,56 @@ export function TodaySession({
       userAnswer: option,
       expected: [current.correctOption],
       feedbackExpected: current.correctOption,
+    });
+  }
+
+  async function handleSentenceSelect(option: string) {
+    if (!current || current.cardType !== "sentences" || phase !== "prompt" || busy) {
+      return;
+    }
+
+    const correct = option === current.correctOption;
+
+    await submitObjectiveReview({
+      card: current,
+      correct,
+      userAnswer: option,
+      expected: [current.correctOption],
+      feedbackExpected: current.correctOption,
+    });
+
+    if (!correct) {
+      setSentenceCorrectionInput("");
+    }
+  }
+
+  function handleSentenceCorrectionSubmit() {
+    if (!current || current.cardType !== "sentences" || phase !== "correction" || busy) {
+      return;
+    }
+
+    const answer = sentenceCorrectionInput.trim();
+    if (!answer) return;
+
+    if (normalize(answer) === normalize(current.correctOption)) {
+      if (autoAdvanceCorrect) {
+        setFeedback(null);
+        advanceFromCurrentCard(retryList);
+        return;
+      }
+
+      setFeedback({
+        correct: true,
+        expected: current.correctOption,
+      });
+      setPhase("feedback");
+      return;
+    }
+
+    setSentenceCorrectionInput("");
+    setFeedback({
+      correct: false,
+      expected: current.correctOption,
     });
   }
 
@@ -483,9 +585,6 @@ export function TodaySession({
       if (!result.ok) {
         throw new Error(result.error);
       }
-
-      setDebugSnapshot(result.debugSnapshot);
-
       const nextRetryList = correct
         ? retryList
         : upsertRetrySorted(retryList, {
@@ -500,6 +599,12 @@ export function TodaySession({
         grade,
       });
       setNormalSubmittedGrade(grade);
+
+      if (correct && autoAdvanceCorrect) {
+        advanceFromCurrentCard(nextRetryList);
+        return;
+      }
+
       setPhase("feedback");
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : "Failed to submit review");
@@ -509,7 +614,10 @@ export function TodaySession({
   }
 
   const totalCards = queue.length;
-  const historyCards = phase === "feedback" ? reviewedCards.slice(0, -1) : reviewedCards;
+  const historyCards =
+    phase === "feedback" || phase === "correction"
+      ? reviewedCards.slice(0, -1)
+      : reviewedCards;
   const activeHistoryIndex = historyIndex ?? -1;
   const viewedSnapshot =
     historyIndex !== null ? historyCards[activeHistoryIndex] ?? null : null;
@@ -533,7 +641,7 @@ export function TodaySession({
     Math.min(dailyLimit, normalizedInitialCompleted + totalCards),
   );
   const localCompletedCount =
-    currentSource === "main" && phase === "feedback"
+    currentSource === "main" && (phase === "feedback" || phase === "correction")
       ? mainCompletedCount + 1
       : mainCompletedCount;
   const completedCount = Math.min(
@@ -632,7 +740,6 @@ export function TodaySession({
                 void handleClozeCheck();
               }}
               onNext={() => advanceFromCurrentCard(retryList)}
-              retryDelayMs={retryDelayMs}
               navigation={flashcardNavigation}
             />
           ) : current.cardType === "normal" ? (
@@ -672,18 +779,19 @@ export function TodaySession({
               submitError={submitError}
               showPosHint={showPosHint}
               feedback={feedback}
+              correctionValue={sentenceCorrectionInput}
+              correctionInputRef={sentenceCorrectionInputRef}
               onSelect={(option) => {
-                void handleChoiceSelect(option);
+                void handleSentenceSelect(option);
               }}
+              onCorrectionChange={setSentenceCorrectionInput}
+              onCorrectionSubmit={handleSentenceCorrectionSubmit}
               onNext={() => advanceFromCurrentCard(retryList)}
-              retryDelayMs={retryDelayMs}
               navigation={flashcardNavigation}
             />
           ) : null}
         </div>
       ) : null}
-
-      <FlashcardDebugPanel currentCard={current} debugSnapshot={debugSnapshot} />
 
       {enabledUnimplementedTypes.length > 0 ? (
         <ComingSoonNotice enabledTypes={enabledUnimplementedTypes} />
@@ -749,7 +857,7 @@ function ReviewedFlashcardCard({
       </div>
 
       {card.cardType === "cloze" ? (
-        <ReviewedClozeCard card={card} feedback={feedback} userAnswer={userAnswer} />
+        <ReviewedClozeCard card={card} answer={feedback?.expected} />
       ) : null}
 
       {card.cardType === "normal" ? (
@@ -761,7 +869,6 @@ function ReviewedFlashcardCard({
           card={card}
           title="Audio"
           subtitle={card.prompt}
-          feedback={feedback}
           userAnswer={userAnswer}
         />
       ) : null}
@@ -771,20 +878,14 @@ function ReviewedFlashcardCard({
           card={card}
           title="Multiple choice"
           subtitle={card.prompt}
-          feedback={feedback}
           userAnswer={userAnswer}
         />
       ) : null}
 
       {card.cardType === "sentences" ? (
-        <ReviewedChoiceCard
+        <ReviewedSentenceCard
           card={card}
-          title="Sentence"
-          subtitle={card.prompt}
-          sentence={card.sentenceData.sentence}
-          translation={card.sentenceData.translation}
-          feedback={feedback}
-          userAnswer={userAnswer}
+          answer={feedback?.expected}
         />
       ) : null}
     </section>
@@ -793,13 +894,17 @@ function ReviewedFlashcardCard({
 
 function ReviewedClozeCard({
   card,
-  feedback,
-  userAnswer,
+  answer,
 }: {
   card: Extract<UnifiedQueueCard, { cardType: "cloze" }>;
-  feedback?: { correct: boolean; expected: string };
-  userAnswer?: string;
+  answer?: string;
 }) {
+  const resolvedAnswer =
+    answer ??
+    (card.direction === "en_to_es"
+      ? card.lemma
+      : splitDefinitionCandidates(card.definition)[0] ?? card.definition ?? "—");
+
   return (
     <div className="mt-5 flex flex-col gap-5">
       <div>
@@ -814,19 +919,14 @@ function ReviewedClozeCard({
         ) : null}
       </div>
 
-      <div>
-        <p className="mb-2 text-sm font-medium text-zinc-600 dark:text-zinc-300">
-          Your answer
+      <div className="rounded-lg border border-green-300 bg-green-50 p-4 dark:border-green-800 dark:bg-green-950/40">
+        <p className="text-xs uppercase tracking-[0.14em] text-green-700 dark:text-green-300">
+          Correct answer
         </p>
-        <input
-          type="text"
-          value={userAnswer ?? ""}
-          readOnly
-          className="w-full rounded-lg border border-zinc-300 bg-zinc-50 px-3 py-2 text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
-        />
+        <p className="mt-2 text-lg font-medium text-green-900 dark:text-green-100">
+          {resolvedAnswer}
+        </p>
       </div>
-
-      {feedback ? <ReviewedFeedback feedback={feedback} /> : null}
     </div>
   );
 }
@@ -946,6 +1046,45 @@ function ReviewedChoiceCard({
   );
 }
 
+function ReviewedSentenceCard({
+  card,
+  answer,
+}: {
+  card: Extract<UnifiedQueueCard, { cardType: "sentences" }>;
+  answer?: string;
+}) {
+  return (
+    <div className="mt-5 flex flex-col gap-5">
+      <div>
+        <p className="text-sm uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
+          Sentence
+        </p>
+        <p className="mt-2 text-lg font-medium text-zinc-900 dark:text-zinc-100">
+          {card.prompt}
+        </p>
+        <p className="mt-4 text-xl font-medium tracking-tight text-zinc-900 dark:text-zinc-100">
+          {card.sentenceData.sentence}
+        </p>
+        {card.sentenceData.translation ? (
+          <p className="mt-2 text-sm text-zinc-500">{card.sentenceData.translation}</p>
+        ) : null}
+        {card.hint ? (
+          <p className="mt-2 text-sm text-zinc-500">({card.hint})</p>
+        ) : null}
+      </div>
+
+      <div className="rounded-lg border border-green-300 bg-green-50 p-4 dark:border-green-800 dark:bg-green-950/40">
+        <p className="text-xs uppercase tracking-[0.14em] text-green-700 dark:text-green-300">
+          Correct answer
+        </p>
+        <p className="mt-2 text-lg font-medium text-green-900 dark:text-green-100">
+          {answer ?? card.correctOption}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ReviewedFeedback({
   feedback,
 }: {
@@ -1006,72 +1145,6 @@ function SessionProgressBar({
       <SettingsButton className="shrink-0" />
     </div>
   );
-}
-
-function FlashcardDebugPanel({
-  currentCard,
-  debugSnapshot,
-}: {
-  currentCard: UnifiedQueueCard | null;
-  debugSnapshot: FlashcardDebugSnapshot;
-}) {
-  return (
-    <section className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50/80 p-5 text-sm dark:border-zinc-700 dark:bg-zinc-900/60">
-      <div className="flex flex-col gap-1">
-        <h2 className="font-semibold tracking-tight">Debug panel</h2>
-        <p className="text-zinc-500 dark:text-zinc-400">
-          Temporary database verification for the Today flashcard flow.
-        </p>
-      </div>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-3">
-        <DebugBlock
-          title="Current card"
-          value={{
-            id: currentCard?.id ?? null,
-            kind: currentCard?.kind ?? null,
-            cardType: currentCard?.cardType ?? null,
-            direction: getCardDirection(currentCard),
-            lemma: currentCard?.lemma ?? null,
-            definition: currentCard?.definition ?? null,
-          }}
-        />
-        <DebugBlock title="Daily session row" value={debugSnapshot.dailySession} />
-        <DebugBlock title="Last review write" value={debugSnapshot.lastReviewEvent} />
-      </div>
-
-      <div className="mt-4">
-        <DebugBlock title="Current user_words row" value={debugSnapshot.currentUserWord} />
-      </div>
-    </section>
-  );
-}
-
-function DebugBlock({
-  title,
-  value,
-}: {
-  title: string;
-  value: unknown;
-}) {
-  return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950/80">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-zinc-400">
-        {title}
-      </h3>
-      <pre className="overflow-x-auto whitespace-pre-wrap break-words text-xs text-zinc-700 dark:text-zinc-200">
-        {JSON.stringify(value, null, 2)}
-      </pre>
-    </div>
-  );
-}
-
-function getCardDirection(card: UnifiedQueueCard | null) {
-  if (!card) return null;
-  if (card.cardType === "normal" || card.cardType === "cloze") {
-    return card.direction;
-  }
-  return null;
 }
 
 function getCardKindLabel(kind: UnifiedQueueCard["kind"]) {

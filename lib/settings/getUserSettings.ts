@@ -17,6 +17,7 @@ const DEFAULT_SETTINGS: UserSettingsRow = {
   include_normal_en_to_es: true,
   include_normal_es_to_en: false,
   retry_delay_seconds: 90,
+  auto_advance_correct: true,
   show_pos_hint: true,
   show_definition_first: true,
   created_at: new Date(0).toISOString(),

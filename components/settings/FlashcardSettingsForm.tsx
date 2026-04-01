@@ -9,6 +9,7 @@ import type {
   UserSettingsRow,
 } from "@/lib/settings/types";
 import { updateUserSettingsAction } from "@/app/actions/settings";
+import type { RawSettingsInput } from "@/lib/settings/normalizeUserSettingsInput";
 
 type Props = {
   userSettings: UserSettingsRow;
@@ -103,6 +104,9 @@ export function FlashcardSettingsForm({
   const [manualDailyLimit, setManualDailyLimit] = useState<number>(
     userSettings.manual_daily_card_limit,
   );
+  const [autoAdvanceCorrect, setAutoAdvanceCorrect] = useState<boolean>(
+    Boolean(userSettings.auto_advance_correct),
+  );
   const initialManualTypes: ManualTypes = {
     include_cloze: Boolean(userSettings.include_cloze),
     include_normal: Boolean(userSettings.include_normal),
@@ -137,9 +141,10 @@ export function FlashcardSettingsForm({
     for (const key of DIRECTION_FIELDS) {
       formData.set(key, String(directionTypes[key]));
     }
+    formData.set("auto_advance_correct", String(autoAdvanceCorrect));
     startTransition(() => {
       void updateUserSettingsAction(
-        Object.fromEntries(formData.entries()) as any,
+        Object.fromEntries(formData.entries()) as RawSettingsInput,
       ).then((res) => {
         if (!res.ok) setError(res.error);
         else {
@@ -440,6 +445,17 @@ export function FlashcardSettingsForm({
               className="app-input app-input-no-spinner w-20 px-2 py-1 text-sm"
             />
             <span className="text-xs text-zinc-500">seconds</span>
+          </label>
+
+          <label className="app-toggle">
+            <input
+              type="checkbox"
+              name="auto_advance_correct"
+              checked={autoAdvanceCorrect}
+              onChange={(e) => setAutoAdvanceCorrect(e.currentTarget.checked)}
+              className="app-check"
+            />
+            <span>Auto-next after correct answers</span>
           </label>
 
           <label className="app-toggle">
