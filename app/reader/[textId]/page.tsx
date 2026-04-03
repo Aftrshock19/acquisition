@@ -1,5 +1,13 @@
+import { redirect } from "next/navigation";
+import { ReaderView } from "@/components/reader/ReaderView";
 import { getTextById } from "@/lib/loop/texts";
-import { toReadingBlocks } from "@/lib/loop/reader";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+
+type SupabaseServerClient = NonNullable<
+  Awaited<ReturnType<typeof createSupabaseServerClient>>
+>;
+
+const MANUAL_SAVED_DECK_KEY = "manual_saved";
 
 export default async function ReaderPage({
   params,
@@ -7,32 +15,148 @@ export default async function ReaderPage({
   params: Promise<{ textId: string }>;
 }) {
   const { textId } = await params;
-  const text = getTextById(textId);
-  const blocks = toReadingBlocks(text?.content ?? "");
+  const supabase = await createSupabaseServerClient();
+
+  if (!supabase) {
+    return (
+      <main className="app-shell">
+        <section className="app-hero">
+          <h1 className="app-title">Reader</h1>
+          <p className="app-subtitle">
+            Open a saved text and tap words to inspect them.
+          </p>
+        </section>
+
+        <div className="app-card-strong flex flex-col gap-4 border-amber-200 bg-amber-50/90 p-8 dark:border-amber-900/50 dark:bg-amber-950/30">
+          <h2 className="text-xl font-semibold tracking-tight text-amber-900 dark:text-amber-100">
+            Supabase not configured
+          </h2>
+          <p className="text-amber-800 dark:text-amber-200">
+            Copy <code className="rounded bg-amber-200 px-1 dark:bg-amber-900/50">.env.example</code> to{" "}
+            <code className="rounded bg-amber-200 px-1 dark:bg-amber-900/50">.env.local</code> and set{" "}
+            <code className="rounded bg-amber-200 px-1 dark:bg-amber-900/50">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
+            <code className="rounded bg-amber-200 px-1 dark:bg-amber-900/50">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  let text = null;
+  try {
+    text = await getTextById(supabase, textId);
+  } catch (error) {
+    return (
+      <main className="app-shell">
+        <section className="app-hero">
+          <h1 className="app-title">Reader</h1>
+          <p className="app-subtitle">
+            Something went wrong while loading this text.
+          </p>
+        </section>
+
+        <div className="app-card-strong flex flex-col gap-4 border-red-200 bg-red-50/90 p-8 dark:border-red-900/50 dark:bg-red-950/30">
+          <h2 className="text-xl font-semibold tracking-tight text-red-900 dark:text-red-100">
+            Error loading text
+          </h2>
+          <p className="text-red-800 dark:text-red-200">
+            {error instanceof Error ? error.message : "Unknown error"}
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!text) {
+    return (
+      <main className="app-shell">
+        <section className="app-hero">
+          <h1 className="app-title">Reader</h1>
+          <p className="app-subtitle">
+            This text could not be found.
+          </p>
+        </section>
+
+        <section className="app-card flex flex-col gap-3 p-8">
+          <h2 className="text-xl font-semibold tracking-tight">Text unavailable</h2>
+          <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+            No text matched <code className="rounded bg-zinc-200 px-1 dark:bg-zinc-800">{textId}</code>.
+          </p>
+        </section>
+      </main>
+    );
+  }
+
+  const savedState = await getSavedWordState(supabase, user.id, text.lang);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-8 px-6 py-16">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-3xl font-semibold tracking-tight">
-          {text?.title ?? "Reader"}
-        </h1>
-        {text?.source ? (
-          <p className="text-sm text-zinc-500">{text.source}</p>
-        ) : null}
-      </header>
-
-      <section className="flex flex-col gap-4">
-        {blocks.length === 0 ? (
-          <p className="text-zinc-600">No text found for “{textId}”.</p>
-        ) : (
-          blocks.map((block, idx) => (
-            <p key={`${idx}-${block.slice(0, 12)}`} className="leading-7">
-              {block}
-            </p>
-          ))
-        )}
+    <main className="app-shell">
+      <section className="app-hero">
+        <h1 className="app-title">{text.title}</h1>
+        <p className="app-subtitle">
+          Tap a word to see its definition and save it to your manual deck.
+        </p>
       </section>
+
+      <ReaderView
+        text={text}
+        initialSavedWordIds={savedState.wordIds}
+        initialSavedLemmas={savedState.lemmas}
+      />
     </main>
   );
 }
 
+async function getSavedWordState(
+  supabase: SupabaseServerClient,
+  userId: string,
+  language: string,
+) {
+  try {
+    const { data: deck, error: deckError } = await supabase
+      .from("decks")
+      .select("id")
+      .eq("key", MANUAL_SAVED_DECK_KEY)
+      .eq("language", language)
+      .maybeSingle();
+
+    if (deckError || !deck) {
+      return { wordIds: [], lemmas: [] };
+    }
+
+    const { data: memberships, error: membershipError } = await supabase
+      .from("user_deck_words")
+      .select("word_id")
+      .eq("user_id", userId)
+      .eq("deck_id", deck.id);
+
+    if (membershipError || !memberships || memberships.length === 0) {
+      return { wordIds: [], lemmas: [] };
+    }
+
+    const wordIds = memberships.map((membership) => membership.word_id);
+    const { data: savedWords, error: savedWordsError } = await supabase
+      .from("words")
+      .select("id, lemma")
+      .in("id", wordIds);
+
+    if (savedWordsError || !savedWords) {
+      return { wordIds, lemmas: [] };
+    }
+
+    return {
+      wordIds,
+      lemmas: savedWords.map((word) => word.lemma),
+    };
+  } catch {
+    return { wordIds: [], lemmas: [] };
+  }
+}

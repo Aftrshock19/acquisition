@@ -1,5 +1,5 @@
-nav bar
-reading page
-podcasts page/listener page
-container for books
+[done]nav bar
+[done]reading page
+[done]podcasts page/listener page
+[done]container for books
 copy weather app podcasts

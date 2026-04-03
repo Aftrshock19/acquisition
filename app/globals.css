@@ -53,6 +53,7 @@ body {
   background-image: var(--app-gradient);
   color: var(--foreground);
   font-family: var(--font-geist-sans), sans-serif;
+  padding-bottom: calc(env(safe-area-inset-bottom) + 4.5rem);
 }
 
 a,
@@ -74,7 +75,7 @@ select {
 
 @layer components {
   .app-shell {
-    @apply mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 px-6 py-10 md:py-16;
+    @apply mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 px-6 py-10 md:px-8 md:py-16;
   }
 
   .app-hero {

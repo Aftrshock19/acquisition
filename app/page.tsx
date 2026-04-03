@@ -1,16 +1,8 @@
 import Link from "next/link";
 import { getUserSettings } from "@/lib/settings/getUserSettings";
-import { recommendSettings } from "@/lib/settings/recommendSettings";
-import { resolveEffectiveSettings } from "@/lib/settings/resolveEffectiveSettings";
-import { FlashcardSettingsPanel } from "@/components/settings/FlashcardSettingsPanel";
 
 export default async function HomePage() {
-  const { settings, signedIn } = await getUserSettings();
-  const recommended = signedIn ? await recommendSettings() : null;
-  const effective =
-    signedIn && recommended
-      ? resolveEffectiveSettings(settings, recommended)
-      : null;
+  const { signedIn } = await getUserSettings();
 
   return (
     <main className="app-shell">
@@ -51,7 +43,7 @@ export default async function HomePage() {
           Sign in
         </Link>
       )}
-      {signedIn && effective && (
+      {/* {signedIn && effective && (
         <div className="app-card p-5">
           <FlashcardSettingsPanel
             variant="home"
@@ -59,7 +51,7 @@ export default async function HomePage() {
             effective={effective}
           />
         </div>
-      )}
+      )} */}
     </main>
   );
 }

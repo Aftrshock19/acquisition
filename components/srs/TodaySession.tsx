@@ -8,9 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import {
-  recordReview,
-} from "@/app/actions/srs";
+import { recordReview } from "@/app/actions/srs";
 import { BackButton } from "@/components/BackButton";
 import { LeftIcon } from "@/components/LeftIcon";
 import { RightIcon } from "@/components/RightIcon";
@@ -78,7 +76,9 @@ function isCorrectClozeAnswer(userAnswer: string, expected: string[]) {
   );
 }
 
-function getClozeExpected(card: Extract<UnifiedQueueCard, { cardType: "cloze" }>) {
+function getClozeExpected(
+  card: Extract<UnifiedQueueCard, { cardType: "cloze" }>,
+) {
   if (card.direction === "en_to_es") {
     return [card.lemma];
   }
@@ -129,13 +129,18 @@ export function TodaySession({
     queue[0] ?? null,
   );
   const [currentSource, setCurrentSource] = useState<"main" | "retry">("main");
-  const [phase, setPhase] = useState<SessionPhase>(queue[0] ? "prompt" : "done");
-  const [reviewedCards, setReviewedCards] = useState<ReviewedCardSnapshot[]>([]);
+  const [phase, setPhase] = useState<SessionPhase>(
+    queue[0] ? "prompt" : "done",
+  );
+  const [reviewedCards, setReviewedCards] = useState<ReviewedCardSnapshot[]>(
+    [],
+  );
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [clozeInput, setClozeInput] = useState("");
   const [sentenceCorrectionInput, setSentenceCorrectionInput] = useState("");
   const [normalRevealed, setNormalRevealed] = useState(false);
-  const [normalSubmittedGrade, setNormalSubmittedGrade] = useState<Grade | null>(null);
+  const [normalSubmittedGrade, setNormalSubmittedGrade] =
+    useState<Grade | null>(null);
   const [feedback, setFeedback] = useState<{
     correct: boolean;
     expected: string;
@@ -429,7 +434,9 @@ export function TodaySession({
 
       setPhase("feedback");
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : "Failed to submit review");
+      setSubmitError(
+        error instanceof Error ? error.message : "Failed to submit review",
+      );
     } finally {
       setBusy(false);
     }
@@ -445,9 +452,11 @@ export function TodaySession({
 
     const expected = getClozeExpected(current);
     const correct = isCorrectClozeAnswer(userAnswer, expected);
-    const feedbackExpected = expected[0] ?? (current.direction === "en_to_es"
-      ? current.lemma
-      : current.definition ?? "—");
+    const feedbackExpected =
+      expected[0] ??
+      (current.direction === "en_to_es"
+        ? current.lemma
+        : (current.definition ?? "—"));
 
     if (phase === "correction") {
       if (correct) {
@@ -504,7 +513,12 @@ export function TodaySession({
   }
 
   async function handleSentenceSelect(option: string) {
-    if (!current || current.cardType !== "sentences" || phase !== "prompt" || busy) {
+    if (
+      !current ||
+      current.cardType !== "sentences" ||
+      phase !== "prompt" ||
+      busy
+    ) {
       return;
     }
 
@@ -524,7 +538,12 @@ export function TodaySession({
   }
 
   function handleSentenceCorrectionSubmit() {
-    if (!current || current.cardType !== "sentences" || phase !== "correction" || busy) {
+    if (
+      !current ||
+      current.cardType !== "sentences" ||
+      phase !== "correction" ||
+      busy
+    ) {
       return;
     }
 
@@ -607,7 +626,9 @@ export function TodaySession({
 
       setPhase("feedback");
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : "Failed to submit review");
+      setSubmitError(
+        error instanceof Error ? error.message : "Failed to submit review",
+      );
     } finally {
       setBusy(false);
     }
@@ -620,13 +641,12 @@ export function TodaySession({
       : reviewedCards;
   const activeHistoryIndex = historyIndex ?? -1;
   const viewedSnapshot =
-    historyIndex !== null ? historyCards[activeHistoryIndex] ?? null : null;
+    historyIndex !== null ? (historyCards[activeHistoryIndex] ?? null) : null;
   const showingHistory = viewedSnapshot !== null;
   const canGoPrevious = !busy && !showingHistory && historyCards.length > 0;
   const canAdvanceLiveCard = !busy && phase === "feedback" && !showingHistory;
   const canGoNext =
-    !busy &&
-    (showingHistory ? current !== null : canAdvanceLiveCard);
+    !busy && (showingHistory ? current !== null : canAdvanceLiveCard);
   const flashcardNavigation = (
     <FlashcardNavigation
       canGoPrevious={canGoPrevious}
@@ -635,7 +655,10 @@ export function TodaySession({
       onNext={goToNextCard}
     />
   );
-  const normalizedInitialCompleted = Math.max(0, Math.floor(initialCompletedCount));
+  const normalizedInitialCompleted = Math.max(
+    0,
+    Math.floor(initialCompletedCount),
+  );
   const progressTotal = Math.max(
     totalCards,
     Math.min(dailyLimit, normalizedInitialCompleted + totalCards),
@@ -648,13 +671,16 @@ export function TodaySession({
     progressTotal,
     normalizedInitialCompleted + localCompletedCount,
   );
-  const progressPercent = progressTotal > 0 ? (100 * completedCount) / progressTotal : 0;
+  const progressPercent =
+    progressTotal > 0 ? (100 * completedCount) / progressTotal : 0;
 
   if (enabledImplementedTypes.length === 0) {
     return (
-      <div className="flex flex-col gap-6">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
         <section className="app-card flex flex-col gap-3 p-8">
-          <h2 className="text-xl font-semibold tracking-tight">No implemented type enabled</h2>
+          <h2 className="text-xl font-semibold tracking-tight">
+            No implemented type enabled
+          </h2>
           <p className="text-zinc-600 dark:text-zinc-400">
             Enable at least one flashcard type in Settings to study now.
           </p>
@@ -668,7 +694,11 @@ export function TodaySession({
   }
 
   if (queue.length === 0) {
-    return <p className="text-zinc-600 dark:text-zinc-400">No cards in this session.</p>;
+    return (
+      <p className="text-zinc-600 dark:text-zinc-400">
+        No cards in this session.
+      </p>
+    );
   }
 
   function goToPreviousReviewedCard() {
@@ -697,24 +727,28 @@ export function TodaySession({
       ) : null}
 
       {phase === "done" ? (
-        <div className="flex flex-col gap-4 rounded-xl border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900/50">
-          <h2 className="text-xl font-semibold tracking-tight">Session complete</h2>
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 rounded-xl border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900/50">
+          <h2 className="text-xl font-semibold tracking-tight">
+            Session complete
+          </h2>
           <p className="text-zinc-600 dark:text-zinc-400">
             You are done for now. Come back tomorrow for more.
           </p>
         </div>
       ) : phase === "waiting" ? (
-        <div className="flex flex-col gap-4 rounded-xl border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900/50">
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 rounded-xl border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900/50">
           <SessionProgressBar
             completedCount={completedCount}
             progressPercent={progressPercent}
             progressTotal={progressTotal}
           />
           <h2 className="text-xl font-semibold tracking-tight">Quick pause</h2>
-          <p className="text-zinc-600 dark:text-zinc-400">Next retry in {waitSeconds}s</p>
+          <p className="text-zinc-600 dark:text-zinc-400">
+            Next retry in {waitSeconds}s
+          </p>
         </div>
       ) : current ? (
-        <div className="flex flex-col gap-6">
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
           <SessionProgressBar
             completedCount={completedCount}
             progressPercent={progressPercent}
@@ -848,12 +882,12 @@ function ReviewedFlashcardCard({
     <section className="relative rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="absolute inset-x-6 top-6">{navigation}</div>
       <div className="flex min-h-9 flex-col items-center gap-2 px-12 text-center">
-          <p className="text-sm uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
-            Previous flashcard
-          </p>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            {getCardKindLabel(card.kind)}
-          </p>
+        <p className="text-sm uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
+          Previous flashcard
+        </p>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          {getCardKindLabel(card.kind)}
+        </p>
       </div>
 
       {card.cardType === "cloze" ? (
@@ -883,10 +917,7 @@ function ReviewedFlashcardCard({
       ) : null}
 
       {card.cardType === "sentences" ? (
-        <ReviewedSentenceCard
-          card={card}
-          answer={feedback?.expected}
-        />
+        <ReviewedSentenceCard card={card} answer={feedback?.expected} />
       ) : null}
     </section>
   );
@@ -903,7 +934,9 @@ function ReviewedClozeCard({
     answer ??
     (card.direction === "en_to_es"
       ? card.lemma
-      : splitDefinitionCandidates(card.definition)[0] ?? card.definition ?? "—");
+      : (splitDefinitionCandidates(card.definition)[0] ??
+        card.definition ??
+        "—"));
 
   return (
     <div className="mt-5 flex flex-col gap-5">
@@ -912,7 +945,9 @@ function ReviewedClozeCard({
           {card.direction === "en_to_es" ? "Meaning" : "Word"}
         </p>
         <p className="mt-2 text-zinc-800 dark:text-zinc-100">
-          {card.direction === "en_to_es" ? (card.definition ?? "—") : card.lemma}
+          {card.direction === "en_to_es"
+            ? (card.definition ?? "—")
+            : card.lemma}
         </p>
         {card.hint ? (
           <p className="mt-1 text-sm text-zinc-500">({card.hint})</p>
@@ -939,9 +974,11 @@ function ReviewedNormalCard({
   grade?: Grade;
 }) {
   const promptLabel = card.direction === "en_to_es" ? "Meaning" : "Word";
-  const promptValue = card.direction === "en_to_es" ? (card.definition ?? "—") : card.lemma;
+  const promptValue =
+    card.direction === "en_to_es" ? (card.definition ?? "—") : card.lemma;
   const answerLabel = card.direction === "en_to_es" ? "Word" : "Meaning";
-  const answerValue = card.direction === "en_to_es" ? card.lemma : (card.definition ?? "—");
+  const answerValue =
+    card.direction === "en_to_es" ? card.lemma : (card.definition ?? "—");
 
   return (
     <div className="mt-5 flex flex-col gap-5">
@@ -1066,7 +1103,9 @@ function ReviewedSentenceCard({
           {card.sentenceData.sentence}
         </p>
         {card.sentenceData.translation ? (
-          <p className="mt-2 text-sm text-zinc-500">{card.sentenceData.translation}</p>
+          <p className="mt-2 text-sm text-zinc-500">
+            {card.sentenceData.translation}
+          </p>
         ) : null}
         {card.hint ? (
           <p className="mt-2 text-sm text-zinc-500">({card.hint})</p>
@@ -1151,7 +1190,11 @@ function getCardKindLabel(kind: UnifiedQueueCard["kind"]) {
   return kind === "review" ? "Review" : "New";
 }
 
-function ComingSoonNotice({ enabledTypes }: { enabledTypes: EnabledFlashcardMode[] }) {
+function ComingSoonNotice({
+  enabledTypes,
+}: {
+  enabledTypes: EnabledFlashcardMode[];
+}) {
   return (
     <section className="app-card-muted p-4 text-sm text-zinc-600 dark:text-zinc-300">
       Enabled but not implemented yet:{" "}

@@ -3,6 +3,7 @@ import { getTodayFlashcards } from "@/app/actions/srs";
 import { TodaySession } from "@/components/srs/TodaySession";
 
 export default async function TodayPage() {
+  const todayShellClassName = "app-shell";
   const result = await getTodayFlashcards("es");
   const session = result.ok
     ? result.session
@@ -21,7 +22,7 @@ export default async function TodayPage() {
 
   if (session.configMissing) {
     return (
-      <main className="app-shell">
+      <main className={todayShellClassName}>
         <section className="app-hero">
           <h1 className="app-title">Vocabulary</h1>
         </section>
@@ -63,7 +64,7 @@ export default async function TodayPage() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={todayShellClassName}>
       <section className="app-hero">
         <h1 className="app-title">Vocabulary</h1>
       </section>

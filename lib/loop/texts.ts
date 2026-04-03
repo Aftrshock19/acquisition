@@ -1,25 +1,39 @@
-export type LoopText = {
-  id: string;
-  title: string;
-  source?: string;
-  content: string;
-};
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { ReaderText } from "@/lib/reader/types";
 
-const TEXTS: LoopText[] = [
-  {
-    id: "welcome",
-    title: "Welcome",
-    source: "Local stub",
-    content:
-      "Welcome to Acquisition. Replace this sample text with your own corpus.",
-  },
-];
+type SupabaseServerClient = NonNullable<
+  Awaited<ReturnType<typeof createSupabaseServerClient>>
+>;
 
-export function listTexts(): LoopText[] {
-  return TEXTS;
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export async function getTextById(
+  supabase: SupabaseServerClient,
+  id: string,
+): Promise<ReaderText | null> {
+  if (!UUID_RE.test(id)) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("texts")
+    .select("id, lang, title, content")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  return {
+    id: data.id,
+    lang: data.lang,
+    title: data.title,
+    content: data.content,
+  };
 }
-
-export function getTextById(id: string): LoopText | undefined {
-  return TEXTS.find((t) => t.id === id);
-}
-
