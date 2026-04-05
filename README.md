@@ -2,7 +2,7 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-Copy `.env.example` to `.env.local` and set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Apply the Supabase migrations in order (e.g. `supabase db push` or run the SQL files in `supabase/migrations/`). Seed vocabulary with `npm run seed` (uses `data/spanish-frequency.json`; replace or expand that file with a full 1–5000 rank Spanish frequency list if desired).
+Copy `.env.example` to `.env.local` and set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Apply the Supabase migrations in order with the Supabase CLI. Seed vocabulary from `supabase/seed/spa.csv` with `npm run seed` after the project is linked and the migration has been pushed.
 
 ### Database overview
 
@@ -16,7 +16,28 @@ The Supabase database is organized into shared content tables and user-specific 
 
 ### Seeding words
 
-The `words` table uses columns including `lang`, `rank`, `lemma`, `definition`, optional `surface`, `pos`, `freq`, and `extra` (JSONB). The seed script reads `data/spanish-frequency.json` (array of `{ rank, word, meaning? }`) and upserts with `lang: "es"`, `lemma: word`, `rank`, and definition data. Conflict is on `(lang, rank)`. For CSV or other sources, map to these columns and upsert with the same conflict key.
+The canonical vocabulary source is `supabase/seed/spa.csv`. The import flow is:
+
+```bash
+python3 scripts/generate_words_import_sql.py supabase/seed/spa.csv supabase/.temp/import_words.sql
+/usr/local/bin/supabase db query --linked -f supabase/.temp/import_words.sql
+```
+
+The final `public.words` schema is:
+
+- `id uuid primary key default gen_random_uuid()`
+- `rank integer not null unique`
+- `lemma text not null`
+- `original_lemma text not null`
+- `translation text`
+- `definition_es text`
+- `definition_en text`
+- `pos text not null`
+- `example_sentence text`
+- `example_sentence_en text`
+- `created_at timestamptz not null default now()`
+
+The import uses `public.words_import_raw` as a staging table, maps the CSV headers into the canonical columns, normalizes `pos`, and upserts on `rank` so reruns are idempotent.
 
 ### Generating TypeScript types from Supabase
 

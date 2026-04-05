@@ -32,18 +32,18 @@ export async function lookupReaderWordAction({
   }
 
   try {
-    const exactEntry = await findWordByLemma(supabase, lang, lookup);
+    const exactEntry = await findWordByLemma(supabase, lookup);
     if (exactEntry) {
       return { ok: true, entry: exactEntry };
     }
 
-    const lemma = await findLemmaByWordForm(supabase, lang, lookup);
-    if (!lemma) {
-      return { ok: true, entry: null };
+    const formEntry = await findWordByForm(supabase, lang, lookup);
+    if (formEntry) {
+      return { ok: true, entry: formEntry };
     }
 
-    const fallbackEntry = await findWordByLemma(supabase, lang, lemma);
-    return { ok: true, entry: fallbackEntry };
+    const originalLemmaEntry = await findWordByOriginalLemma(supabase, lookup);
+    return { ok: true, entry: originalLemmaEntry };
   } catch (error) {
     return {
       ok: false,
@@ -123,14 +123,53 @@ export async function saveReaderWordAction({
 
 async function findWordByLemma(
   supabase: SupabaseServerClient,
-  lang: string,
   lemma: string,
 ): Promise<ReaderLookupEntry | null> {
   const { data, error } = await supabase
     .from("words")
-    .select("id, lemma, definition, pos")
-    .eq("lang", lang)
+    .select("id, lemma, translation, definition_en, definition_es, pos")
     .eq("lemma", lemma)
+    .order("rank", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return toReaderLookupEntry(data);
+}
+
+async function findWordByOriginalLemma(
+  supabase: SupabaseServerClient,
+  originalLemma: string,
+): Promise<ReaderLookupEntry | null> {
+  const { data, error } = await supabase
+    .from("words")
+    .select("id, lemma, translation, definition_en, definition_es, pos")
+    .eq("original_lemma", originalLemma)
+    .order("rank", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return toReaderLookupEntry(data);
+}
+
+async function findWordByForm(
+  supabase: SupabaseServerClient,
+  lang: string,
+  form: string,
+): Promise<ReaderLookupEntry | null> {
+  const { data, error } = await supabase
+    .from("word_forms")
+    .select("word_id, lemma")
+    .eq("lang", lang)
+    .eq("form", form)
+    .limit(1)
     .maybeSingle();
 
   if (error) {
@@ -141,32 +180,24 @@ async function findWordByLemma(
     return null;
   }
 
-  return {
-    id: data.id,
-    lemma: data.lemma,
-    definition: data.definition ?? null,
-    pos: data.pos ?? null,
-  };
-}
+  if (data.word_id) {
+    const { data: word, error: wordError } = await supabase
+      .from("words")
+      .select("id, lemma, translation, definition_en, definition_es, pos")
+      .eq("id", data.word_id)
+      .maybeSingle();
 
-async function findLemmaByWordForm(
-  supabase: SupabaseServerClient,
-  lang: string,
-  form: string,
-): Promise<string | null> {
-  const { data, error } = await supabase
-    .from("word_forms")
-    .select("lemma")
-    .eq("lang", lang)
-    .eq("form", form)
-    .limit(1)
-    .maybeSingle();
+    if (wordError) {
+      throw new Error(wordError.message);
+    }
 
-  if (error) {
-    throw new Error(error.message);
+    const byIdEntry = toReaderLookupEntry(word);
+    if (byIdEntry) {
+      return byIdEntry;
+    }
   }
 
-  return data?.lemma ?? null;
+  return findWordByLemma(supabase, data.lemma);
 }
 
 async function getManualSavedDeckId(
@@ -185,4 +216,29 @@ async function getManualSavedDeckId(
   }
 
   return data?.id ?? null;
+}
+
+function toReaderLookupEntry(
+  data:
+    | {
+        id: string;
+        lemma: string;
+        translation?: string | null;
+        definition_en?: string | null;
+        definition_es?: string | null;
+        pos?: string | null;
+      }
+    | null
+    | undefined,
+): ReaderLookupEntry | null {
+  if (!data) {
+    return null;
+  }
+
+  return {
+    id: data.id,
+    lemma: data.lemma,
+    definition: data.translation ?? data.definition_en ?? data.definition_es ?? null,
+    pos: data.pos ?? null,
+  };
 }

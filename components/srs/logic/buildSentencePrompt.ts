@@ -3,10 +3,14 @@ import frequencySeed from "@/data/spanish-frequency.json";
 type CandidateWord = {
   id: string;
   lemma: string;
+  translation: string | null;
   definition: string | null;
+  definitionEs?: string | null;
+  definitionEn?: string | null;
+  exampleSentence?: string | null;
+  exampleSentenceEn?: string | null;
   hint?: string | null;
   rank?: number;
-  extra?: Record<string, unknown> | null;
 };
 
 type SentencePromptData = {
@@ -83,55 +87,11 @@ function buildSentenceOptions(target: CandidateWord, pool: CandidateWord[]) {
 }
 
 function extractSentence(target: CandidateWord) {
-  const extra = target.extra;
-  if (!extra || typeof extra !== "object") return null;
-
-  const directSentence = firstString([
-    extra.example_sentence,
-    extra.exampleSentence,
-    extra.sentence,
-    extra.context_sentence,
-    extra.example,
-  ]);
-
-  if (directSentence) {
-    return {
-      sentence: directSentence,
-      translation: firstString([
-        extra.example_translation,
-        extra.exampleTranslation,
-        extra.translation,
-      ]),
-    };
-  }
-
-  const sentencesValue = extra.sentences;
-  if (Array.isArray(sentencesValue) && sentencesValue.length > 0) {
-    const first = sentencesValue[0];
-    if (typeof first === "string") {
-      return { sentence: first, translation: null };
-    }
-    if (first && typeof first === "object") {
-      const sentence = firstString([
-        (first as Record<string, unknown>).sentence,
-        (first as Record<string, unknown>).text,
-        (first as Record<string, unknown>).es,
-        (first as Record<string, unknown>).spanish,
-      ]);
-      if (sentence) {
-        return {
-          sentence,
-          translation: firstString([
-            (first as Record<string, unknown>).translation,
-            (first as Record<string, unknown>).en,
-            (first as Record<string, unknown>).english,
-          ]),
-        };
-      }
-    }
-  }
-
-  return null;
+  if (!target.exampleSentence) return null;
+  return {
+    sentence: target.exampleSentence,
+    translation: target.exampleSentenceEn ?? null,
+  };
 }
 
 function buildFallbackSentence(target: CandidateWord) {
@@ -152,15 +112,6 @@ function maskLemma(sentence: string, lemma: string) {
     return sentence.replace(regex, "_____");
   }
   return `${sentence} (_____)`;
-}
-
-function firstString(values: unknown[]) {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-  return null;
 }
 
 function uniqueStrings(values: string[]) {

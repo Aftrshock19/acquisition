@@ -128,11 +128,15 @@ export async function getDailyQueue(
       language: lang,
       lemma: r.lemma,
       rank: r.rank,
+      translation: r.translation ?? null,
       definition: r.definition ?? null,
+      definitionEs: r.definition_es ?? null,
+      definitionEn: r.definition_en ?? null,
+      exampleSentence: r.example_sentence ?? null,
+      exampleSentenceEn: r.example_sentence_en ?? null,
       user_id: user.id,
       status: "learning",
       pos: r.pos ?? null,
-      extra: r.extra ?? null,
     }));
   let filteredDueReviews = dueReviews;
 
@@ -161,9 +165,13 @@ export async function getDailyQueue(
       language: lang,
       lemma: r.lemma,
       rank: r.rank,
+      translation: r.translation ?? null,
       definition: r.definition ?? null,
+      definitionEs: r.definition_es ?? null,
+      definitionEn: r.definition_en ?? null,
+      exampleSentence: r.example_sentence ?? null,
+      exampleSentenceEn: r.example_sentence_en ?? null,
       pos: r.pos ?? null,
-      extra: r.extra ?? null,
     }));
 
   return {

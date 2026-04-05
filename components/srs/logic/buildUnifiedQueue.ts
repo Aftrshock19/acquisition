@@ -42,10 +42,14 @@ export type UnifiedQueueSourceCard = {
   id: string;
   kind: "review" | "new";
   lemma: string;
+  translation?: string | null;
   definition: string | null;
+  definitionEs?: string | null;
+  definitionEn?: string | null;
+  exampleSentence?: string | null;
+  exampleSentenceEn?: string | null;
   rank?: number;
   hint?: string | null;
-  extra?: Record<string, unknown> | null;
 };
 
 export type UnifiedQueueCard =
@@ -128,19 +132,27 @@ export function buildUnifiedQueue(
       id: card.word_id,
       kind: "review" as const,
       lemma: card.lemma,
+      translation: card.translation ?? null,
       definition: card.definition ?? null,
+      definitionEs: card.definitionEs ?? null,
+      definitionEn: card.definitionEn ?? null,
+      exampleSentence: card.exampleSentence ?? null,
+      exampleSentenceEn: card.exampleSentenceEn ?? null,
       rank: card.rank,
       hint: card.pos ?? null,
-      extra: card.extra,
     })),
     ...session.newWords.map((card) => ({
       id: card.id,
       kind: "new" as const,
       lemma: card.lemma,
+      translation: card.translation ?? null,
       definition: card.definition ?? null,
+      definitionEs: card.definitionEs ?? null,
+      definitionEn: card.definitionEn ?? null,
+      exampleSentence: card.exampleSentence ?? null,
+      exampleSentenceEn: card.exampleSentenceEn ?? null,
       rank: card.rank,
       hint: card.pos ?? null,
-      extra: card.extra,
     })),
   ];
 
@@ -198,7 +210,7 @@ export function buildUnifiedQueue(
         prompt: "What does this audio mean?",
         options: mcq.options,
         correctOption: mcq.correctOption,
-        audioUrl: getAudioUrl(card.extra),
+        audioUrl: null,
         audioText: getAudioText(card),
       };
     }
@@ -240,45 +252,8 @@ function isImplementedCardMode(type: EnabledFlashcardMode): type is ImplementedC
   return IMPLEMENTED_CARD_MODES.includes(type as ImplementedCardMode);
 }
 
-function getAudioUrl(extra?: Record<string, unknown> | null) {
-  if (!extra) return null;
-  const direct = firstString([
-    extra.audio_url,
-    extra.audioUrl,
-    extra.pronunciation_url,
-    extra.pronunciationUrl,
-  ]);
-  if (direct) return direct;
-
-  const audioValue = extra.audio;
-  if (audioValue && typeof audioValue === "object") {
-    return firstString([
-      (audioValue as Record<string, unknown>).url,
-      (audioValue as Record<string, unknown>).src,
-    ]);
-  }
-
-  return null;
-}
-
 function getAudioText(card: UnifiedQueueSourceCard) {
-  return (
-    firstString([
-      card.extra?.audio_text,
-      card.extra?.audioText,
-      card.extra?.transcript,
-      card.extra?.surface,
-    ]) ?? card.lemma
-  );
-}
-
-function firstString(values: unknown[]) {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-  return null;
+  return card.exampleSentence ?? card.lemma;
 }
 
 function debugQueueBuild(

@@ -8,7 +8,12 @@ export type Word = {
   language: string;
   lemma: string;
   rank: number;
+  translation?: string | null;
   definition: string | null;
+  definitionEs?: string | null;
+  definitionEn?: string | null;
+  exampleSentence?: string | null;
+  exampleSentenceEn?: string | null;
   pos?: string | null;
   extra?: Record<string, unknown> | null;
 };
@@ -45,9 +50,12 @@ export type QueueItem = {
   lemma: string;
   rank: number;
   kind: "review" | "new";
-  surface: string | null;
   pos: string | null;
-  extra: Record<string, unknown> | null;
+  translation: string | null;
+  definition_es: string | null;
+  definition_en: string | null;
+  example_sentence: string | null;
+  example_sentence_en: string | null;
   definition: string | null;
 };
 
@@ -55,9 +63,7 @@ export type DueReviewItem = Word & {
   word_id: string;
   user_id: string;
   status: string;
-  definition: string | null;
   pos?: string | null;
-  extra?: Record<string, unknown> | null;
 };
 
 export type TodaySession = {

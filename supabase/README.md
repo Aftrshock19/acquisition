@@ -1,25 +1,21 @@
-# Supabase migrations
+# Supabase workflow
 
-Apply these in order so the Today page, SRS, and database schema match the current project model:
+Use the Supabase CLI from the project root:
 
-1. **First run (tables + RPCs)**  
-   In [Supabase Dashboard](https://supabase.com/dashboard) → **SQL Editor**, run the full contents of:
-   - `migrations/20260226120000_srs.sql`
+1. Initialize the repo once if needed:
+   - `/usr/local/bin/supabase init`
 
-2. **Cloze API (updated RPCs)**  
-   Then run the full contents of:
-   - `migrations/20260226140000_srs_cloze_api.sql`  
-   This updates `get_daily_queue` (adds `definition`) and `record_review` (drops `p_correct`), and notifies the API to reload the schema.
+2. Link to the hosted project:
+   - `/usr/local/bin/supabase link --project-ref xjlowdivepjtukzzehki --password "$SUPABASE_DB_PASSWORD"`
 
-3. **Database context alignment**
-   Then run the full contents of:
-   - `migrations/20260316141903_user_settings.sql`
-   - `migrations/20260325120000_align_database_context.sql`
-   This adds the missing shared-content tables (`word_forms`, `texts`, `audio`), adds `daily_sessions`, aligns `words`/`user_words`/`review_events` with the current database summary, and updates `get_daily_queue` to read from `words.definition`.
+3. Apply migrations:
+   - `/usr/local/bin/supabase db push --linked`
 
-4. **If you still see “Could not find the function … in the schema cache”**  
-   - In the SQL Editor, run: `NOTIFY pgrst, 'reload schema';`  
-   - Or in Dashboard: **Project Settings** → **API** → find the option to reload the schema cache.
+4. Seed canonical words from `supabase/seed/spa.csv`:
+   - `python3 scripts/generate_words_import_sql.py supabase/seed/spa.csv supabase/.temp/import_words.sql`
+   - `/usr/local/bin/supabase db query --linked -f supabase/.temp/import_words.sql`
 
-5. **Seed words**  
-   From the project root: `npm run seed` (uses `data/spanish-frequency.json` and needs `words` with `lang`, `rank`, `lemma`, and preferably `definition` / `extra`).
+5. If the API schema cache is stale:
+   - `/usr/local/bin/supabase db query --linked "NOTIFY pgrst, 'reload schema';"`
+
+The canonical table is `public.words`. `public.stg_words_spa` is legacy and should not exist after the replacement migration.

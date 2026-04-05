@@ -264,9 +264,8 @@ async function getSpanishEntryCounts(
 ): Promise<CountResult> {
   const learnedResult = await supabase
     .from("user_words")
-    .select("word_id, words!inner(lang)", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .eq("words.lang", "es");
+    .select("word_id", { count: "exact", head: true })
+    .eq("user_id", userId);
 
   return {
     learned: learnedResult.count ?? 0,
@@ -282,9 +281,8 @@ async function getLemmaProgressCounts(
 ): Promise<CountResult> {
   const learnedLemmaResult = await supabase
     .from("user_words")
-    .select("words!inner(lemma, lang)")
-    .eq("user_id", userId)
-    .eq("words.lang", "es");
+    .select("words!inner(lemma)")
+    .eq("user_id", userId);
 
   if (learnedLemmaResult.error) {
     return {
@@ -305,10 +303,9 @@ async function getVerbLemmaCounts(
 ): Promise<CountResult> {
   const learnedVerbResult = await supabase
     .from("user_words")
-    .select("words!inner(lemma, lang, pos)")
+    .select("words!inner(lemma, pos)")
     .eq("user_id", userId)
-    .eq("words.lang", "es")
-    .eq("words.pos", "v");
+    .eq("words.pos", "verb");
 
   if (learnedVerbResult.error) {
     return {
