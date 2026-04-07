@@ -9,6 +9,7 @@ type CandidateWord = {
   definitionEn?: string | null;
   exampleSentence?: string | null;
   exampleSentenceEn?: string | null;
+  pos?: string | null;
   hint?: string | null;
   rank?: number;
 };
@@ -53,7 +54,7 @@ function buildSentenceOptions(target: CandidateWord, pool: CandidateWord[]) {
     .filter((candidate) => candidate.id !== target.id && candidate.lemma !== target.lemma)
     .map((candidate) => ({
       lemma: candidate.lemma,
-      samePos: candidate.hint && target.hint ? candidate.hint === target.hint : false,
+      samePos: candidate.pos && target.pos ? candidate.pos === target.pos : false,
       rankDistance:
         typeof candidate.rank === "number" && typeof target.rank === "number"
           ? Math.abs(candidate.rank - target.rank)
@@ -96,10 +97,10 @@ function extractSentence(target: CandidateWord) {
 
 function buildFallbackSentence(target: CandidateWord) {
   const blank = "_____";
-  if (target.hint?.includes("verb")) {
+  if (target.pos === "verb") {
     return `Cada dia necesito ${blank} para terminar esto.`;
   }
-  if (target.hint?.includes("adj")) {
+  if (target.pos === "adj") {
     return `La idea parece ${blank} en este contexto.`;
   }
   return `Hoy veo ${blank} en esta situacion.`;

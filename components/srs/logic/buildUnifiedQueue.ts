@@ -1,6 +1,7 @@
 import { buildMcqOptions } from "@/components/srs/logic/buildMcqOptions";
 import { buildSentencePrompt } from "@/components/srs/logic/buildSentencePrompt";
 import type { EnabledFlashcardMode } from "@/lib/settings/types";
+import { formatPartOfSpeech } from "@/lib/srs/partOfSpeech";
 import type {
   ClozeDirection,
   TodaySession,
@@ -49,6 +50,7 @@ export type UnifiedQueueSourceCard = {
   exampleSentence?: string | null;
   exampleSentenceEn?: string | null;
   rank?: number;
+  pos?: string | null;
   hint?: string | null;
 };
 
@@ -139,7 +141,8 @@ export function buildUnifiedQueue(
       exampleSentence: card.exampleSentence ?? null,
       exampleSentenceEn: card.exampleSentenceEn ?? null,
       rank: card.rank,
-      hint: card.pos ?? null,
+      pos: card.pos ?? null,
+      hint: formatPartOfSpeech(card.pos),
     })),
     ...session.newWords.map((card) => ({
       id: card.id,
@@ -152,7 +155,8 @@ export function buildUnifiedQueue(
       exampleSentence: card.exampleSentence ?? null,
       exampleSentenceEn: card.exampleSentenceEn ?? null,
       rank: card.rank,
-      hint: card.pos ?? null,
+      pos: card.pos ?? null,
+      hint: formatPartOfSpeech(card.pos),
     })),
   ];
 

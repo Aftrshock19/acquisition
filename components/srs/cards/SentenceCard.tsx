@@ -4,8 +4,8 @@ import type { ReactNode, RefObject } from "react";
 import {
   FlashcardContainer,
   FlashcardSuccessActions,
-  getFlashcardFieldToneClasses,
 } from "@/components/srs/cards/FlashcardContainer";
+import { CorrectionHintInput } from "@/components/srs/cards/CorrectionHintInput";
 import type { UnifiedQueueCard } from "@/components/srs/logic/buildUnifiedQueue";
 
 type SentenceCardProps = {
@@ -20,6 +20,8 @@ type SentenceCardProps = {
       }
     | null;
   correctionValue: string;
+  correctionPlaceholder?: string;
+  correctionPlaceholderVisible?: boolean;
   correctionInputRef?: RefObject<HTMLInputElement | null>;
   onSelect: (option: string) => void;
   onCorrectionChange: (value: string) => void;
@@ -35,6 +37,8 @@ export function SentenceCard({
   showPosHint = true,
   feedback,
   correctionValue,
+  correctionPlaceholder,
+  correctionPlaceholderVisible = false,
   correctionInputRef,
   onSelect,
   onCorrectionChange,
@@ -69,22 +73,17 @@ export function SentenceCard({
         ) : null}
 
         {needsCorrection || showingSuccess ? (
-          <div className="mt-4">
-            <input
-              ref={correctionInputRef}
-              type="text"
-              value={correctionValue}
-              onChange={(event) => onCorrectionChange(event.target.value)}
-              placeholder={feedback?.expected}
-              aria-invalid={needsCorrection}
-              autoComplete="off"
-              readOnly={showingSuccess}
-              disabled={busy}
-              className={`w-full rounded-lg px-3 py-2 text-zinc-900 focus:outline-none focus:ring-1 disabled:opacity-50 dark:text-zinc-100 ${
-                getFlashcardFieldToneClasses(showingSuccess ? "success" : "error")
-              }`}
-            />
-          </div>
+          <CorrectionHintInput
+            value={correctionValue}
+            onChange={onCorrectionChange}
+            correctionHint={correctionPlaceholder}
+            correctionHintVisible={correctionPlaceholderVisible}
+            tone={showingSuccess ? "success" : "error"}
+            inputRef={correctionInputRef}
+            readOnly={showingSuccess}
+            disabled={busy}
+            wrapperClassName="mt-4"
+          />
         ) : null}
 
       </FlashcardContainer>

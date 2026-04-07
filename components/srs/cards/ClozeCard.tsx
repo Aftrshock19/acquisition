@@ -4,8 +4,8 @@ import type { ReactNode, RefObject } from "react";
 import {
   FlashcardContainer,
   FlashcardSuccessActions,
-  getFlashcardFieldToneClasses,
 } from "@/components/srs/cards/FlashcardContainer";
+import { CorrectionHintInput } from "@/components/srs/cards/CorrectionHintInput";
 import type { UnifiedQueueCard } from "@/components/srs/logic/buildUnifiedQueue";
 
 type ClozeCardProps = {
@@ -20,6 +20,8 @@ type ClozeCardProps = {
         expected: string;
       }
     | null;
+  correctionPlaceholder?: string;
+  correctionPlaceholderVisible?: boolean;
   inputRef?: RefObject<HTMLInputElement | null>;
   onChange: (value: string) => void;
   onCheck: () => void;
@@ -34,6 +36,8 @@ export function ClozeCard({
   submitError,
   showPosHint = true,
   feedback,
+  correctionPlaceholder,
+  correctionPlaceholderVisible = false,
   inputRef,
   onChange,
   onCheck,
@@ -42,6 +46,7 @@ export function ClozeCard({
 }: ClozeCardProps) {
   const needsCorrection = feedback?.correct === false;
   const showingSuccess = feedback?.correct === true;
+  const showAcceptedAnswers = showingSuccess && feedback.expected.includes(" or ");
   const translationLabel =
     card.direction === "en_to_es"
       ? "Write Spanish translation"
@@ -66,28 +71,29 @@ export function ClozeCard({
           </p>
         ) : null}
 
-        <input
-          ref={inputRef}
-          type="text"
+        <CorrectionHintInput
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={
-            needsCorrection
-              ? feedback.expected
-              : card.direction === "en_to_es"
-                ? "Write Spanish translation..."
-                : "Write English translation..."
-          }
-          aria-invalid={needsCorrection}
+          onChange={onChange}
+          placeholder={translationLabel + "..."}
+          correctionHint={correctionPlaceholder}
+          correctionHintVisible={correctionPlaceholderVisible}
+          tone={showingSuccess ? "success" : needsCorrection ? "error" : "default"}
+          inputRef={inputRef}
           readOnly={showingSuccess}
-          className={`mt-4 w-full rounded-lg px-3 py-2 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-1 disabled:opacity-50 dark:text-zinc-100 ${
-            getFlashcardFieldToneClasses(
-              showingSuccess ? "success" : needsCorrection ? "error" : "default",
-            )
-          }`}
-          autoComplete="off"
           disabled={busy}
+          wrapperClassName="mt-4"
         />
+
+        {showAcceptedAnswers ? (
+          <div className="mt-4 rounded-lg border border-green-300 bg-green-50 p-4 dark:border-green-800 dark:bg-green-950/40">
+            <p className="text-xs uppercase tracking-[0.14em] text-green-700 dark:text-green-300">
+              Correct answers
+            </p>
+            <p className="mt-2 text-green-900 dark:text-green-100">
+              {feedback.expected}
+            </p>
+          </div>
+        ) : null}
       </FlashcardContainer>
 
       {showingSuccess ? (

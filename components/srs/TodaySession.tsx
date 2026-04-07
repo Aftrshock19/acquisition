@@ -24,6 +24,11 @@ import {
   TYPE_LABELS,
   type UnifiedQueueCard,
 } from "@/components/srs/logic/buildUnifiedQueue";
+import {
+  formatDefinitionCandidates,
+  isCorrectClozeAnswer,
+  splitDefinitionCandidates,
+} from "@/lib/srs/cloze";
 import type { EnabledFlashcardMode } from "@/lib/settings/types";
 import type {
   DailySessionRow,
@@ -44,6 +49,7 @@ type Props = {
 type RetryEntry = { card: UnifiedQueueCard; dueAt: number };
 type SessionPhase = "prompt" | "feedback" | "correction" | "waiting" | "done";
 const TEXT_SUCCESS_DELAY_MS = 1200;
+const CORRECTION_PLACEHOLDER_DELAY_MS = 1900;
 type ReviewedCardSnapshot = {
   card: UnifiedQueueCard;
   source: "main" | "retry";
@@ -55,26 +61,36 @@ type ReviewedCardSnapshot = {
   grade?: Grade;
 };
 
-function stripDiacritics(value: string) {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-}
-
 function normalize(value: string) {
-  return stripDiacritics(
-    value
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, " ")
-      .replace(/[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~¿¡]/g, ""),
-  );
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~¿¡]/g, "");
 }
 
-function isCorrectClozeAnswer(userAnswer: string, expected: string[]) {
-  const normalizedAnswer = normalize(userAnswer);
-  if (!normalizedAnswer) return false;
-  return expected.some(
-    (candidate) => normalize(candidate) === normalizedAnswer,
-  );
+function getClozeExpectedLabel(
+  card: Extract<UnifiedQueueCard, { cardType: "cloze" }>,
+  expected: string[],
+) {
+  if (card.direction === "en_to_es") {
+    return expected[0] ?? card.lemma;
+  }
+
+  if (expected.length > 1) {
+    return formatDefinitionCandidates(expected);
+  }
+
+  return expected[0] ?? card.definition ?? "—";
+}
+
+function allowContainedClozeCandidateMatch(
+  card: Extract<UnifiedQueueCard, { cardType: "cloze" }>,
+  expected: string[],
+) {
+  return card.direction === "es_to_en" && expected.length > 1;
 }
 
 function getClozeExpected(
@@ -85,17 +101,6 @@ function getClozeExpected(
   }
 
   return splitDefinitionCandidates(card.definition);
-}
-
-function splitDefinitionCandidates(definition: string | null) {
-  if (!definition) return [];
-
-  const parts = definition
-    .split(/[;,/|]/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  return parts.length > 0 ? parts : [definition];
 }
 
 function upsertRetrySorted(list: RetryEntry[], entry: RetryEntry) {
@@ -146,12 +151,16 @@ export function TodaySession({
     correct: boolean;
     expected: string;
   } | null>(null);
+  const [showCorrectionPlaceholder, setShowCorrectionPlaceholder] =
+    useState(false);
   const [waitSeconds, setWaitSeconds] = useState(0);
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const startedAtRef = useRef<number>(Date.now());
   const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const correctionPlaceholderTimeoutRef =
+    useRef<ReturnType<typeof setTimeout> | null>(null);
   const clozeInputRef = useRef<HTMLInputElement>(null);
   const sentenceCorrectionInputRef = useRef<HTMLInputElement>(null);
 
@@ -169,6 +178,7 @@ export function TodaySession({
     setNormalRevealed(false);
     setNormalSubmittedGrade(null);
     setFeedback(null);
+    setShowCorrectionPlaceholder(false);
     setWaitSeconds(0);
     setBusy(false);
     setSubmitError(null);
@@ -177,12 +187,19 @@ export function TodaySession({
       clearTimeout(successTimeoutRef.current);
       successTimeoutRef.current = null;
     }
+    if (correctionPlaceholderTimeoutRef.current) {
+      clearTimeout(correctionPlaceholderTimeoutRef.current);
+      correctionPlaceholderTimeoutRef.current = null;
+    }
   }, [queue]);
 
   useEffect(() => {
     return () => {
       if (successTimeoutRef.current) {
         clearTimeout(successTimeoutRef.current);
+      }
+      if (correctionPlaceholderTimeoutRef.current) {
+        clearTimeout(correctionPlaceholderTimeoutRef.current);
       }
     };
   }, []);
@@ -196,6 +213,7 @@ export function TodaySession({
     setNormalRevealed(false);
     setNormalSubmittedGrade(null);
     setFeedback(null);
+    setShowCorrectionPlaceholder(false);
     setPhase("prompt");
     startedAtRef.current = Date.now();
   }, [current]);
@@ -294,6 +312,38 @@ export function TodaySession({
       clearTimeout(successTimeoutRef.current);
       successTimeoutRef.current = null;
     }
+  }
+
+  function clearCorrectionPlaceholderTimeout() {
+    if (correctionPlaceholderTimeoutRef.current) {
+      clearTimeout(correctionPlaceholderTimeoutRef.current);
+      correctionPlaceholderTimeoutRef.current = null;
+    }
+  }
+
+  function revealCorrectionPlaceholder() {
+    clearCorrectionPlaceholderTimeout();
+    setShowCorrectionPlaceholder(true);
+    correctionPlaceholderTimeoutRef.current = setTimeout(() => {
+      correctionPlaceholderTimeoutRef.current = null;
+      setShowCorrectionPlaceholder(false);
+    }, CORRECTION_PLACEHOLDER_DELAY_MS);
+  }
+
+  function handleClozeInputChange(value: string) {
+    if (showCorrectionPlaceholder && value.length > 0) {
+      clearCorrectionPlaceholderTimeout();
+      setShowCorrectionPlaceholder(false);
+    }
+    setClozeInput(value);
+  }
+
+  function handleSentenceCorrectionChange(value: string) {
+    if (showCorrectionPlaceholder && value.length > 0) {
+      clearCorrectionPlaceholderTimeout();
+      setShowCorrectionPlaceholder(false);
+    }
+    setSentenceCorrectionInput(value);
   }
 
   function appendReviewedCard(snapshot: ReviewedCardSnapshot) {
@@ -458,6 +508,7 @@ export function TodaySession({
       });
 
       if (card.cardType === "cloze" || card.cardType === "sentences") {
+        revealCorrectionPlaceholder();
         setPhase("correction");
         return;
       }
@@ -481,12 +532,12 @@ export function TodaySession({
     if (!userAnswer) return;
 
     const expected = getClozeExpected(current);
-    const correct = isCorrectClozeAnswer(userAnswer, expected);
-    const feedbackExpected =
-      expected[0] ??
-      (current.direction === "en_to_es"
-        ? current.lemma
-        : (current.definition ?? "—"));
+    const correct = isCorrectClozeAnswer(
+      userAnswer,
+      expected,
+      allowContainedClozeCandidateMatch(current, expected),
+    );
+    const feedbackExpected = getClozeExpectedLabel(current, expected);
 
     if (phase === "correction") {
       if (correct) {
@@ -506,6 +557,7 @@ export function TodaySession({
         correct: false,
         expected: feedbackExpected,
       });
+      revealCorrectionPlaceholder();
       return;
     }
 
@@ -594,6 +646,7 @@ export function TodaySession({
       correct: false,
       expected: current.correctOption,
     });
+    revealCorrectionPlaceholder();
   }
 
   async function handleNormalGrade(grade: Grade) {
@@ -793,8 +846,12 @@ export function TodaySession({
               submitError={submitError}
               showPosHint={showPosHint}
               feedback={feedback}
+              correctionPlaceholder={
+                feedback?.expected
+              }
+              correctionPlaceholderVisible={showCorrectionPlaceholder}
               inputRef={clozeInputRef}
-              onChange={setClozeInput}
+              onChange={handleClozeInputChange}
               onCheck={() => {
                 void handleClozeCheck();
               }}
@@ -839,11 +896,15 @@ export function TodaySession({
               showPosHint={showPosHint}
               feedback={feedback}
               correctionValue={sentenceCorrectionInput}
+              correctionPlaceholder={
+                feedback?.expected
+              }
+              correctionPlaceholderVisible={showCorrectionPlaceholder}
               correctionInputRef={sentenceCorrectionInputRef}
               onSelect={(option) => {
                 void handleSentenceSelect(option);
               }}
-              onCorrectionChange={setSentenceCorrectionInput}
+              onCorrectionChange={handleSentenceCorrectionChange}
               onCorrectionSubmit={handleSentenceCorrectionSubmit}
               onNext={() => advanceFromCurrentCard(retryList)}
               navigation={flashcardNavigation}
