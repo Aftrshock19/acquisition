@@ -11,11 +11,11 @@ Use the Supabase CLI from the project root:
 3. Apply migrations:
    - `/usr/local/bin/supabase db push --linked`
 
-4. Seed canonical words from `supabase/seed/spa.csv`:
-   - `python3 scripts/generate_words_import_sql.py supabase/seed/spa.csv supabase/.temp/import_words.sql`
+4. Seed canonical words from `supabase/seed/new_spa.csv`:
+   - `python3 scripts/generate_words_import_sql.py supabase/seed/new_spa.csv supabase/.temp/import_words.sql`
    - `/usr/local/bin/supabase db query --linked -f supabase/.temp/import_words.sql`
 
 5. If the API schema cache is stale:
    - `/usr/local/bin/supabase db query --linked "NOTIFY pgrst, 'reload schema';"`
 
-The canonical table is `public.words`. `public.stg_words_spa` is legacy and should not exist after the replacement migration.
+The canonical lookup table is `public.words`, with large definition text stored in `public.definitions`. `public.stg_words_spa` is legacy and should not exist after the replacement migrations.

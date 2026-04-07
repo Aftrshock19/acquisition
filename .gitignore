@@ -42,3 +42,4 @@ next-env.d.ts
 stg_words_spa.csv
 spa-eng.csv
 supabase/seed/spa.csv
+supabase/seed/new_spa.csv

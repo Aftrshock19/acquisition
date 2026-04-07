@@ -2,7 +2,7 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-Copy `.env.example` to `.env.local` and set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Apply the Supabase migrations in order with the Supabase CLI. Seed vocabulary from `supabase/seed/spa.csv` with `npm run seed` after the project is linked and the migration has been pushed.
+Copy `.env.example` to `.env.local` and set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Apply the Supabase migrations in order with the Supabase CLI. Seed vocabulary from `supabase/seed/new_spa.csv` with `npm run seed` after the project is linked and the migration has been pushed.
 
 ### Database overview
 
@@ -16,10 +16,10 @@ The Supabase database is organized into shared content tables and user-specific 
 
 ### Seeding words
 
-The canonical vocabulary source is `supabase/seed/spa.csv`. The import flow is:
+The canonical vocabulary source is `supabase/seed/new_spa.csv`. The import flow is:
 
 ```bash
-python3 scripts/generate_words_import_sql.py supabase/seed/spa.csv supabase/.temp/import_words.sql
+python3 scripts/generate_words_import_sql.py supabase/seed/new_spa.csv supabase/.temp/import_words.sql
 /usr/local/bin/supabase db query --linked -f supabase/.temp/import_words.sql
 ```
 
@@ -30,14 +30,23 @@ The final `public.words` schema is:
 - `lemma text not null`
 - `original_lemma text not null`
 - `translation text`
-- `definition_es text`
-- `definition_en text`
+- `tags text[] not null default '{}'`
 - `pos text not null`
 - `example_sentence text`
 - `example_sentence_en text`
 - `created_at timestamptz not null default now()`
 
-The import uses `public.words_import_raw` as a staging table, maps the CSV headers into the canonical columns, normalizes `pos`, and upserts on `rank` so reruns are idempotent.
+The large definition payload lives in `public.definitions`:
+
+- `id uuid primary key references public.words(id) on delete cascade`
+- `rank integer not null unique`
+- `lemma text not null`
+- `translation text`
+- `definition_es text`
+- `definition_en text`
+- `created_at timestamptz not null default now()`
+
+The import uses `public.words_import_raw` as a staging table, accepts both the legacy `spa.csv` header set and the current `new_spa.csv` header set, persists `tags` on `public.words`, writes the large definition text to `public.definitions`, normalizes `pos`, and upserts on `rank` so reruns are idempotent.
 
 ### Generating TypeScript types from Supabase
 

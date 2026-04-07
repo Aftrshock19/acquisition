@@ -12,6 +12,19 @@ type SupabaseServerClient = NonNullable<
   Awaited<ReturnType<typeof createSupabaseServerClient>>
 >;
 
+type WordLookupRow = {
+  id: string;
+  lemma: string;
+  translation?: string | null;
+  pos?: string | null;
+};
+
+type DefinitionLookupRow = {
+  translation?: string | null;
+  definition_en?: string | null;
+  definition_es?: string | null;
+};
+
 const MANUAL_SAVED_DECK_KEY = "manual_saved";
 
 export async function lookupReaderWordAction({
@@ -127,7 +140,7 @@ async function findWordByLemma(
 ): Promise<ReaderLookupEntry | null> {
   const { data, error } = await supabase
     .from("words")
-    .select("id, lemma, translation, definition_en, definition_es, pos")
+    .select("id, lemma, translation, pos")
     .eq("lemma", lemma)
     .order("rank", { ascending: true })
     .limit(1)
@@ -137,7 +150,7 @@ async function findWordByLemma(
     throw new Error(error.message);
   }
 
-  return toReaderLookupEntry(data);
+  return toReaderLookupEntry(supabase, data);
 }
 
 async function findWordByOriginalLemma(
@@ -146,7 +159,7 @@ async function findWordByOriginalLemma(
 ): Promise<ReaderLookupEntry | null> {
   const { data, error } = await supabase
     .from("words")
-    .select("id, lemma, translation, definition_en, definition_es, pos")
+    .select("id, lemma, translation, pos")
     .eq("original_lemma", originalLemma)
     .order("rank", { ascending: true })
     .limit(1)
@@ -156,7 +169,7 @@ async function findWordByOriginalLemma(
     throw new Error(error.message);
   }
 
-  return toReaderLookupEntry(data);
+  return toReaderLookupEntry(supabase, data);
 }
 
 async function findWordByForm(
@@ -183,7 +196,7 @@ async function findWordByForm(
   if (data.word_id) {
     const { data: word, error: wordError } = await supabase
       .from("words")
-      .select("id, lemma, translation, definition_en, definition_es, pos")
+      .select("id, lemma, translation, pos")
       .eq("id", data.word_id)
       .maybeSingle();
 
@@ -191,7 +204,7 @@ async function findWordByForm(
       throw new Error(wordError.message);
     }
 
-    const byIdEntry = toReaderLookupEntry(word);
+    const byIdEntry = await toReaderLookupEntry(supabase, word);
     if (byIdEntry) {
       return byIdEntry;
     }
@@ -218,27 +231,42 @@ async function getManualSavedDeckId(
   return data?.id ?? null;
 }
 
-function toReaderLookupEntry(
-  data:
-    | {
-        id: string;
-        lemma: string;
-        translation?: string | null;
-        definition_en?: string | null;
-        definition_es?: string | null;
-        pos?: string | null;
-      }
-    | null
-    | undefined,
-): ReaderLookupEntry | null {
+async function getDefinitionLookupRow(
+  supabase: SupabaseServerClient,
+  wordId: string,
+): Promise<DefinitionLookupRow | null> {
+  const { data, error } = await supabase
+    .from("definitions")
+    .select("translation, definition_en, definition_es")
+    .eq("id", wordId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+async function toReaderLookupEntry(
+  supabase: SupabaseServerClient,
+  data: WordLookupRow | null | undefined,
+): Promise<ReaderLookupEntry | null> {
   if (!data) {
     return null;
   }
 
+  const definitions = await getDefinitionLookupRow(supabase, data.id);
+
   return {
     id: data.id,
     lemma: data.lemma,
-    definition: data.translation ?? data.definition_en ?? data.definition_es ?? null,
+    definition:
+      data.translation ??
+      definitions?.translation ??
+      definitions?.definition_en ??
+      definitions?.definition_es ??
+      null,
     pos: data.pos ?? null,
   };
 }

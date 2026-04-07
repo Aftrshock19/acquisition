@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest",
-    "seed": "python3 scripts/generate_words_import_sql.py supabase/seed/spa.csv supabase/.temp/import_words.sql && /usr/local/bin/supabase db query --linked -f supabase/.temp/import_words.sql"
+    "seed": "python3 scripts/generate_words_import_sql.py supabase/seed/new_spa.csv supabase/.temp/import_words.sql && /usr/local/bin/supabase db query --linked -f supabase/.temp/import_words.sql"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
