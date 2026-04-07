@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useRef, type ReactNode } from "react";
-import { FlashcardContainer } from "@/components/srs/cards/FlashcardContainer";
+import {
+  FlashcardContainer,
+  FlashcardFeedbackPanel,
+  FlashcardSuccessActions,
+} from "@/components/srs/cards/FlashcardContainer";
 import type { UnifiedQueueCard } from "@/components/srs/logic/buildUnifiedQueue";
 
 type AudioCardProps = {
@@ -52,7 +56,7 @@ export function AudioCard({
 
   return (
     <div className="flex flex-col gap-6">
-      <FlashcardContainer title="Audio" navigation={navigation}>
+      <FlashcardContainer typeLabel="Audio" title="Audio" navigation={navigation}>
         <p className="mt-2 text-lg font-medium">{card.prompt}</p>
         {showPosHint && card.hint ? (
           <p className="mt-1 text-sm text-zinc-500">({card.hint})</p>
@@ -128,29 +132,28 @@ function FeedbackBlock({
 }) {
   return (
     <div className="flex flex-col gap-6">
-      <div
-        className={`rounded-xl border p-6 ${
-          correct
-            ? "border-green-300 bg-green-50 dark:border-green-800 dark:bg-green-950/40"
-            : "border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/40"
-        }`}
-      >
-        <p className="font-medium">{correct ? "Correct" : "Incorrect"}</p>
-        <p className="mt-1 text-zinc-600 dark:text-zinc-400">Expected: {expected}</p>
-        {!correct ? (
-          <p className="mt-1 text-sm text-zinc-500">
-            Will repeat in {Math.max(1, Math.round(retryDelayMs / 1000))}s
-          </p>
-        ) : null}
-      </div>
-      <button
-        type="button"
-        onClick={onNext}
-        disabled={busy}
-        className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-      >
-        Next
-      </button>
+      <FlashcardFeedbackPanel
+        tone={correct ? "success" : "error"}
+        title={correct ? "Correct" : "Incorrect"}
+        detail={`Expected: ${expected}`}
+        secondary={
+          !correct
+            ? `Will repeat in ${Math.max(1, Math.round(retryDelayMs / 1000))}s`
+            : undefined
+        }
+      />
+      {correct ? (
+        <FlashcardSuccessActions onNext={onNext} busy={busy} />
+      ) : (
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={busy}
+          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+        >
+          Next
+        </button>
+      )}
     </div>
   );
 }

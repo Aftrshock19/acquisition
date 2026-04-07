@@ -1,7 +1,11 @@
 "use client";
 
 import type { ReactNode, RefObject } from "react";
-import { FlashcardContainer } from "@/components/srs/cards/FlashcardContainer";
+import {
+  FlashcardContainer,
+  FlashcardSuccessActions,
+  getFlashcardFieldToneClasses,
+} from "@/components/srs/cards/FlashcardContainer";
 import type { UnifiedQueueCard } from "@/components/srs/logic/buildUnifiedQueue";
 
 type SentenceCardProps = {
@@ -43,7 +47,11 @@ export function SentenceCard({
 
   return (
     <div className="flex flex-col gap-6">
-      <FlashcardContainer title="Sentence" navigation={navigation}>
+      <FlashcardContainer
+        typeLabel="Sentence"
+        title="Sentence"
+        navigation={navigation}
+      >
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">{card.prompt}</p>
         <p className="mt-4 text-xl font-medium tracking-tight">{card.sentenceData.sentence}</p>
         {card.sentenceData.translation ? (
@@ -60,39 +68,29 @@ export function SentenceCard({
           </p>
         ) : null}
 
-        {needsCorrection ? (
+        {needsCorrection || showingSuccess ? (
           <div className="mt-4">
             <input
               ref={correctionInputRef}
               type="text"
               value={correctionValue}
               onChange={(event) => onCorrectionChange(event.target.value)}
-              placeholder={feedback.expected}
-              aria-invalid
+              placeholder={feedback?.expected}
+              aria-invalid={needsCorrection}
               autoComplete="off"
+              readOnly={showingSuccess}
               disabled={busy}
-              className="w-full rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-zinc-900 placeholder:text-red-400 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 disabled:opacity-50 dark:border-red-800 dark:bg-red-950/40 dark:text-zinc-100 dark:placeholder:text-red-300"
+              className={`w-full rounded-lg px-3 py-2 text-zinc-900 focus:outline-none focus:ring-1 disabled:opacity-50 dark:text-zinc-100 ${
+                getFlashcardFieldToneClasses(showingSuccess ? "success" : "error")
+              }`}
             />
-            <p className="mt-2 text-sm text-red-700 dark:text-red-300">
-              Type the correct word to continue.
-            </p>
           </div>
         ) : null}
 
       </FlashcardContainer>
 
       {showingSuccess ? (
-        <>
-          <button
-            type="button"
-            onClick={onNext}
-            disabled={busy}
-            className="rounded-lg bg-zinc-900 px-4 py-3 text-base font-medium text-white shadow-lg shadow-zinc-900/20 hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-          >
-            Next
-          </button>
-          <p className="text-sm text-zinc-500">Press Enter to continue</p>
-        </>
+        <FlashcardSuccessActions onNext={onNext} busy={busy} />
       ) : needsCorrection ? (
         <>
           <button

@@ -43,6 +43,7 @@ type Props = {
 
 type RetryEntry = { card: UnifiedQueueCard; dueAt: number };
 type SessionPhase = "prompt" | "feedback" | "correction" | "waiting" | "done";
+const TEXT_SUCCESS_DELAY_MS = 1200;
 type ReviewedCardSnapshot = {
   card: UnifiedQueueCard;
   source: "main" | "retry";
@@ -150,6 +151,7 @@ export function TodaySession({
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const startedAtRef = useRef<number>(Date.now());
+  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clozeInputRef = useRef<HTMLInputElement>(null);
   const sentenceCorrectionInputRef = useRef<HTMLInputElement>(null);
 
@@ -171,7 +173,19 @@ export function TodaySession({
     setBusy(false);
     setSubmitError(null);
     startedAtRef.current = Date.now();
+    if (successTimeoutRef.current) {
+      clearTimeout(successTimeoutRef.current);
+      successTimeoutRef.current = null;
+    }
   }, [queue]);
+
+  useEffect(() => {
+    return () => {
+      if (successTimeoutRef.current) {
+        clearTimeout(successTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!current) return;
@@ -275,6 +289,13 @@ export function TodaySession({
     setHistoryIndex(null);
   }
 
+  function clearSuccessAdvanceTimeout() {
+    if (successTimeoutRef.current) {
+      clearTimeout(successTimeoutRef.current);
+      successTimeoutRef.current = null;
+    }
+  }
+
   function appendReviewedCard(snapshot: ReviewedCardSnapshot) {
     setReviewedCards((items) => [...items, snapshot]);
     setHistoryIndex(null);
@@ -326,6 +347,8 @@ export function TodaySession({
   function advanceFromCurrentCard(nextRetryList: RetryEntry[]) {
     if (!current) return;
 
+    clearSuccessAdvanceTimeout();
+
     const nextMainIndex = currentSource === "main" ? mainIndex + 1 : mainIndex;
     const nextMainCompleted =
       currentSource === "main" ? mainCompletedCount + 1 : mainCompletedCount;
@@ -361,6 +384,15 @@ export function TodaySession({
     setRetryList([]);
     setCurrent(null);
     setPhase("done");
+  }
+
+  function scheduleSuccessAdvance(nextRetryList: RetryEntry[]) {
+    clearSuccessAdvanceTimeout();
+
+    successTimeoutRef.current = setTimeout(() => {
+      successTimeoutRef.current = null;
+      advanceFromCurrentCard(nextRetryList);
+    }, TEXT_SUCCESS_DELAY_MS);
   }
 
   async function submitObjectiveReview(args: {
@@ -409,16 +441,14 @@ export function TodaySession({
       });
 
       if (correct) {
-        if (autoAdvanceCorrect) {
-          advanceFromCurrentCard(nextRetryList);
-          return;
-        }
-
         setFeedback({
           correct,
           expected: feedbackExpected,
         });
         setPhase("feedback");
+        if (autoAdvanceCorrect) {
+          scheduleSuccessAdvance(nextRetryList);
+        }
         return;
       }
 
@@ -460,17 +490,14 @@ export function TodaySession({
 
     if (phase === "correction") {
       if (correct) {
-        if (autoAdvanceCorrect) {
-          setFeedback(null);
-          advanceFromCurrentCard(retryList);
-          return;
-        }
-
         setFeedback({
           correct: true,
           expected: feedbackExpected,
         });
         setPhase("feedback");
+        if (autoAdvanceCorrect) {
+          scheduleSuccessAdvance(retryList);
+        }
         return;
       }
 
@@ -551,17 +578,14 @@ export function TodaySession({
     if (!answer) return;
 
     if (normalize(answer) === normalize(current.correctOption)) {
-      if (autoAdvanceCorrect) {
-        setFeedback(null);
-        advanceFromCurrentCard(retryList);
-        return;
-      }
-
       setFeedback({
         correct: true,
         expected: current.correctOption,
       });
       setPhase("feedback");
+      if (autoAdvanceCorrect) {
+        scheduleSuccessAdvance(retryList);
+      }
       return;
     }
 
@@ -619,12 +643,10 @@ export function TodaySession({
       });
       setNormalSubmittedGrade(grade);
 
-      if (correct && autoAdvanceCorrect) {
-        advanceFromCurrentCard(nextRetryList);
-        return;
-      }
-
       setPhase("feedback");
+      if (correct && autoAdvanceCorrect) {
+        scheduleSuccessAdvance(nextRetryList);
+      }
     } catch (error) {
       setSubmitError(
         error instanceof Error ? error.message : "Failed to submit review",
@@ -703,6 +725,7 @@ export function TodaySession({
 
   function goToPreviousReviewedCard() {
     if (!canGoPrevious) return;
+    clearSuccessAdvanceTimeout();
     setHistoryIndex(historyCards.length - 1);
   }
 
@@ -713,6 +736,8 @@ export function TodaySession({
       setHistoryIndex(null);
       return;
     }
+
+    clearSuccessAdvanceTimeout();
 
     advanceFromCurrentCard(retryList);
   }
