@@ -122,7 +122,7 @@ export function SentenceCard({
                   {tone === "error" && correctionPlaceholder ? (
                     <span
                       aria-hidden="true"
-                      className={`pointer-events-none absolute inset-y-0 left-0 flex items-center px-3 text-sm text-zinc-400 transition-opacity duration-300 dark:text-zinc-500 ${
+                      className={`pointer-events-none absolute inset-0 flex items-center justify-center px-3 text-center text-sm text-zinc-400 transition-opacity duration-300 dark:text-zinc-500 ${
                         correctionPlaceholderVisible && !value ? "opacity-100" : "opacity-0"
                       }`}
                     >
