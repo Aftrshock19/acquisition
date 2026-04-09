@@ -1,14 +1,16 @@
 "use client";
 
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
 import { SENTENCE_CLOZE_BLANK_TOKEN } from "@/components/srs/logic/buildSentencePrompt";
 
 export function SentenceClozePrompt({
   sentence,
   className = "mt-4 text-xl font-medium tracking-tight text-zinc-900 dark:text-zinc-100",
+  blankContent,
 }: {
   sentence: string;
   className?: string;
+  blankContent?: ReactNode;
 }) {
   const parts = sentence.split(SENTENCE_CLOZE_BLANK_TOKEN);
 
@@ -16,7 +18,7 @@ export function SentenceClozePrompt({
     <p className={className}>
       {parts.map((part, index) => (
         <Fragment key={`${part}-${index}`}>
-          {index > 0 ? <SentenceBlank /> : null}
+          {index > 0 ? blankContent ?? <SentenceBlank /> : null}
           {part}
         </Fragment>
       ))}

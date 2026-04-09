@@ -54,6 +54,8 @@ type RetryEntry = { card: UnifiedQueueCard; dueAt: number };
 type SessionPhase = "prompt" | "feedback" | "correction" | "waiting" | "done";
 const TEXT_SUCCESS_DELAY_MS = 1200;
 const CORRECTION_PLACEHOLDER_DELAY_MS = 1900;
+const REVIEWED_SENTENCE_SUPPORT_EXPANDED_STORAGE_KEY =
+  "reviewed-sentence-support-expanded";
 type ReviewedCardSnapshot = {
   card: UnifiedQueueCard;
   source: "main" | "retry";
@@ -1129,6 +1131,8 @@ function ReviewedSentenceCard({
   card: Extract<UnifiedQueueCard, { cardType: "sentences" }>;
   answer?: string;
 }) {
+  const resolvedAnswer = answer ?? card.correctOption;
+
   return (
     <div className="mt-5 flex flex-col gap-5">
       <div>
@@ -1138,6 +1142,7 @@ function ReviewedSentenceCard({
         <SentenceClozePrompt
           sentence={card.sentenceData.sentence}
           className="mt-4 text-xl font-medium tracking-tight text-zinc-900 dark:text-zinc-100"
+          blankContent={<ReviewedInlineAnswerField answer={resolvedAnswer} />}
         />
         {card.hint ? (
           <p className="mt-2 text-sm text-zinc-500">({card.hint})</p>
@@ -1148,16 +1153,19 @@ function ReviewedSentenceCard({
         translation={card.translation ?? null}
         englishSentence={card.exampleSentenceEn ?? null}
       />
-
-      <div className="rounded-lg border border-green-300 bg-green-50 p-4 dark:border-green-800 dark:bg-green-950/40">
-        <p className="text-xs uppercase tracking-[0.14em] text-green-700 dark:text-green-300">
-          Correct answer
-        </p>
-        <p className="mt-2 text-lg font-medium text-green-900 dark:text-green-100">
-          {answer ?? card.correctOption}
-        </p>
-      </div>
     </div>
+  );
+}
+
+function ReviewedInlineAnswerField({
+  answer,
+}: {
+  answer: string;
+}) {
+  return (
+    <span className="mx-1 inline-flex min-w-16 items-center justify-center rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1 align-middle text-base font-medium text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100">
+      {answer}
+    </span>
   );
 }
 
@@ -1171,6 +1179,30 @@ function ReviewedSentenceSupport({
   const [expanded, setExpanded] = useState(false);
   const wordTranslation = translation?.trim() || null;
   const normalizedEnglishSentence = englishSentence?.trim() || null;
+
+  useEffect(() => {
+    try {
+      const savedState = window.localStorage.getItem(
+        REVIEWED_SENTENCE_SUPPORT_EXPANDED_STORAGE_KEY,
+      );
+      if (savedState === "true") {
+        setExpanded(true);
+      }
+    } catch {
+      // Ignore unavailable storage and keep the default collapsed state.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        REVIEWED_SENTENCE_SUPPORT_EXPANDED_STORAGE_KEY,
+        expanded ? "true" : "false",
+      );
+    } catch {
+      // Ignore unavailable storage.
+    }
+  }, [expanded]);
 
   if (!wordTranslation && !normalizedEnglishSentence) {
     return null;
