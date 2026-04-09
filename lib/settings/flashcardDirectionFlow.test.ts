@@ -153,6 +153,74 @@ describe("flashcard direction flow", () => {
 
     expect(effective.autoAdvanceCorrect).toBe(false);
   });
+
+  it("builds only single-word MCQ cards when only the single-word format is selected", () => {
+    const queue = buildUnifiedQueue(
+      makeSession(),
+      {
+        cloze_en_to_es: false,
+        cloze_es_to_en: false,
+        normal_en_to_es: false,
+        normal_es_to_en: false,
+        audio: false,
+        mcq: true,
+        sentences: false,
+      },
+      ["single_word"],
+    ).queue;
+
+    const mcqCards = queue.filter(
+      (card): card is Extract<(typeof queue)[number], { cardType: "mcq" }> =>
+        card.cardType === "mcq",
+    );
+
+    expect(mcqCards.length).toBeGreaterThan(0);
+    expect(mcqCards.every((card) => card.questionFormat === "single_word")).toBe(true);
+    expect(mcqCards.every((card) => !card.sentenceData)).toBe(true);
+  });
+
+  it("builds only sentence MCQ cards when only the sentence format is selected", () => {
+    const queue = buildUnifiedQueue(
+      makeSession(),
+      {
+        cloze_en_to_es: false,
+        cloze_es_to_en: false,
+        normal_en_to_es: false,
+        normal_es_to_en: false,
+        audio: false,
+        mcq: true,
+        sentences: false,
+      },
+      ["sentence"],
+    ).queue;
+
+    const mcqCards = queue.filter(
+      (card): card is Extract<(typeof queue)[number], { cardType: "mcq" }> =>
+        card.cardType === "mcq",
+    );
+
+    expect(mcqCards.length).toBeGreaterThan(0);
+    expect(mcqCards.every((card) => card.questionFormat === "sentence")).toBe(true);
+    expect(mcqCards.every((card) => Boolean(card.sentenceData?.sentence))).toBe(true);
+  });
+
+  it("keeps sentence cards as their own family regardless of MCQ question format selection", () => {
+    const queue = buildUnifiedQueue(
+      makeSession(),
+      {
+        cloze_en_to_es: false,
+        cloze_es_to_en: false,
+        normal_en_to_es: false,
+        normal_es_to_en: false,
+        audio: false,
+        mcq: false,
+        sentences: true,
+      },
+      ["single_word"],
+    ).queue;
+
+    expect(queue.every((card) => card.cardType === "sentences")).toBe(true);
+  });
 });
 
 function makeSettings(overrides: Partial<UserSettingsRow> = {}): UserSettingsRow {
@@ -191,6 +259,7 @@ function makeSession(): TodaySession {
         lemma: "hola",
         rank: 1,
         definition: "hello",
+        exampleSentence: "Hola, amigo.",
         user_id: "user-1",
         status: "learning",
         pos: "interjection",
@@ -203,6 +272,7 @@ function makeSession(): TodaySession {
         lemma: "adios",
         rank: 2,
         definition: "goodbye",
+        exampleSentence: "Adios por ahora.",
         user_id: "user-1",
         status: "learning",
         pos: "interjection",
@@ -216,6 +286,7 @@ function makeSession(): TodaySession {
         lemma: "gracias",
         rank: 3,
         definition: "thanks",
+        exampleSentence: "Muchas gracias por venir.",
         pos: "interjection",
         extra: null,
       },
@@ -225,6 +296,7 @@ function makeSession(): TodaySession {
         lemma: "libro",
         rank: 4,
         definition: "book",
+        exampleSentence: "El libro está aquí.",
         pos: "noun",
         extra: null,
       },

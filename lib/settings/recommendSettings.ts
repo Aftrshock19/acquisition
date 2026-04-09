@@ -1,3 +1,4 @@
+import { getSupabaseUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import type { RecommendedSettings, RecommendedTypes } from './types';
 
@@ -18,9 +19,7 @@ export async function recommendSettings(): Promise<RecommendedSettings> {
     return { recommendedDailyLimit, recommendedTypes: types };
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user } = await getSupabaseUser(supabase);
   if (!user) {
     return { recommendedDailyLimit, recommendedTypes: types };
   }

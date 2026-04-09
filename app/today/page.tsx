@@ -131,6 +131,7 @@ export default async function TodayPage() {
       ) : (
         <TodaySession
           enabledTypes={effectiveSettings.enabledTypes}
+          mcqQuestionFormats={effectiveSettings.mcqQuestionFormats}
           session={session}
           dailyLimit={effectiveSettings.dailyLimit}
           retryDelayMs={effectiveSettings.retryDelaySeconds * 1000}

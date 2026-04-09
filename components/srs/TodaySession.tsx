@@ -18,6 +18,7 @@ import { ClozeCard } from "@/components/srs/cards/ClozeCard";
 import { McqCard } from "@/components/srs/cards/McqCard";
 import { NormalEnToEsCard } from "@/components/srs/cards/NormalEnToEsCard";
 import { NormalEsToEnCard } from "@/components/srs/cards/NormalEsToEnCard";
+import { SentenceClozePrompt } from "@/components/srs/cards/SentenceClozePrompt";
 import { SentenceCard } from "@/components/srs/cards/SentenceCard";
 import {
   buildUnifiedQueue,
@@ -29,6 +30,7 @@ import {
   isCorrectClozeAnswer,
   splitDefinitionCandidates,
 } from "@/lib/srs/cloze";
+import type { McqQuestionFormat } from "@/lib/settings/mcqQuestionFormats";
 import type { EnabledFlashcardMode } from "@/lib/settings/types";
 import type {
   DailySessionRow,
@@ -38,6 +40,7 @@ import type {
 
 type Props = {
   enabledTypes: Record<EnabledFlashcardMode, boolean>;
+  mcqQuestionFormats: McqQuestionFormat[];
   session: TodaySessionData;
   dailyLimit: number;
   retryDelayMs?: number;
@@ -60,16 +63,6 @@ type ReviewedCardSnapshot = {
   };
   grade?: Grade;
 };
-
-function normalize(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .replace(/[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~¿¡]/g, "");
-}
 
 function getClozeExpectedLabel(
   card: Extract<UnifiedQueueCard, { cardType: "cloze" }>,
@@ -103,6 +96,38 @@ function getClozeExpected(
   return splitDefinitionCandidates(card.definition);
 }
 
+function getTypingExpected(
+  card: Extract<UnifiedQueueCard, { cardType: "cloze" | "sentences" }>,
+) {
+  if (card.cardType === "cloze") {
+    return getClozeExpected(card);
+  }
+
+  return [card.correctOption];
+}
+
+function getTypingExpectedLabel(
+  card: Extract<UnifiedQueueCard, { cardType: "cloze" | "sentences" }>,
+  expected: string[],
+) {
+  if (card.cardType === "cloze") {
+    return getClozeExpectedLabel(card, expected);
+  }
+
+  return expected[0] ?? card.correctOption;
+}
+
+function allowContainedTypingCandidateMatch(
+  card: Extract<UnifiedQueueCard, { cardType: "cloze" | "sentences" }>,
+  expected: string[],
+) {
+  if (card.cardType === "cloze") {
+    return allowContainedClozeCandidateMatch(card, expected);
+  }
+
+  return false;
+}
+
 function upsertRetrySorted(list: RetryEntry[], entry: RetryEntry) {
   const filtered = list.filter((item) => item.card.id !== entry.card.id);
   const index = filtered.findIndex((item) => item.dueAt > entry.dueAt);
@@ -112,6 +137,7 @@ function upsertRetrySorted(list: RetryEntry[], entry: RetryEntry) {
 
 export function TodaySession({
   enabledTypes,
+  mcqQuestionFormats,
   session,
   dailyLimit,
   retryDelayMs = 90000,
@@ -120,8 +146,8 @@ export function TodaySession({
   initialDailySession = null,
 }: Props) {
   const { queue, enabledImplementedTypes, enabledUnimplementedTypes } = useMemo(
-    () => buildUnifiedQueue(session, enabledTypes),
-    [session, enabledTypes],
+    () => buildUnifiedQueue(session, enabledTypes, mcqQuestionFormats),
+    [session, enabledTypes, mcqQuestionFormats],
   );
   const initialCompletedCount = Math.max(
     0,
@@ -142,8 +168,7 @@ export function TodaySession({
     [],
   );
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
-  const [clozeInput, setClozeInput] = useState("");
-  const [sentenceCorrectionInput, setSentenceCorrectionInput] = useState("");
+  const [typingInput, setTypingInput] = useState("");
   const [normalRevealed, setNormalRevealed] = useState(false);
   const [normalSubmittedGrade, setNormalSubmittedGrade] =
     useState<Grade | null>(null);
@@ -161,8 +186,7 @@ export function TodaySession({
   const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const correctionPlaceholderTimeoutRef =
     useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clozeInputRef = useRef<HTMLInputElement>(null);
-  const sentenceCorrectionInputRef = useRef<HTMLInputElement>(null);
+  const typingInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setMainIndex(0);
@@ -173,8 +197,7 @@ export function TodaySession({
     setPhase(queue[0] ? "prompt" : "done");
     setReviewedCards([]);
     setHistoryIndex(null);
-    setClozeInput("");
-    setSentenceCorrectionInput("");
+    setTypingInput("");
     setNormalRevealed(false);
     setNormalSubmittedGrade(null);
     setFeedback(null);
@@ -208,8 +231,7 @@ export function TodaySession({
     if (!current) return;
 
     setSubmitError(null);
-    setClozeInput("");
-    setSentenceCorrectionInput("");
+    setTypingInput("");
     setNormalRevealed(false);
     setNormalSubmittedGrade(null);
     setFeedback(null);
@@ -221,15 +243,9 @@ export function TodaySession({
   useEffect(() => {
     if (
       (phase === "prompt" || phase === "correction") &&
-      current?.cardType === "cloze"
+      (current?.cardType === "cloze" || current?.cardType === "sentences")
     ) {
-      requestAnimationFrame(() => clozeInputRef.current?.focus());
-    }
-  }, [phase, current]);
-
-  useEffect(() => {
-    if (phase === "correction" && current?.cardType === "sentences") {
-      requestAnimationFrame(() => sentenceCorrectionInputRef.current?.focus());
+      requestAnimationFrame(() => typingInputRef.current?.focus());
     }
   }, [phase, current]);
 
@@ -265,15 +281,9 @@ export function TodaySession({
     }
 
     if (phase === "correction") {
-      if (current.cardType === "cloze") {
+      if (current.cardType === "cloze" || current.cardType === "sentences") {
         event.preventDefault();
-        void handleClozeCheck();
-        return;
-      }
-
-      if (current.cardType === "sentences") {
-        event.preventDefault();
-        handleSentenceCorrectionSubmit();
+        void handleTypingCheck();
       }
 
       return;
@@ -281,9 +291,9 @@ export function TodaySession({
 
     if (phase !== "prompt") return;
 
-    if (current.cardType === "cloze") {
+    if (current.cardType === "cloze" || current.cardType === "sentences") {
       event.preventDefault();
-      void handleClozeCheck();
+      void handleTypingCheck();
       return;
     }
 
@@ -330,20 +340,12 @@ export function TodaySession({
     }, CORRECTION_PLACEHOLDER_DELAY_MS);
   }
 
-  function handleClozeInputChange(value: string) {
+  function handleTypingInputChange(value: string) {
     if (showCorrectionPlaceholder && value.length > 0) {
       clearCorrectionPlaceholderTimeout();
       setShowCorrectionPlaceholder(false);
     }
-    setClozeInput(value);
-  }
-
-  function handleSentenceCorrectionChange(value: string) {
-    if (showCorrectionPlaceholder && value.length > 0) {
-      clearCorrectionPlaceholderTimeout();
-      setShowCorrectionPlaceholder(false);
-    }
-    setSentenceCorrectionInput(value);
+    setTypingInput(value);
   }
 
   function appendReviewedCard(snapshot: ReviewedCardSnapshot) {
@@ -523,21 +525,25 @@ export function TodaySession({
     }
   }
 
-  async function handleClozeCheck() {
-    if (!current || current.cardType !== "cloze" || busy) {
+  async function handleTypingCheck() {
+    if (
+      !current ||
+      (current.cardType !== "cloze" && current.cardType !== "sentences") ||
+      busy
+    ) {
       return;
     }
 
-    const userAnswer = clozeInput.trim();
+    const userAnswer = typingInput.trim();
     if (!userAnswer) return;
 
-    const expected = getClozeExpected(current);
+    const expected = getTypingExpected(current);
     const correct = isCorrectClozeAnswer(
       userAnswer,
       expected,
-      allowContainedClozeCandidateMatch(current, expected),
+      allowContainedTypingCandidateMatch(current, expected),
     );
-    const feedbackExpected = getClozeExpectedLabel(current, expected);
+    const feedbackExpected = getTypingExpectedLabel(current, expected);
 
     if (phase === "correction") {
       if (correct) {
@@ -552,7 +558,7 @@ export function TodaySession({
         return;
       }
 
-      setClozeInput("");
+      setTypingInput("");
       setFeedback({
         correct: false,
         expected: feedbackExpected,
@@ -572,7 +578,7 @@ export function TodaySession({
     });
 
     if (!correct) {
-      setClozeInput("");
+      setTypingInput("");
     }
   }
 
@@ -589,64 +595,6 @@ export function TodaySession({
       expected: [current.correctOption],
       feedbackExpected: current.correctOption,
     });
-  }
-
-  async function handleSentenceSelect(option: string) {
-    if (
-      !current ||
-      current.cardType !== "sentences" ||
-      phase !== "prompt" ||
-      busy
-    ) {
-      return;
-    }
-
-    const correct = option === current.correctOption;
-
-    await submitObjectiveReview({
-      card: current,
-      correct,
-      userAnswer: option,
-      expected: [current.correctOption],
-      feedbackExpected: current.correctOption,
-    });
-
-    if (!correct) {
-      setSentenceCorrectionInput("");
-    }
-  }
-
-  function handleSentenceCorrectionSubmit() {
-    if (
-      !current ||
-      current.cardType !== "sentences" ||
-      phase !== "correction" ||
-      busy
-    ) {
-      return;
-    }
-
-    const answer = sentenceCorrectionInput.trim();
-    if (!answer) return;
-
-    if (normalize(answer) === normalize(current.correctOption)) {
-      setFeedback({
-        correct: true,
-        expected: current.correctOption,
-      });
-      setPhase("feedback");
-      if (autoAdvanceCorrect) {
-        scheduleSuccessAdvance(retryList);
-      }
-      return;
-    }
-
-    setSentenceCorrectionInput("");
-    setFeedback({
-      correct: false,
-      expected: current.correctOption,
-    });
-    revealCorrectionPlaceholder();
   }
 
   async function handleNormalGrade(grade: Grade) {
@@ -841,7 +789,7 @@ export function TodaySession({
           ) : current.cardType === "cloze" ? (
             <ClozeCard
               card={current}
-              value={clozeInput}
+              value={typingInput}
               busy={busy}
               submitError={submitError}
               showPosHint={showPosHint}
@@ -850,10 +798,10 @@ export function TodaySession({
                 feedback?.expected
               }
               correctionPlaceholderVisible={showCorrectionPlaceholder}
-              inputRef={clozeInputRef}
-              onChange={handleClozeInputChange}
+              inputRef={typingInputRef}
+              onChange={handleTypingInputChange}
               onCheck={() => {
-                void handleClozeCheck();
+                void handleTypingCheck();
               }}
               onNext={() => advanceFromCurrentCard(retryList)}
               navigation={flashcardNavigation}
@@ -891,21 +839,20 @@ export function TodaySession({
           ) : current.cardType === "sentences" ? (
             <SentenceCard
               card={current}
+              value={typingInput}
               busy={busy}
               submitError={submitError}
               showPosHint={showPosHint}
               feedback={feedback}
-              correctionValue={sentenceCorrectionInput}
               correctionPlaceholder={
                 feedback?.expected
               }
               correctionPlaceholderVisible={showCorrectionPlaceholder}
-              correctionInputRef={sentenceCorrectionInputRef}
-              onSelect={(option) => {
-                void handleSentenceSelect(option);
+              inputRef={typingInputRef}
+              onChange={handleTypingInputChange}
+              onCheck={() => {
+                void handleTypingCheck();
               }}
-              onCorrectionChange={handleSentenceCorrectionChange}
-              onCorrectionSubmit={handleSentenceCorrectionSubmit}
               onNext={() => advanceFromCurrentCard(retryList)}
               navigation={flashcardNavigation}
             />
@@ -1102,16 +1049,12 @@ function ReviewedChoiceCard({
   card,
   title,
   subtitle,
-  sentence,
-  translation,
   feedback,
   userAnswer,
 }: {
-  card: Extract<UnifiedQueueCard, { cardType: "audio" | "mcq" | "sentences" }>;
+  card: Extract<UnifiedQueueCard, { cardType: "audio" | "mcq" }>;
   title: string;
   subtitle: string;
-  sentence?: string;
-  translation?: string | null;
   feedback?: { correct: boolean; expected: string };
   userAnswer?: string;
 }) {
@@ -1124,13 +1067,13 @@ function ReviewedChoiceCard({
         <p className="mt-2 text-lg font-medium text-zinc-900 dark:text-zinc-100">
           {subtitle}
         </p>
-        {sentence ? (
-          <p className="mt-4 text-xl font-medium tracking-tight text-zinc-900 dark:text-zinc-100">
-            {sentence}
-          </p>
-        ) : null}
-        {translation ? (
-          <p className="mt-2 text-sm text-zinc-500">{translation}</p>
+        {card.cardType === "mcq" &&
+        card.questionFormat === "sentence" &&
+        card.sentenceData ? (
+          <SentenceClozePrompt
+            sentence={card.sentenceData.sentence}
+            className="mt-4 text-xl font-medium tracking-tight text-zinc-900 dark:text-zinc-100"
+          />
         ) : null}
         {card.hint ? (
           <p className="mt-2 text-sm text-zinc-500">({card.hint})</p>
@@ -1180,19 +1123,12 @@ function ReviewedSentenceCard({
     <div className="mt-5 flex flex-col gap-5">
       <div>
         <p className="text-sm uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">
-          Sentence
+          Complete the sentence
         </p>
-        <p className="mt-2 text-lg font-medium text-zinc-900 dark:text-zinc-100">
-          {card.prompt}
-        </p>
-        <p className="mt-4 text-xl font-medium tracking-tight text-zinc-900 dark:text-zinc-100">
-          {card.sentenceData.sentence}
-        </p>
-        {card.sentenceData.translation ? (
-          <p className="mt-2 text-sm text-zinc-500">
-            {card.sentenceData.translation}
-          </p>
-        ) : null}
+        <SentenceClozePrompt
+          sentence={card.sentenceData.sentence}
+          className="mt-4 text-xl font-medium tracking-tight text-zinc-900 dark:text-zinc-100"
+        />
         {card.hint ? (
           <p className="mt-2 text-sm text-zinc-500">({card.hint})</p>
         ) : null}

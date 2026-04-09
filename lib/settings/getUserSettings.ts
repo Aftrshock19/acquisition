@@ -1,3 +1,4 @@
+import { getSupabaseUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { UserSettingsRow } from "./types";
 
@@ -30,9 +31,16 @@ export async function getUserSettings() {
     return { settings: DEFAULT_SETTINGS, exists: false, signedIn: false };
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user, error: authError } = await getSupabaseUser(supabase);
+  if (authError) {
+    return {
+      settings: DEFAULT_SETTINGS,
+      exists: false,
+      signedIn: false,
+      error: authError,
+    };
+  }
+
   if (!user) {
     return { settings: DEFAULT_SETTINGS, exists: false, signedIn: false };
   }

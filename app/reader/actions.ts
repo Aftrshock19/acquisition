@@ -1,5 +1,6 @@
 "use server";
 
+import { getSupabaseUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { normalizeWordToken } from "@/lib/reader/tokenize";
 import type {
@@ -77,9 +78,10 @@ export async function saveReaderWordAction({
     return { ok: false, error: "Supabase is not configured." };
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user, error } = await getSupabaseUser(supabase);
+  if (error) {
+    return { ok: false, error };
+  }
 
   if (!user) {
     return { ok: false, error: "Please sign in to save words." };

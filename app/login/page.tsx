@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { LoginForm } from "@/components/LoginForm";
+import { getSupabaseUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export default async function LoginPage() {
@@ -33,9 +34,29 @@ export default async function LoginPage() {
     );
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user, error } = await getSupabaseUser(supabase);
+
+  if (error) {
+    return (
+      <main className="app-shell">
+        <section className="app-hero">
+          <h1 className="app-title">Login</h1>
+          <p className="app-subtitle">
+            Sign in or create an account to use daily reviews and new words.
+          </p>
+        </section>
+        <div className="app-card-strong flex flex-col gap-4 border-red-200 bg-red-50/90 p-8 dark:border-red-900/50 dark:bg-red-950/30">
+          <h2 className="text-xl font-semibold tracking-tight text-red-900 dark:text-red-100">
+            Authentication unavailable
+          </h2>
+          <p className="text-red-800 dark:text-red-200">{error}</p>
+        </div>
+        <p className="text-sm text-zinc-500">
+          <Link href="/" className="underline">Back to home</Link>
+        </p>
+      </main>
+    );
+  }
 
   if (user) {
     redirect("/");

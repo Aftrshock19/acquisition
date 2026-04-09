@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { BackButton } from "@/components/BackButton";
+import { getSupabaseUser } from "@/lib/supabase/auth";
 import {
   CefrLadder,
   type CefrLadderRowData,
@@ -67,9 +68,28 @@ export default async function ProgressPage() {
     );
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user, error: authError } = await getSupabaseUser(supabase);
+
+  if (authError) {
+    return (
+      <main className="app-shell">
+        <BackButton />
+        <section className="app-hero">
+          <h1 className="app-title">Progress</h1>
+          <p className="app-subtitle">Your Spanish vocabulary profile</p>
+        </section>
+
+        <section className="app-card-strong flex flex-col gap-3 border-red-200 bg-red-50/90 p-8 dark:border-red-900/50 dark:bg-red-950/30">
+          <h2 className="text-xl font-semibold tracking-tight text-red-900 dark:text-red-100">
+            Error loading progress
+          </h2>
+          <p className="text-sm leading-6 text-red-800 dark:text-red-200">
+            {authError}
+          </p>
+        </section>
+      </main>
+    );
+  }
 
   if (!user) {
     return (

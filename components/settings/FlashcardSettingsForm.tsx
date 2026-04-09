@@ -8,11 +8,13 @@ import type {
   RecommendedSettings,
   UserSettingsRow,
 } from "@/lib/settings/types";
+import type { McqQuestionFormat } from "@/lib/settings/mcqQuestionFormats";
 import { updateUserSettingsAction } from "@/app/actions/settings";
 import type { RawSettingsInput } from "@/lib/settings/normalizeUserSettingsInput";
 
 type Props = {
   userSettings: UserSettingsRow;
+  mcqQuestionFormats: McqQuestionFormat[];
   recommended: RecommendedSettings;
   effective: EffectiveFlashcardSettings;
 };
@@ -32,6 +34,7 @@ type DirectionKey =
 
 type ManualTypes = Record<ManualTypeKey, boolean>;
 type DirectionTypes = Record<DirectionKey, boolean>;
+type McqQuestionFormats = Record<McqQuestionFormat, boolean>;
 type RecommendedTypeKey = keyof RecommendedSettings["recommendedTypes"];
 
 const MANUAL_TYPE_FIELDS: ManualTypeKey[] = [
@@ -89,6 +92,7 @@ const FLASHCARD_TYPE_OPTIONS: Array<{
 
 export function FlashcardSettingsForm({
   userSettings,
+  mcqQuestionFormats: initialMcqQuestionFormats,
   recommended,
   effective,
 }: Props) {
@@ -107,6 +111,10 @@ export function FlashcardSettingsForm({
   const [autoAdvanceCorrect, setAutoAdvanceCorrect] = useState<boolean>(
     Boolean(userSettings.auto_advance_correct),
   );
+  const [mcqQuestionFormats, setMcqQuestionFormats] = useState<McqQuestionFormats>({
+    single_word: initialMcqQuestionFormats.includes("single_word"),
+    sentence: initialMcqQuestionFormats.includes("sentence"),
+  });
   const initialManualTypes: ManualTypes = {
     include_cloze: Boolean(userSettings.include_cloze),
     include_normal: Boolean(userSettings.include_normal),
@@ -131,6 +139,14 @@ export function FlashcardSettingsForm({
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (
+      isFamilyEnabled("mcq") &&
+      !mcqQuestionFormats.single_word &&
+      !mcqQuestionFormats.sentence
+    ) {
+      setError("Select at least one MCQ question format.");
+      return;
+    }
     const formData = new FormData(e.currentTarget);
     formData.set("daily_plan_mode", dailyPlanMode);
     formData.set("manual_daily_card_limit", String(manualDailyLimit));
@@ -142,9 +158,15 @@ export function FlashcardSettingsForm({
       formData.set(key, String(directionTypes[key]));
     }
     formData.set("auto_advance_correct", String(autoAdvanceCorrect));
+    formData.set(
+      "mcq_question_formats",
+      serializeSelectedMcqQuestionFormats(mcqQuestionFormats),
+    );
     startTransition(() => {
       void updateUserSettingsAction(
-        Object.fromEntries(formData.entries()) as RawSettingsInput,
+        Object.fromEntries(formData.entries()) as RawSettingsInput & {
+          mcq_question_formats: string;
+        },
       ).then((res) => {
         if (!res.ok) setError(res.error);
         else {
@@ -193,6 +215,21 @@ export function FlashcardSettingsForm({
     setDirectionTypes((prev) => ({ ...prev, [key]: checked }));
   }
 
+  function handleMcqQuestionFormatChange(
+    key: McqQuestionFormat,
+    checked: boolean,
+  ) {
+    if (!checked && isMcqQuestionFormatLocked(key)) {
+      setError("Select at least one MCQ question format.");
+      return;
+    }
+
+    setMcqQuestionFormats((prev) => ({ ...prev, [key]: checked }));
+    setError((prev) =>
+      prev === "Select at least one MCQ question format." ? null : prev,
+    );
+  }
+
   function isFamilyEnabled(family: FlashcardFamily) {
     if (flashcardSelectionMode === "recommended") {
       return recommended.recommendedTypes[family];
@@ -207,6 +244,14 @@ export function FlashcardSettingsForm({
       isFamilyEnabled(family)
       && isCurrentDirectionValue(directionTypes, key)
       && !otherDirectionValue(directionTypes, key)
+    );
+  }
+
+  function isMcqQuestionFormatLocked(key: McqQuestionFormat) {
+    return (
+      isFamilyEnabled("mcq") &&
+      mcqQuestionFormats[key] &&
+      !otherMcqQuestionFormatValue(mcqQuestionFormats, key)
     );
   }
 
@@ -422,6 +467,68 @@ export function FlashcardSettingsForm({
                   )
                 }
               />
+
+              <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900/50">
+                <div className="flex flex-col gap-1">
+                  <h3 className="font-medium text-zinc-900 dark:text-zinc-100">
+                    MCQ question format
+                  </h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Choose how MCQ questions are shown. Select at least one.
+                  </p>
+                </div>
+                {!isFamilyEnabled("mcq") ? (
+                  <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
+                    Turn on this family above to use its question format settings.
+                  </p>
+                ) : (
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <label className="app-toggle">
+                      <span className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          name="mcq_question_format_single_word"
+                          checked={mcqQuestionFormats.single_word}
+                          onChange={(e) =>
+                            handleMcqQuestionFormatChange(
+                              "single_word",
+                              e.currentTarget.checked,
+                            )
+                          }
+                          disabled={isMcqQuestionFormatLocked("single_word")}
+                          className="app-check"
+                        />
+                        <span>Single word</span>
+                      </span>
+                    </label>
+                    <label className="app-toggle">
+                      <span className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          name="mcq_question_format_sentence"
+                          checked={mcqQuestionFormats.sentence}
+                          onChange={(e) =>
+                            handleMcqQuestionFormatChange(
+                              "sentence",
+                              e.currentTarget.checked,
+                            )
+                          }
+                          disabled={isMcqQuestionFormatLocked("sentence")}
+                          className="app-check"
+                        />
+                        <span>Sentence</span>
+                      </span>
+                    </label>
+                  </div>
+                )}
+                {isFamilyEnabled("mcq") &&
+                (isMcqQuestionFormatLocked("single_word") ||
+                  isMcqQuestionFormatLocked("sentence")) ? (
+                  <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+                    At least one question format must stay on.
+                  </p>
+                ) : null}
+              </section>
             </div>
           </div>
         </details>
@@ -489,6 +596,9 @@ export function FlashcardSettingsForm({
           <p className="mt-1">
             Effective directions:{" "}
             {summarizeDirections(effective.effectiveDirections, effective.effectiveTypes)}
+          </p>
+          <p className="mt-1">
+            MCQ question format: {summarizeMcqQuestionFormats(mcqQuestionFormats)}
           </p>
         </div>
         <button type="submit" disabled={pending} className="app-button">
@@ -656,6 +766,31 @@ function otherDirectionValue(directionTypes: DirectionTypes, key: DirectionKey) 
     case "include_normal_es_to_en":
       return directionTypes.include_normal_en_to_es;
   }
+}
+
+function otherMcqQuestionFormatValue(
+  formats: McqQuestionFormats,
+  key: McqQuestionFormat,
+) {
+  return key === "single_word" ? formats.sentence : formats.single_word;
+}
+
+function serializeSelectedMcqQuestionFormats(formats: McqQuestionFormats) {
+  return [
+    formats.single_word ? "single_word" : null,
+    formats.sentence ? "sentence" : null,
+  ]
+    .filter(Boolean)
+    .join(",");
+}
+
+function summarizeMcqQuestionFormats(formats: McqQuestionFormats) {
+  const enabled = [
+    formats.single_word ? "Single word" : null,
+    formats.sentence ? "Sentence" : null,
+  ].filter(Boolean);
+
+  return enabled.length > 0 ? enabled.join(", ") : "Single word";
 }
 
 function isCurrentDirectionValue(directionTypes: DirectionTypes, key: DirectionKey) {

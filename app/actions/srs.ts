@@ -1,5 +1,6 @@
 "use server";
 
+import { getSupabaseUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { MAX_DUE_REVIEWS, MAX_NEW_WORDS } from "@/lib/srs/constants";
 import type {
@@ -13,6 +14,7 @@ import type {
   Grade,
 } from "@/lib/srs/types";
 import { getUserSettings } from "@/lib/settings/getUserSettings";
+import { getMcqQuestionFormatsPreference } from "@/lib/settings/mcqQuestionFormats";
 import { recommendSettings } from "@/lib/settings/recommendSettings";
 import { resolveEffectiveSettings } from "@/lib/settings/resolveEffectiveSettings";
 import type { EnabledFlashcardMode } from "@/lib/settings/types";
@@ -39,6 +41,9 @@ export type TodayFlashcardsResult =
         autoAdvanceCorrect: boolean;
         showPosHint: boolean;
         showDefinitionFirst: boolean;
+        mcqQuestionFormats: Awaited<
+          ReturnType<typeof getMcqQuestionFormatsPreference>
+        >;
         enabledTypes: Record<EnabledFlashcardMode, boolean>;
       };
     }
@@ -56,6 +61,9 @@ export type TodayFlashcardsResult =
         autoAdvanceCorrect: boolean;
         showPosHint: boolean;
         showDefinitionFirst: boolean;
+        mcqQuestionFormats: Awaited<
+          ReturnType<typeof getMcqQuestionFormatsPreference>
+        >;
         enabledTypes: Record<EnabledFlashcardMode, boolean>;
       };
     };
@@ -90,9 +98,16 @@ export async function getDailyQueue(
     };
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user, error: authError } = await getSupabaseUser(supabase);
+  if (authError) {
+    return {
+      ok: false,
+      session: { dueReviews: [], newWords: [] },
+      signedIn: false,
+      error: authError,
+    };
+  }
+
   if (!user) {
     return {
       ok: false,
@@ -182,6 +197,7 @@ export async function getDailyQueue(
 
 export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsResult> {
   const { settings, signedIn } = await getUserSettings();
+  const mcqQuestionFormats = await getMcqQuestionFormatsPreference();
   const recommended = await recommendSettings();
   const effective = resolveEffectiveSettings(settings, recommended);
   const existingDailySession = await getTodayDailySession();
@@ -195,6 +211,7 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     autoAdvanceCorrect: effective.autoAdvanceCorrect,
     showPosHint: effective.showPosHint,
     showDefinitionFirst: effective.showDefinitionFirst,
+    mcqQuestionFormats,
     enabledTypes: effective.enabledModes,
   };
 
@@ -239,9 +256,7 @@ async function getTodayDailySession(): Promise<DailySessionRow | null> {
   const supabase = await createSupabaseServerClient();
   if (!supabase) return null;
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user } = await getSupabaseUser(supabase);
   if (!user) return null;
 
   const sessionDate = new Date().toISOString().slice(0, 10);
@@ -281,9 +296,11 @@ export async function recordReview(
       };
     }
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const { user, error: authError } = await getSupabaseUser(supabase);
+    if (authError) {
+      return { ok: false, error: authError };
+    }
+
     if (!user) {
       return { ok: false, error: "Not authenticated" };
     }
@@ -372,9 +389,11 @@ export async function recordExposure(
     };
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user, error: authError } = await getSupabaseUser(supabase);
+  if (authError) {
+    return { ok: false, error: authError };
+  }
+
   if (!user) {
     return { ok: false, error: "Not authenticated" };
   }
@@ -414,9 +433,7 @@ async function upsertDailySession(
   const supabase = await createSupabaseServerClient();
   if (!supabase) return null;
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user } = await getSupabaseUser(supabase);
   if (!user) return null;
 
   const sessionDate = new Date().toISOString().slice(0, 10);
@@ -582,9 +599,7 @@ export async function getFlashcardDebugSnapshot(
     };
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user } = await getSupabaseUser(supabase);
   if (!user) {
     return {
       dailySession: null,

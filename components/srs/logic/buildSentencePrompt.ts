@@ -1,12 +1,11 @@
 import frequencySeed from "@/data/spanish-frequency.json";
 
+export const SENTENCE_CLOZE_BLANK_TOKEN = "__FLASHCARD_SENTENCE_BLANK__";
+
 type CandidateWord = {
-  id: string;
+  id?: string;
   lemma: string;
-  translation: string | null;
-  definition: string | null;
-  definitionEs?: string | null;
-  definitionEn?: string | null;
+  definition?: string | null;
   exampleSentence?: string | null;
   exampleSentenceEn?: string | null;
   pos?: string | null;
@@ -14,12 +13,11 @@ type CandidateWord = {
   rank?: number;
 };
 
-type SentencePromptData = {
+export type SentencePromptData = {
   instruction: string;
   sentence: string;
   translation: string | null;
   answer: string;
-  options: string[];
 };
 
 type SeedWord = {
@@ -30,30 +28,32 @@ type SeedWord = {
 
 const seedWords = frequencySeed as SeedWord[];
 
-export function buildSentencePrompt(
-  target: CandidateWord,
-  pool: CandidateWord[],
-): SentencePromptData {
+export function buildSentencePrompt(target: CandidateWord): SentencePromptData {
   const extracted = extractSentence(target);
-  const sentence = extracted
-    ? maskLemma(extracted.sentence, target.lemma)
-    : buildFallbackSentence(target);
-  const options = buildSentenceOptions(target, pool);
+  const sentence = extracted?.sentence ?? buildFallbackSentence(target);
 
   return {
-    instruction: "Choose the word that best completes the sentence.",
-    sentence,
+    instruction: "Write the missing word.",
+    sentence: maskLemma(sentence, target.lemma),
     translation: extracted?.translation ?? null,
     answer: target.lemma,
-    options,
   };
 }
 
-function buildSentenceOptions(target: CandidateWord, pool: CandidateWord[]) {
-  const candidates = pool
-    .filter((candidate) => candidate.id !== target.id && candidate.lemma !== target.lemma)
+export function buildSentenceMcqOptions(
+  target: CandidateWord,
+  pool: CandidateWord[],
+) {
+  const distractors = pool
+    .filter((candidate) => {
+      return (
+        candidate.id !== target.id &&
+        candidate.lemma !== target.lemma &&
+        candidate.lemma
+      );
+    })
     .map((candidate) => ({
-      lemma: candidate.lemma,
+      lemma: candidate.lemma.trim(),
       samePos: candidate.pos && target.pos ? candidate.pos === target.pos : false,
       rankDistance:
         typeof candidate.rank === "number" && typeof target.rank === "number"
@@ -68,23 +68,29 @@ function buildSentenceOptions(target: CandidateWord, pool: CandidateWord[]) {
       return left.lemma.localeCompare(right.lemma);
     });
 
-  const distractors = uniqueStrings(candidates.map((candidate) => candidate.lemma)).slice(0, 3);
+  const options = uniqueStrings(distractors.map((candidate) => candidate.lemma)).slice(
+    0,
+    3,
+  );
 
-  if (distractors.length < 3) {
+  if (options.length < 3) {
     for (const seed of seedWords) {
       const candidate = seed.word.trim();
-      if (!candidate || candidate === target.lemma || distractors.includes(candidate)) {
+      if (!candidate || candidate === target.lemma || options.includes(candidate)) {
         continue;
       }
-      distractors.push(candidate);
-      if (distractors.length === 3) break;
+      options.push(candidate);
+      if (options.length === 3) break;
     }
   }
 
-  const options = distractors.slice(0, 3);
-  const insertAt = hashString(target.id) % (options.length + 1);
+  const insertAt = hashString(target.id ?? target.lemma) % (options.length + 1);
   options.splice(insertAt, 0, target.lemma);
-  return options;
+
+  return {
+    options,
+    correctOption: target.lemma,
+  };
 }
 
 function extractSentence(target: CandidateWord) {
@@ -96,23 +102,39 @@ function extractSentence(target: CandidateWord) {
 }
 
 function buildFallbackSentence(target: CandidateWord) {
-  const blank = "_____";
+  const blank = SENTENCE_CLOZE_BLANK_TOKEN;
+
   if (target.pos === "verb") {
     return `Cada dia necesito ${blank} para terminar esto.`;
   }
+
   if (target.pos === "adj") {
     return `La idea parece ${blank} en este contexto.`;
   }
+
   return `Hoy veo ${blank} en esta situacion.`;
 }
 
 function maskLemma(sentence: string, lemma: string) {
-  const escaped = lemma.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp(`\\b${escaped}\\b`, "i");
-  if (regex.test(sentence)) {
-    return sentence.replace(regex, "_____");
+  if (sentence.includes(SENTENCE_CLOZE_BLANK_TOKEN)) {
+    return sentence;
   }
-  return `${sentence} (_____)`;
+
+  const escapedLemma = lemma.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const boundary = "[^\\p{L}\\p{N}_]";
+  const matcher = new RegExp(
+    `(^|${boundary})(${escapedLemma})(?=$|${boundary})`,
+    "iu",
+  );
+
+  if (matcher.test(sentence)) {
+    return sentence.replace(
+      matcher,
+      (_, prefix: string) => `${prefix}${SENTENCE_CLOZE_BLANK_TOKEN}`,
+    );
+  }
+
+  return `${sentence} (${SENTENCE_CLOZE_BLANK_TOKEN})`;
 }
 
 function uniqueStrings(values: string[]) {

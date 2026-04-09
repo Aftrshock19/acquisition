@@ -1,5 +1,9 @@
 import { buildMcqOptions } from "@/components/srs/logic/buildMcqOptions";
-import { buildSentencePrompt } from "@/components/srs/logic/buildSentencePrompt";
+import {
+  buildSentenceMcqOptions,
+  buildSentencePrompt,
+} from "@/components/srs/logic/buildSentencePrompt";
+import type { McqQuestionFormat } from "@/lib/settings/mcqQuestionFormats";
 import type { EnabledFlashcardMode } from "@/lib/settings/types";
 import { formatPartOfSpeech } from "@/lib/srs/partOfSpeech";
 import type {
@@ -77,19 +81,21 @@ export type UnifiedQueueCard =
     })
   | (UnifiedQueueSourceCard & {
       cardType: "mcq";
+      questionFormat: McqQuestionFormat;
       prompt: string;
       options: string[];
       correctOption: string;
+      sentenceData?: {
+        sentence: string;
+      };
     })
   | (UnifiedQueueSourceCard & {
       cardType: "sentences";
       prompt: string;
-      options: string[];
       correctOption: string;
       sentenceData: {
         instruction: string;
         sentence: string;
-        translation: string | null;
       };
     });
 
@@ -102,6 +108,7 @@ export type UnifiedQueueResult = {
 export function buildUnifiedQueue(
   session: TodaySession,
   enabledModes: Record<EnabledFlashcardMode, boolean>,
+  mcqQuestionFormats: readonly McqQuestionFormat[] = ["single_word"],
 ): UnifiedQueueResult {
   debugQueueBuild("input", {
     enabledModes,
@@ -160,6 +167,7 @@ export function buildUnifiedQueue(
     })),
   ];
 
+  let mcqIndex = 0;
   const queue: UnifiedQueueCard[] = baseCards.map((card, index) => {
     const cardMode = enabledImplementedTypes[index % enabledImplementedTypes.length];
 
@@ -196,10 +204,31 @@ export function buildUnifiedQueue(
     }
 
     if (cardMode === "mcq") {
+      const questionFormat =
+        mcqQuestionFormats[mcqIndex % mcqQuestionFormats.length] ?? "single_word";
+      mcqIndex += 1;
+
+      if (questionFormat === "sentence") {
+        const sentencePrompt = buildSentencePrompt(card);
+        const mcq = buildSentenceMcqOptions(card, baseCards);
+        return {
+          ...card,
+          cardType: "mcq" as const,
+          questionFormat,
+          prompt: "Which word completes the sentence?",
+          options: mcq.options,
+          correctOption: mcq.correctOption,
+          sentenceData: {
+            sentence: sentencePrompt.sentence,
+          },
+        };
+      }
+
       const mcq = buildMcqOptions(card, baseCards);
       return {
         ...card,
         cardType: "mcq" as const,
+        questionFormat,
         prompt: `What does "${card.lemma}" mean?`,
         options: mcq.options,
         correctOption: mcq.correctOption,
@@ -219,17 +248,15 @@ export function buildUnifiedQueue(
       };
     }
 
-    const sentence = buildSentencePrompt(card, baseCards);
+    const sentence = buildSentencePrompt(card);
     return {
       ...card,
       cardType: "sentences" as const,
       prompt: sentence.instruction,
-      options: sentence.options,
       correctOption: sentence.answer,
       sentenceData: {
         instruction: sentence.instruction,
         sentence: sentence.sentence,
-        translation: sentence.translation,
       },
     };
   });

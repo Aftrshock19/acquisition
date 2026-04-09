@@ -1,11 +1,22 @@
 'use server';
 
+import { cookies } from 'next/headers';
+import { getSupabaseUser } from '@/lib/supabase/auth';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { normalizeUserSettingsInput, type RawSettingsInput } from '@/lib/settings/normalizeUserSettingsInput';
+import {
+  MCQ_QUESTION_FORMATS_COOKIE,
+  parseMcqQuestionFormats,
+  readRequestedMcqQuestionFormats,
+  serializeMcqQuestionFormats,
+} from '@/lib/settings/mcqQuestionFormats';
 import type { UserSettingsRow } from '@/lib/settings/types';
 import { revalidatePath } from 'next/cache';
 
 export type UpdateUserSettingsResult = { ok: true } | { ok: false; error: string };
+type UpdateUserSettingsInput = RawSettingsInput & {
+  mcq_question_formats?: string;
+};
 
 const DEBUG_SETTINGS_KEYS = [
   'daily_plan_mode',
@@ -27,27 +38,36 @@ const DEBUG_SETTINGS_KEYS = [
 ] as const;
 
 export async function updateUserSettingsAction(
-  input: RawSettingsInput,
+  input: UpdateUserSettingsInput,
 ): Promise<UpdateUserSettingsResult> {
   const supabase = await createSupabaseServerClient();
   if (!supabase) {
     return { ok: false, error: 'Supabase not configured' };
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user, error: authError } = await getSupabaseUser(supabase);
+  if (authError) {
+    return { ok: false, error: authError };
+  }
+
   if (!user) {
     return { ok: false, error: 'Not authenticated' };
   }
 
   let payload: Partial<UserSettingsRow>;
+  const { mcq_question_formats, ...settingsInput } = input;
   try {
-    payload = normalizeUserSettingsInput(input);
+    payload = normalizeUserSettingsInput(settingsInput);
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Invalid settings';
     return { ok: false, error: message };
   }
+
+  const requestedMcqQuestionFormats = readRequestedMcqQuestionFormats(mcq_question_formats);
+  if (settingsInput.include_mcq === 'true' && requestedMcqQuestionFormats.length === 0) {
+    return { ok: false, error: 'Select at least one MCQ question format.' };
+  }
+  const parsedMcqQuestionFormats = parseMcqQuestionFormats(mcq_question_formats);
 
   // Always ensure user_id is set for upsert
   const row: Partial<UserSettingsRow> = {
@@ -96,6 +116,18 @@ export async function updateUserSettingsAction(
         'Settings did not persist correctly. Apply the latest database migration for flashcard direction settings and try again.',
     };
   }
+
+  const cookieStore = await cookies();
+  cookieStore.set(
+    MCQ_QUESTION_FORMATS_COOKIE,
+    serializeMcqQuestionFormats(parsedMcqQuestionFormats),
+    {
+      httpOnly: false,
+      maxAge: 60 * 60 * 24 * 365,
+      path: '/',
+      sameSite: 'lax',
+    },
+  );
 
   revalidatePath('/');
   revalidatePath('/settings');

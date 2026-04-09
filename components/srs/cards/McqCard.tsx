@@ -6,6 +6,7 @@ import {
   FlashcardFeedbackPanel,
   FlashcardSuccessActions,
 } from "@/components/srs/cards/FlashcardContainer";
+import { SentenceClozePrompt } from "@/components/srs/cards/SentenceClozePrompt";
 import type { UnifiedQueueCard } from "@/components/srs/logic/buildUnifiedQueue";
 
 type McqCardProps = {
@@ -56,6 +57,12 @@ export function McqCard({
         navigation={navigation}
       >
         <p className="mt-2 text-lg font-medium">{card.prompt}</p>
+        {card.questionFormat === "sentence" && card.sentenceData ? (
+          <SentenceClozePrompt
+            sentence={card.sentenceData.sentence}
+            className="mt-4 text-xl font-medium tracking-tight text-zinc-900 dark:text-zinc-100"
+          />
+        ) : null}
         {showPosHint && card.hint ? (
           <p className="mt-1 text-sm text-zinc-500">({card.hint})</p>
         ) : null}

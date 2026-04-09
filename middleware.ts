@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import { getSupabaseUser } from "@/lib/supabase/auth";
 
 export async function middleware(request: NextRequest) {
   const response = NextResponse.next({ request });
@@ -21,7 +22,11 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  await supabase.auth.getUser();
+  const { error } = await getSupabaseUser(supabase);
+  if (error) {
+    console.error("[middleware] supabase auth unavailable", error);
+  }
+
   return response;
 }
 
