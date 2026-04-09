@@ -17,6 +17,7 @@ export type RawSettingsInput = Partial<{
   auto_advance_correct: string | boolean;
   show_pos_hint: string | boolean;
   show_definition_first: string | boolean;
+  hide_translation_sentences: string | boolean;
 }>;
 
 export function normalizeUserSettingsInput(raw: RawSettingsInput): Partial<UserSettingsRow> {
@@ -64,6 +65,9 @@ export function normalizeUserSettingsInput(raw: RawSettingsInput): Partial<UserS
 
   if (raw.show_pos_hint !== undefined) out.show_pos_hint = toBool(raw.show_pos_hint);
   if (raw.show_definition_first !== undefined) out.show_definition_first = toBool(raw.show_definition_first);
+  if (raw.hide_translation_sentences !== undefined) {
+    out.hide_translation_sentences = toBool(raw.hide_translation_sentences);
+  }
 
   // If manual mode is requested, enforce at least one type enabled.
   if (out.flashcard_selection_mode === 'manual') {

@@ -111,6 +111,8 @@ export function FlashcardSettingsForm({
   const [autoAdvanceCorrect, setAutoAdvanceCorrect] = useState<boolean>(
     Boolean(userSettings.auto_advance_correct),
   );
+  const [hideTranslationSentences, setHideTranslationSentences] =
+    useState<boolean>(Boolean(userSettings.hide_translation_sentences));
   const [mcqQuestionFormats, setMcqQuestionFormats] = useState<McqQuestionFormats>({
     single_word: initialMcqQuestionFormats.includes("single_word"),
     sentence: initialMcqQuestionFormats.includes("sentence"),
@@ -158,6 +160,10 @@ export function FlashcardSettingsForm({
       formData.set(key, String(directionTypes[key]));
     }
     formData.set("auto_advance_correct", String(autoAdvanceCorrect));
+    formData.set(
+      "hide_translation_sentences",
+      String(hideTranslationSentences),
+    );
     formData.set(
       "mcq_question_formats",
       serializeSelectedMcqQuestionFormats(mcqQuestionFormats),
@@ -528,6 +534,39 @@ export function FlashcardSettingsForm({
                     At least one question format must stay on.
                   </p>
                 ) : null}
+              </section>
+
+              <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900/50">
+                <div className="flex flex-col gap-1">
+                  <h3 className="font-medium text-zinc-900 dark:text-zinc-100">
+                    Sentence translation
+                  </h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Hide the translation on Sentence cards so the learner answers from sentence context only.
+                  </p>
+                </div>
+                {!isFamilyEnabled("sentences") ? (
+                  <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
+                    Turn on this family above to use its advanced settings.
+                  </p>
+                ) : (
+                  <div className="mt-4 grid gap-3">
+                    <label className="app-toggle">
+                      <span className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          name="hide_translation_sentences"
+                          checked={hideTranslationSentences}
+                          onChange={(e) =>
+                            setHideTranslationSentences(e.currentTarget.checked)
+                          }
+                          className="app-check"
+                        />
+                        <span>Hide translation</span>
+                      </span>
+                    </label>
+                  </div>
+                )}
               </section>
             </div>
           </div>

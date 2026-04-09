@@ -40,6 +40,7 @@ export type TodayFlashcardsResult =
         autoAdvanceCorrect: boolean;
         showPosHint: boolean;
         showDefinitionFirst: boolean;
+        hideTranslationSentences: boolean;
         mcqQuestionFormats: Awaited<
           ReturnType<typeof getMcqQuestionFormatsPreference>
         >;
@@ -59,6 +60,7 @@ export type TodayFlashcardsResult =
         autoAdvanceCorrect: boolean;
         showPosHint: boolean;
         showDefinitionFirst: boolean;
+        hideTranslationSentences: boolean;
         mcqQuestionFormats: Awaited<
           ReturnType<typeof getMcqQuestionFormatsPreference>
         >;
@@ -215,6 +217,7 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     autoAdvanceCorrect: effective.autoAdvanceCorrect,
     showPosHint: effective.showPosHint,
     showDefinitionFirst: effective.showDefinitionFirst,
+    hideTranslationSentences: effective.hideTranslationSentences,
     mcqQuestionFormats,
     enabledTypes: effective.enabledModes,
   };

@@ -35,6 +35,7 @@ const DEBUG_SETTINGS_KEYS = [
   'auto_advance_correct',
   'show_pos_hint',
   'show_definition_first',
+  'hide_translation_sentences',
 ] as const;
 
 export async function updateUserSettingsAction(
@@ -150,6 +151,10 @@ function isMissingAutoAdvanceColumnError(message?: string) {
   return Boolean(message?.includes("auto_advance_correct"));
 }
 
+function isMissingSentenceTranslationVisibilityColumnError(message?: string) {
+  return Boolean(message?.includes("hide_translation_sentences"));
+}
+
 function formatSettingsSaveError(message?: string) {
   if (isMissingDirectionColumnError(message)) {
     return 'Flashcard direction settings could not be saved because the database is missing the latest direction columns. Run the newest Supabase migration and try again.';
@@ -157,6 +162,10 @@ function formatSettingsSaveError(message?: string) {
 
   if (isMissingAutoAdvanceColumnError(message)) {
     return 'Auto-next settings could not be saved because the database is missing the latest settings column. Run the newest Supabase migration and try again.';
+  }
+
+  if (isMissingSentenceTranslationVisibilityColumnError(message)) {
+    return 'Sentence translation visibility settings could not be saved because the database is missing the latest settings column. Run the newest Supabase migration and try again.';
   }
 
   return message ?? 'Failed to save settings';

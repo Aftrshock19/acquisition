@@ -43,6 +43,7 @@ export type UserSettingsRow = {
   auto_advance_correct: boolean;
   show_pos_hint: boolean;
   show_definition_first: boolean;
+  hide_translation_sentences: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -63,4 +64,5 @@ export type EffectiveFlashcardSettings = {
   autoAdvanceCorrect: boolean;
   showPosHint: boolean;
   showDefinitionFirst: boolean;
+  hideTranslationSentences: boolean;
 };

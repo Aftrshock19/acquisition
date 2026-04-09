@@ -5,7 +5,7 @@ import {
   FlashcardContainer,
   FlashcardSuccessActions,
 } from "@/components/srs/cards/FlashcardContainer";
-import { CorrectionHintInput } from "@/components/srs/cards/CorrectionHintInput";
+import { TextAnswerInput } from "@/components/srs/cards/TextAnswerInput";
 
 type TypingFlashcardCardProps = {
   typeLabel: string;
@@ -66,7 +66,7 @@ export function TypingFlashcardCard({
           </p>
         ) : null}
 
-        <CorrectionHintInput
+        <TextAnswerInput
           value={value}
           onChange={onChange}
           placeholder={inputPlaceholder}

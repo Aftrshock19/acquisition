@@ -68,6 +68,7 @@ export function resolveEffectiveSettings(
     autoAdvanceCorrect: user.auto_advance_correct,
     showPosHint: user.show_pos_hint,
     showDefinitionFirst: user.show_definition_first,
+    hideTranslationSentences: user.hide_translation_sentences,
   };
 }
 

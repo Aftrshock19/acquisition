@@ -154,6 +154,20 @@ describe("flashcard direction flow", () => {
     expect(effective.autoAdvanceCorrect).toBe(false);
   });
 
+  it("defaults hide translation for sentence cards to false", () => {
+    const effective = resolveEffectiveSettings(makeSettings(), RECOMMENDED);
+
+    expect(effective.hideTranslationSentences).toBe(false);
+  });
+
+  it("normalizes hide translation for sentence cards as a boolean", () => {
+    const normalized = normalizeUserSettingsInput({
+      hide_translation_sentences: "true",
+    });
+
+    expect(normalized.hide_translation_sentences).toBe(true);
+  });
+
   it("builds only single-word MCQ cards when only the single-word format is selected", () => {
     const queue = buildUnifiedQueue(
       makeSession(),
@@ -243,6 +257,7 @@ function makeSettings(overrides: Partial<UserSettingsRow> = {}): UserSettingsRow
     auto_advance_correct: true,
     show_pos_hint: true,
     show_definition_first: true,
+    hide_translation_sentences: false,
     created_at: new Date(0).toISOString(),
     updated_at: new Date(0).toISOString(),
     ...overrides,

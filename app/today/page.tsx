@@ -137,6 +137,7 @@ export default async function TodayPage() {
           retryDelayMs={effectiveSettings.retryDelaySeconds * 1000}
           autoAdvanceCorrect={effectiveSettings.autoAdvanceCorrect}
           showPosHint={effectiveSettings.showPosHint}
+          hideTranslationSentences={effectiveSettings.hideTranslationSentences}
           initialDailySession={result.dailySession ?? null}
         />
       )}

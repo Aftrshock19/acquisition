@@ -46,6 +46,7 @@ type Props = {
   retryDelayMs?: number;
   autoAdvanceCorrect?: boolean;
   showPosHint?: boolean;
+  hideTranslationSentences?: boolean;
   initialDailySession?: DailySessionRow | null;
 };
 
@@ -143,6 +144,7 @@ export function TodaySession({
   retryDelayMs = 90000,
   autoAdvanceCorrect = true,
   showPosHint = true,
+  hideTranslationSentences = false,
   initialDailySession = null,
 }: Props) {
   const { queue, enabledImplementedTypes, enabledUnimplementedTypes } = useMemo(
@@ -843,6 +845,7 @@ export function TodaySession({
               busy={busy}
               submitError={submitError}
               showPosHint={showPosHint}
+              hideTranslation={hideTranslationSentences}
               feedback={feedback}
               correctionPlaceholder={
                 feedback?.expected
@@ -1080,6 +1083,13 @@ function ReviewedChoiceCard({
         ) : null}
       </div>
 
+      {card.cardType === "mcq" && card.questionFormat === "sentence" ? (
+        <ReviewedSentenceSupport
+          translation={card.translation ?? null}
+          englishSentence={card.exampleSentenceEn ?? null}
+        />
+      ) : null}
+
       <div className="grid gap-2">
         {card.options.map((option) => {
           const isSelected = option === userAnswer;
@@ -1134,6 +1144,11 @@ function ReviewedSentenceCard({
         ) : null}
       </div>
 
+      <ReviewedSentenceSupport
+        translation={card.translation ?? null}
+        englishSentence={card.exampleSentenceEn ?? null}
+      />
+
       <div className="rounded-lg border border-green-300 bg-green-50 p-4 dark:border-green-800 dark:bg-green-950/40">
         <p className="text-xs uppercase tracking-[0.14em] text-green-700 dark:text-green-300">
           Correct answer
@@ -1142,6 +1157,52 @@ function ReviewedSentenceCard({
           {answer ?? card.correctOption}
         </p>
       </div>
+    </div>
+  );
+}
+
+function ReviewedSentenceSupport({
+  translation,
+  englishSentence,
+}: {
+  translation: string | null;
+  englishSentence: string | null;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const wordTranslation = translation?.trim() || null;
+  const normalizedEnglishSentence = englishSentence?.trim() || null;
+
+  if (!wordTranslation && !normalizedEnglishSentence) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 dark:border-zinc-800 dark:bg-zinc-900/70">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-base font-medium text-zinc-900 dark:text-zinc-100">
+            {wordTranslation ?? "Unavailable"}
+          </p>
+        </div>
+        {normalizedEnglishSentence ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            aria-expanded={expanded}
+            className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500 transition-colors hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+          >
+            {expanded ? "Hide sentence" : "Show sentence"}
+          </button>
+        ) : null}
+      </div>
+
+      {expanded && normalizedEnglishSentence ? (
+        <div className="mt-3 pt-1">
+          <p className="text-sm text-zinc-700 dark:text-zinc-300">
+            {normalizedEnglishSentence}
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }

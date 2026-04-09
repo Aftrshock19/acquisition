@@ -20,6 +20,7 @@ const DEFAULT_SETTINGS: UserSettingsRow = {
   auto_advance_correct: true,
   show_pos_hint: true,
   show_definition_first: true,
+  hide_translation_sentences: false,
   created_at: new Date(0).toISOString(),
   updated_at: new Date(0).toISOString(),
 };
