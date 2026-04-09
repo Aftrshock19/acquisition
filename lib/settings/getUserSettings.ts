@@ -1,5 +1,4 @@
-import { getSupabaseUser } from "@/lib/supabase/auth";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getSupabaseServerContext } from "@/lib/supabase/server";
 import type { UserSettingsRow } from "./types";
 
 const DEFAULT_SETTINGS: UserSettingsRow = {
@@ -26,12 +25,11 @@ const DEFAULT_SETTINGS: UserSettingsRow = {
 };
 
 export async function getUserSettings() {
-  const supabase = await createSupabaseServerClient();
+  const { supabase, user, error: authError } = await getSupabaseServerContext();
   if (!supabase) {
     return { settings: DEFAULT_SETTINGS, exists: false, signedIn: false };
   }
 
-  const { user, error: authError } = await getSupabaseUser(supabase);
   if (authError) {
     return {
       settings: DEFAULT_SETTINGS,
@@ -52,7 +50,6 @@ export async function getUserSettings() {
     .maybeSingle();
 
   if (error) {
-    // On error, fall back to defaults but mark signed-in
     return {
       settings: { ...DEFAULT_SETTINGS, user_id: user.id },
       exists: false,

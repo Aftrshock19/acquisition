@@ -1,11 +1,7 @@
-import { getSupabaseUser } from "@/lib/supabase/auth";
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import type { RecommendedSettings, RecommendedTypes } from './types';
+import { getSupabaseServerContext } from "@/lib/supabase/server";
+import type { RecommendedSettings, RecommendedTypes } from "./types";
 
 export async function recommendSettings(): Promise<RecommendedSettings> {
-  const supabase = await createSupabaseServerClient();
-
-  // Start from simple defaults
   let recommendedDailyLimit = 30;
   let types: RecommendedTypes = {
     cloze: true,
@@ -15,27 +11,22 @@ export async function recommendSettings(): Promise<RecommendedSettings> {
     sentences: false,
   };
 
-  if (!supabase) {
+  const { supabase, user } = await getSupabaseServerContext();
+  if (!supabase || !user) {
     return { recommendedDailyLimit, recommendedTypes: types };
   }
 
-  const { user } = await getSupabaseUser(supabase);
-  if (!user) {
-    return { recommendedDailyLimit, recommendedTypes: types };
-  }
-
-  // Cheap heuristics: backlog size and recent accuracy
   const [{ count: dueCount }, { data: recentEvents }] = await Promise.all([
     supabase
-      .from('user_words')
-      .select('word_id', { count: 'exact', head: true })
-      .eq('user_id', user.id)
-      .lte('due_at', new Date().toISOString()),
+      .from("user_words")
+      .select("word_id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .lte("due_at", new Date().toISOString()),
     supabase
-      .from('review_events')
-      .select('correct')
-      .eq('user_id', user.id)
-      .order('happened_at', { ascending: false })
+      .from("review_events")
+      .select("correct")
+      .eq("user_id", user.id)
+      .order("happened_at", { ascending: false })
       .limit(100),
   ]);
 
@@ -48,7 +39,6 @@ export async function recommendSettings(): Promise<RecommendedSettings> {
     accuracy = correctCount / events.length;
   }
 
-  // Adjust daily limit based on backlog and accuracy
   if (backlog > 200 || accuracy < 0.7) {
     recommendedDailyLimit = 20;
   } else if (backlog > 100 || accuracy < 0.8) {
@@ -57,10 +47,8 @@ export async function recommendSettings(): Promise<RecommendedSettings> {
     recommendedDailyLimit = 40;
   }
 
-  // Clamp
   recommendedDailyLimit = Math.min(200, Math.max(10, recommendedDailyLimit));
 
-  // Very simple type rules based on rough "experience" proxy
   const totalReviews = events.length;
   if (totalReviews < 50) {
     types = { cloze: true, normal: true, audio: false, mcq: true, sentences: false };

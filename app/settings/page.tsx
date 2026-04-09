@@ -1,7 +1,5 @@
 import { redirect } from 'next/navigation';
 import { BackButton } from '@/components/BackButton';
-import { getSupabaseUser } from '@/lib/supabase/auth';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getUserSettings } from '@/lib/settings/getUserSettings';
 import { getMcqQuestionFormatsPreference } from '@/lib/settings/mcqQuestionFormats';
 import { recommendSettings } from '@/lib/settings/recommendSettings';
@@ -9,8 +7,17 @@ import { resolveEffectiveSettings } from '@/lib/settings/resolveEffectiveSetting
 import { FlashcardSettingsForm } from '@/components/settings/FlashcardSettingsForm';
 
 export default async function SettingsPage() {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) {
+  const [
+    { settings, signedIn, error },
+    mcqQuestionFormats,
+    recommended,
+  ] = await Promise.all([
+    getUserSettings(),
+    getMcqQuestionFormatsPreference(),
+    recommendSettings(),
+  ]);
+
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
     return (
       <main className="app-shell">
         <BackButton />
@@ -23,8 +30,6 @@ export default async function SettingsPage() {
       </main>
     );
   }
-
-  const { user, error } = await getSupabaseUser(supabase);
 
   if (error) {
     return (
@@ -48,13 +53,10 @@ export default async function SettingsPage() {
     );
   }
 
-  if (!user) {
+  if (!signedIn) {
     redirect('/login');
   }
 
-  const { settings } = await getUserSettings();
-  const mcqQuestionFormats = await getMcqQuestionFormatsPreference();
-  const recommended = await recommendSettings();
   const effective = resolveEffectiveSettings(settings, recommended);
 
   return (

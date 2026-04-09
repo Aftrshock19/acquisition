@@ -1,7 +1,7 @@
 "use server";
 
+import { createSupabaseServerClient, getSupabaseServerContext } from "@/lib/supabase/server";
 import { getSupabaseUser } from "@/lib/supabase/auth";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { MAX_DUE_REVIEWS, MAX_NEW_WORDS } from "@/lib/srs/constants";
 import type {
   TodaySession,
@@ -34,7 +34,6 @@ export type TodayFlashcardsResult =
       ok: true;
       session: TodaySession;
       dailySession: DailySessionRow | null;
-      debugSnapshot: FlashcardDebugSnapshot;
       effectiveSettings: {
         dailyLimit: number;
         retryDelaySeconds: number;
@@ -54,7 +53,6 @@ export type TodayFlashcardsResult =
       signedIn?: boolean;
       error?: string;
       dailySession?: DailySessionRow | null;
-      debugSnapshot: FlashcardDebugSnapshot;
       effectiveSettings: {
         dailyLimit: number;
         retryDelaySeconds: number;
@@ -89,7 +87,7 @@ export async function getDailyQueue(
     };
   }
 
-  const supabase = await createSupabaseServerClient();
+  const { supabase, user, error: authError } = await getSupabaseServerContext();
   if (!supabase) {
     return {
       ok: false,
@@ -98,7 +96,6 @@ export async function getDailyQueue(
     };
   }
 
-  const { user, error: authError } = await getSupabaseUser(supabase);
   if (authError) {
     return {
       ok: false,
@@ -196,11 +193,18 @@ export async function getDailyQueue(
 }
 
 export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsResult> {
-  const { settings, signedIn } = await getUserSettings();
-  const mcqQuestionFormats = await getMcqQuestionFormatsPreference();
-  const recommended = await recommendSettings();
+  const [
+    { settings, signedIn },
+    mcqQuestionFormats,
+    recommended,
+    existingDailySession,
+  ] = await Promise.all([
+    getUserSettings(),
+    getMcqQuestionFormatsPreference(),
+    recommendSettings(),
+    getTodayDailySession(),
+  ]);
   const effective = resolveEffectiveSettings(settings, recommended);
-  const existingDailySession = await getTodayDailySession();
   const completedToday = Math.max(0, existingDailySession?.reviews_done ?? 0);
   const remainingDailyLimit = Math.max(0, effective.effectiveDailyLimit - completedToday);
   const queueLimit = Math.max(1, remainingDailyLimit);
@@ -229,35 +233,24 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
       signedIn: queueResult.signedIn ?? signedIn,
       error: queueResult.error,
       dailySession: null,
-      debugSnapshot: {
-        dailySession: null,
-        currentUserWord: null,
-        lastReviewEvent: null,
-      },
       effectiveSettings,
     };
   }
 
   const session = limitTodaySession(queueResult.session, remainingDailyLimit);
   const dailySession = await upsertDailySession(session);
-  const firstWordId = session.dueReviews[0]?.word_id ?? session.newWords[0]?.id ?? null;
-  const debugSnapshot = await getFlashcardDebugSnapshot(firstWordId ?? undefined);
 
   return {
     ok: true,
     session,
     dailySession,
-    debugSnapshot,
     effectiveSettings,
   };
 }
 
 async function getTodayDailySession(): Promise<DailySessionRow | null> {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return null;
-
-  const { user } = await getSupabaseUser(supabase);
-  if (!user) return null;
+  const { supabase, user } = await getSupabaseServerContext();
+  if (!supabase || !user) return null;
 
   const sessionDate = new Date().toISOString().slice(0, 10);
   const { data, error } = await supabase
@@ -288,15 +281,13 @@ export async function recordReview(
       };
     }
 
-    const supabase = await createSupabaseServerClient();
+    const { supabase, user, error: authError } = await getSupabaseServerContext();
     if (!supabase) {
       return {
         ok: false,
         error: "Supabase client could not be created on the server",
       };
     }
-
-    const { user, error: authError } = await getSupabaseUser(supabase);
     if (authError) {
       return { ok: false, error: authError };
     }
@@ -381,15 +372,13 @@ export async function recordExposure(
     };
   }
 
-  const supabase = await createSupabaseServerClient();
+  const { supabase, user, error: authError } = await getSupabaseServerContext();
   if (!supabase) {
     return {
       ok: false,
       error: "Supabase client could not be created on the server",
     };
   }
-
-  const { user, error: authError } = await getSupabaseUser(supabase);
   if (authError) {
     return { ok: false, error: authError };
   }
@@ -430,11 +419,8 @@ function limitTodaySession(session: TodaySession, dailyLimit: number): TodaySess
 async function upsertDailySession(
   session: TodaySession,
 ): Promise<DailySessionRow | null> {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return null;
-
-  const { user } = await getSupabaseUser(supabase);
-  if (!user) return null;
+  const { supabase, user } = await getSupabaseServerContext();
+  if (!supabase || !user) return null;
 
   const sessionDate = new Date().toISOString().slice(0, 10);
   const hasCards = session.dueReviews.length + session.newWords.length > 0;

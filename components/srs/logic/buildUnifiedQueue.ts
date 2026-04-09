@@ -287,10 +287,12 @@ function getAudioText(card: UnifiedQueueSourceCard) {
   return card.exampleSentence ?? card.lemma;
 }
 
+const SRS_QUEUE_DEBUG_LOGS_ENABLED = process.env.NEXT_PUBLIC_SRS_QUEUE_DEBUG === "1";
+
 function debugQueueBuild(
   stage: "input" | "output",
   value: Record<string, unknown>,
 ) {
-  if (process.env.NODE_ENV === "test") return;
+  if (!SRS_QUEUE_DEBUG_LOGS_ENABLED) return;
   console.log(`[srs:queue] ${stage}`, value);
 }

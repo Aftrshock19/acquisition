@@ -75,6 +75,8 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+const SETTINGS_DEBUG_LOGS_ENABLED = process.env.SETTINGS_DEBUG_LOGS === "1";
+
 function debugEffectiveSettings(value: {
   selectionMode: UserSettingsRow["flashcard_selection_mode"];
   manualTypes: FamilySettings;
@@ -82,6 +84,6 @@ function debugEffectiveSettings(value: {
   effectiveDirections: DirectionSettings;
   enabledModes: EffectiveFlashcardSettings["enabledModes"];
 }) {
-  if (process.env.NODE_ENV === "test") return;
+  if (!SETTINGS_DEBUG_LOGS_ENABLED) return;
   console.log("[settings:effective]", value);
 }
