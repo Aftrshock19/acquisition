@@ -1,0 +1,193 @@
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+
+type SupabaseServerClient = NonNullable<
+  Awaited<ReturnType<typeof createSupabaseServerClient>>
+>;
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+type ListeningTextRow = {
+  id: string;
+  title: string;
+  lang: string;
+};
+
+type ListeningAssetRow = {
+  id: string;
+  text_id: string;
+  title: string;
+  url: string;
+  transcript: string | null;
+  duration_seconds: number | null;
+  created_at: string;
+  texts: ListeningTextRow | ListeningTextRow[] | null;
+};
+
+export type ListeningAsset = {
+  id: string;
+  textId: string;
+  title: string;
+  audioUrl: string;
+  transcript: string | null;
+  durationSeconds: number | null;
+  createdAt: string;
+  text: {
+    id: string;
+    title: string;
+    lang: string;
+  } | null;
+};
+
+export async function getListeningAssetById(
+  supabase: SupabaseServerClient,
+  id: string,
+): Promise<ListeningAsset | null> {
+  if (!UUID_RE.test(id)) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("audio")
+    .select(
+      `
+        id,
+        text_id,
+        title,
+        url,
+        transcript,
+        duration_seconds,
+        created_at,
+        texts (
+          id,
+          title,
+          lang
+        )
+      `,
+    )
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data ? toListeningAsset(data as ListeningAssetRow) : null;
+}
+
+export async function getListeningAssetForTextId(
+  supabase: SupabaseServerClient,
+  textId: string,
+): Promise<ListeningAsset | null> {
+  if (!UUID_RE.test(textId)) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("audio")
+    .select(
+      `
+        id,
+        text_id,
+        title,
+        url,
+        transcript,
+        duration_seconds,
+        created_at,
+        texts (
+          id,
+          title,
+          lang
+        )
+      `,
+    )
+    .eq("text_id", textId)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data ? toListeningAsset(data as ListeningAssetRow) : null;
+}
+
+export async function getListeningIndexData(
+  supabase: SupabaseServerClient,
+): Promise<ListeningAsset[]> {
+  const { data, error } = await supabase
+    .from("audio")
+    .select(
+      `
+        id,
+        text_id,
+        title,
+        url,
+        transcript,
+        duration_seconds,
+        created_at,
+        texts (
+          id,
+          title,
+          lang
+        )
+      `,
+    )
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return ((data ?? []) as ListeningAssetRow[])
+    .map(toListeningAsset)
+    .sort(compareListeningAssets);
+}
+
+function toListeningAsset(row: ListeningAssetRow): ListeningAsset {
+  const text = normalizeText(row.texts);
+
+  return {
+    id: row.id,
+    textId: row.text_id,
+    title: row.title,
+    audioUrl: row.url,
+    transcript: row.transcript ?? null,
+    durationSeconds: row.duration_seconds ?? null,
+    createdAt: row.created_at,
+    text: text
+      ? {
+          id: text.id,
+          title: text.title,
+          lang: text.lang,
+        }
+      : null,
+  };
+}
+
+function normalizeText(text: ListeningAssetRow["texts"]) {
+  if (!text) {
+    return null;
+  }
+
+  return Array.isArray(text) ? text[0] ?? null : text;
+}
+
+function compareListeningAssets(a: ListeningAsset, b: ListeningAsset) {
+  const byTextTitle = (a.text?.title ?? "").localeCompare(
+    b.text?.title ?? "",
+    "es",
+    { sensitivity: "base" },
+  );
+  if (byTextTitle !== 0) {
+    return byTextTitle;
+  }
+
+  const byTitle = a.title.localeCompare(b.title, "es", { sensitivity: "base" });
+  if (byTitle !== 0) {
+    return byTitle;
+  }
+
+  return a.id.localeCompare(b.id);
+}

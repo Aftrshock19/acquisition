@@ -1,7 +1,13 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient, getSupabaseServerContext } from "@/lib/supabase/server";
 import { getSupabaseUser } from "@/lib/supabase/auth";
+import { getTodayDailySessionRow, getTodaySessionDate } from "@/lib/loop/dailySessions";
+import {
+  getListeningAssetById,
+  getListeningAssetForTextId,
+} from "@/lib/loop/listening";
 import { EMPTY_SAVED_WORDS_STATE, getSavedWordsState, type SavedWordsState } from "@/lib/reader/savedWords";
 import { MAX_DUE_REVIEWS, MAX_NEW_WORDS } from "@/lib/srs/constants";
 import type {
@@ -76,6 +82,35 @@ export type FlashcardDebugSnapshot = {
   currentUserWord: Record<string, unknown> | null;
   lastReviewEvent: Record<string, unknown> | null;
 };
+
+type DailySessionProgressState = {
+  flashcardTargetCount: number;
+  reviewsDone: number;
+  readingDone: boolean;
+  listeningDone: boolean;
+};
+
+export type CompleteReadingStepResult =
+  | {
+      ok: true;
+      dailySession: DailySessionRow;
+      nextPath: string;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
+export type CompleteListeningStepResult =
+  | {
+      ok: true;
+      dailySession: DailySessionRow;
+      nextPath: string;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
 
 export async function getDailyQueue(
   lang: string,
@@ -247,7 +282,7 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
   }
 
   const session = limitTodaySession(queueResult.session, remainingDailyLimit);
-  const dailySession = await upsertDailySession(session);
+  const dailySession = await upsertDailySession(session, existingDailySession);
 
   return {
     ok: true,
@@ -262,16 +297,7 @@ async function getTodayDailySession(): Promise<DailySessionRow | null> {
   const { supabase, user } = await getSupabaseServerContext();
   if (!supabase || !user) return null;
 
-  const sessionDate = new Date().toISOString().slice(0, 10);
-  const { data, error } = await supabase
-    .from("daily_sessions")
-    .select("*")
-    .eq("user_id", user.id)
-    .eq("session_date", sessionDate)
-    .maybeSingle();
-
-  if (error) return null;
-  return data as DailySessionRow | null;
+  return getTodayDailySessionRow(supabase, user.id);
 }
 
 async function getTodaySavedWordsState(language: string): Promise<SavedWordsState> {
@@ -419,6 +445,78 @@ export async function recordExposure(
   return { ok: true };
 }
 
+function getDailySessionProgressState(
+  current:
+    | {
+        new_words_count?: number | null;
+        reviews_done?: number | null;
+        reading_done?: boolean | null;
+        listening_done?: boolean | null;
+      }
+    | null,
+  fallbackFlashcardTargetCount = 0,
+): DailySessionProgressState {
+  const reviewsDone = Math.max(0, current?.reviews_done ?? 0);
+
+  return {
+    flashcardTargetCount: Math.max(
+      reviewsDone,
+      current?.new_words_count ?? 0,
+      fallbackFlashcardTargetCount,
+    ),
+    reviewsDone,
+    readingDone: current?.reading_done ?? false,
+    listeningDone: current?.listening_done ?? false,
+  };
+}
+
+function resolveDailySessionStage(
+  state: DailySessionProgressState,
+): DailySessionRow["stage"] {
+  if (state.reviewsDone < state.flashcardTargetCount) {
+    return "flashcards";
+  }
+
+  if (!state.readingDone) {
+    return "reading";
+  }
+
+  if (!state.listeningDone) {
+    return "listening";
+  }
+
+  return "complete";
+}
+
+function getDailySessionCompleted(state: DailySessionProgressState) {
+  return resolveDailySessionStage(state) === "complete";
+}
+
+function getNextPathForDailySession(
+  dailySession: Pick<
+    DailySessionRow,
+    "stage" | "reading_text_id" | "listening_asset_id"
+  >,
+) {
+  if (dailySession.stage === "reading" && dailySession.reading_text_id) {
+    return `/reader/${dailySession.reading_text_id}`;
+  }
+
+  if (dailySession.stage === "listening" && dailySession.listening_asset_id) {
+    return `/listening/${dailySession.listening_asset_id}`;
+  }
+
+  if (dailySession.stage === "reading") {
+    return "/reading";
+  }
+
+  if (dailySession.stage === "listening") {
+    return "/listening";
+  }
+
+  return "/today";
+}
+
 function limitTodaySession(session: TodaySession, dailyLimit: number): TodaySession {
   if (dailyLimit <= 0) {
     return { ...session, dueReviews: [], newWords: [] };
@@ -437,12 +535,17 @@ function limitTodaySession(session: TodaySession, dailyLimit: number): TodaySess
 
 async function upsertDailySession(
   session: TodaySession,
+  existingDailySession: DailySessionRow | null,
 ): Promise<DailySessionRow | null> {
   const { supabase, user } = await getSupabaseServerContext();
   if (!supabase || !user) return null;
 
-  const sessionDate = new Date().toISOString().slice(0, 10);
-  const hasCards = session.dueReviews.length + session.newWords.length > 0;
+  const sessionDate = getTodaySessionDate();
+  const progress = getDailySessionProgressState(
+    existingDailySession,
+    session.dueReviews.length + session.newWords.length,
+  );
+  const stage = resolveDailySessionStage(progress);
 
   const { data, error } = await supabase
     .from("daily_sessions")
@@ -450,9 +553,10 @@ async function upsertDailySession(
       {
         user_id: user.id,
         session_date: sessionDate,
-        stage: hasCards ? "flashcards" : "reading",
-        new_words_count: session.newWords.length,
-        completed: !hasCards,
+        stage,
+        new_words_count: progress.flashcardTargetCount,
+        reviews_done: progress.reviewsDone,
+        completed: getDailySessionCompleted(progress),
       },
       { onConflict: "user_id,session_date" },
     )
@@ -467,7 +571,7 @@ async function incrementDailySessionReviews(
   supabase: NonNullable<Awaited<ReturnType<typeof createSupabaseServerClient>>>,
   userId: string,
 ) {
-  const sessionDate = new Date().toISOString().slice(0, 10);
+  const sessionDate = getTodaySessionDate();
   const { data } = await supabase
     .from("daily_sessions")
     .select("reviews_done,new_words_count,reading_done,listening_done")
@@ -484,21 +588,270 @@ async function incrementDailySessionReviews(
       }
     | null;
 
-  const nextReviewsDone = (current?.reviews_done ?? 0) + 1;
-  const readingDone = current?.reading_done ?? false;
-  const listeningDone = current?.listening_done ?? false;
-  const completed = nextReviewsDone >= (current?.new_words_count ?? 0) && readingDone && listeningDone;
+  const progress = getDailySessionProgressState(current);
+  const nextProgress: DailySessionProgressState = {
+    ...progress,
+    reviewsDone: progress.reviewsDone + 1,
+    flashcardTargetCount: Math.max(
+      progress.flashcardTargetCount,
+      progress.reviewsDone + 1,
+    ),
+  };
+  const stage = resolveDailySessionStage(nextProgress);
 
   await supabase.from("daily_sessions").upsert(
     {
       user_id: userId,
       session_date: sessionDate,
-      stage: "flashcards",
-      reviews_done: nextReviewsDone,
-      completed,
+      stage,
+      new_words_count: nextProgress.flashcardTargetCount,
+      reviews_done: nextProgress.reviewsDone,
+      completed: getDailySessionCompleted(nextProgress),
     },
     { onConflict: "user_id,session_date" },
   );
+}
+
+export async function completeReadingStep({
+  textId,
+}: {
+  textId: string;
+}): Promise<CompleteReadingStepResult> {
+  try {
+    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    if (!supabase) {
+      return {
+        ok: false,
+        error: "Supabase client could not be created on the server",
+      };
+    }
+
+    if (authError) {
+      return { ok: false, error: authError };
+    }
+
+    if (!user) {
+      return { ok: false, error: "Not authenticated" };
+    }
+
+    const [currentDailySession, listeningAsset] = await Promise.all([
+      getTodayDailySessionRow(supabase, user.id),
+      getListeningAssetForTextId(supabase, textId),
+    ]);
+
+    const currentProgress = getDailySessionProgressState(currentDailySession);
+    const nextListeningDone =
+      listeningAsset === null
+        ? true
+        : Boolean(
+            currentDailySession?.listening_done &&
+              currentDailySession.listening_asset_id === listeningAsset.id,
+          );
+    const nextProgress: DailySessionProgressState = {
+      ...currentProgress,
+      readingDone: true,
+      listeningDone: nextListeningDone,
+    };
+    const stage = resolveDailySessionStage(nextProgress);
+    const sessionDate = getTodaySessionDate();
+    const now = new Date().toISOString();
+    const shouldResetListeningProgress =
+      currentDailySession?.listening_asset_id != null &&
+      currentDailySession.listening_asset_id !== listeningAsset?.id;
+
+    const { data, error } = await supabase
+      .from("daily_sessions")
+      .upsert(
+        {
+          user_id: user.id,
+          session_date: sessionDate,
+          stage,
+          new_words_count: nextProgress.flashcardTargetCount,
+          reviews_done: nextProgress.reviewsDone,
+          reading_done: true,
+          reading_text_id: textId,
+          reading_completed_at: now,
+          listening_done: nextListeningDone,
+          listening_asset_id: listeningAsset?.id ?? null,
+          listening_completed_at:
+            listeningAsset === null
+              ? currentDailySession?.listening_completed_at ?? now
+              : nextListeningDone
+                ? currentDailySession?.listening_completed_at ?? now
+                : null,
+          listening_max_position_seconds:
+            listeningAsset === null || shouldResetListeningProgress
+              ? null
+              : currentDailySession?.listening_max_position_seconds ?? null,
+          listening_required_seconds:
+            listeningAsset === null || shouldResetListeningProgress
+              ? null
+              : currentDailySession?.listening_required_seconds ?? null,
+          listening_transcript_opened:
+            listeningAsset === null || shouldResetListeningProgress
+              ? false
+              : currentDailySession?.listening_transcript_opened ?? false,
+          listening_playback_rate:
+            listeningAsset === null || shouldResetListeningProgress
+              ? null
+              : currentDailySession?.listening_playback_rate ?? null,
+          completed: getDailySessionCompleted(nextProgress),
+        },
+        { onConflict: "user_id,session_date" },
+      )
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      return {
+        ok: false,
+        error: error?.message ?? "Failed to update today's reading progress",
+      };
+    }
+
+    revalidatePath("/today");
+    revalidatePath("/reading");
+    revalidatePath(`/reader/${textId}`);
+    revalidatePath("/listening");
+    if (listeningAsset) {
+      revalidatePath(`/listening/${listeningAsset.id}`);
+    }
+
+    const dailySession = data as DailySessionRow;
+
+    return {
+      ok: true,
+      dailySession,
+      nextPath: getNextPathForDailySession(dailySession),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to complete the reading step",
+    };
+  }
+}
+
+export async function completeListeningStep({
+  assetId,
+  maxPositionSeconds,
+  requiredListenSeconds,
+  transcriptOpened,
+  playbackRate,
+}: {
+  assetId: string;
+  maxPositionSeconds: number;
+  requiredListenSeconds: number;
+  transcriptOpened: boolean;
+  playbackRate: number;
+}): Promise<CompleteListeningStepResult> {
+  try {
+    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    if (!supabase) {
+      return {
+        ok: false,
+        error: "Supabase client could not be created on the server",
+      };
+    }
+
+    if (authError) {
+      return { ok: false, error: authError };
+    }
+
+    if (!user) {
+      return { ok: false, error: "Not authenticated" };
+    }
+
+    const [currentDailySession, listeningAsset] = await Promise.all([
+      getTodayDailySessionRow(supabase, user.id),
+      getListeningAssetById(supabase, assetId),
+    ]);
+
+    if (!listeningAsset) {
+      return {
+        ok: false,
+        error: "This listening asset could not be found.",
+      };
+    }
+
+    const currentProgress = getDailySessionProgressState(currentDailySession);
+    const nextProgress: DailySessionProgressState = {
+      ...currentProgress,
+      listeningDone: true,
+    };
+    const stage = resolveDailySessionStage(nextProgress);
+    const sessionDate = getTodaySessionDate();
+    const now = new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from("daily_sessions")
+      .upsert(
+        {
+          user_id: user.id,
+          session_date: sessionDate,
+          stage,
+          new_words_count: nextProgress.flashcardTargetCount,
+          reviews_done: nextProgress.reviewsDone,
+          reading_done: currentProgress.readingDone,
+          reading_text_id:
+            currentDailySession?.reading_text_id ?? listeningAsset.textId,
+          listening_done: true,
+          listening_asset_id: listeningAsset.id,
+          listening_completed_at: now,
+          listening_max_position_seconds: Math.max(
+            Math.max(0, Math.round(maxPositionSeconds)),
+            currentDailySession?.listening_asset_id === listeningAsset.id
+              ? currentDailySession?.listening_max_position_seconds ?? 0
+              : 0,
+          ),
+          listening_required_seconds: Math.max(
+            1,
+            Math.round(requiredListenSeconds),
+          ),
+          listening_transcript_opened:
+            transcriptOpened ||
+            (currentDailySession?.listening_asset_id === listeningAsset.id &&
+              (currentDailySession?.listening_transcript_opened ?? false)),
+          listening_playback_rate: playbackRate,
+          completed: getDailySessionCompleted(nextProgress),
+        },
+        { onConflict: "user_id,session_date" },
+      )
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      return {
+        ok: false,
+        error: error?.message ?? "Failed to save today's listening progress",
+      };
+    }
+
+    revalidatePath("/today");
+    revalidatePath("/listening");
+    revalidatePath(`/listening/${listeningAsset.id}`);
+    revalidatePath("/reading");
+    revalidatePath(`/reader/${listeningAsset.textId}`);
+
+    const dailySession = data as DailySessionRow;
+
+    return {
+      ok: true,
+      dailySession,
+      nextPath: getNextPathForDailySession(dailySession),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to complete the listening step",
+    };
+  }
 }
 
 async function syncUserWordReviewState(

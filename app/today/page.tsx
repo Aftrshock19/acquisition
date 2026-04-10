@@ -15,6 +15,7 @@ export default async function TodayPage() {
         error: result.error,
       };
   const effectiveSettings = result.effectiveSettings;
+  const dailySession = result.dailySession ?? null;
   const hasCards = session.dueReviews.length > 0 || session.newWords.length > 0;
   const enabledTypeCount = Object.values(effectiveSettings.enabledTypes).filter(
     Boolean,
@@ -109,25 +110,65 @@ export default async function TodayPage() {
           </p>
         </div>
       ) : !hasCards ? (
-        <div className="app-card flex flex-col gap-4 p-8">
-          <h2 className="text-xl font-semibold tracking-tight">
-            All done for today
-          </h2>
-          <p className="text-zinc-600 dark:text-zinc-400">
-            No reviews or new words due. Come back tomorrow or check your{" "}
+        dailySession?.stage === "reading" ? (
+          <div className="app-card flex flex-col gap-4 p-8">
+            <h2 className="text-xl font-semibold tracking-tight">
+              Reading is next
+            </h2>
+            <p className="text-zinc-600 dark:text-zinc-400">
+              Flashcards are done. Read one short text, then move on to the matched audio.
+            </p>
             <Link
-              href="/progress"
-              className="font-medium text-zinc-900 underline dark:text-zinc-100"
+              href={
+                dailySession.reading_text_id
+                  ? `/reader/${dailySession.reading_text_id}`
+                  : "/reading"
+              }
+              className="app-button self-start"
             >
-              progress
+              Continue to reading
             </Link>
-            . If you haven’t added vocabulary yet, run{" "}
-            <code className="rounded bg-zinc-200 px-1 dark:bg-zinc-700">
-              npm run seed
-            </code>{" "}
-            to load sample words.
-          </p>
-        </div>
+          </div>
+        ) : dailySession?.stage === "listening" ? (
+          <div className="app-card flex flex-col gap-4 p-8">
+            <h2 className="text-xl font-semibold tracking-tight">
+              Listening is next
+            </h2>
+            <p className="text-zinc-600 dark:text-zinc-400">
+              Reading is logged. Finish with one calm listening pass and you are done for today.
+            </p>
+            <Link
+              href={
+                dailySession.listening_asset_id
+                  ? `/listening/${dailySession.listening_asset_id}`
+                  : "/listening"
+              }
+              className="app-button self-start"
+            >
+              Continue to listening
+            </Link>
+          </div>
+        ) : (
+          <div className="app-card flex flex-col gap-4 p-8">
+            <h2 className="text-xl font-semibold tracking-tight">
+              All done for today
+            </h2>
+            <p className="text-zinc-600 dark:text-zinc-400">
+              No reviews or new words due. Come back tomorrow or check your{" "}
+              <Link
+                href="/progress"
+                className="font-medium text-zinc-900 underline dark:text-zinc-100"
+              >
+                progress
+              </Link>
+              . If you haven’t added vocabulary yet, run{" "}
+              <code className="rounded bg-zinc-200 px-1 dark:bg-zinc-700">
+                npm run seed
+              </code>{" "}
+              to load sample words.
+            </p>
+          </div>
+        )
       ) : (
         <TodaySession
           enabledTypes={effectiveSettings.enabledTypes}
@@ -140,7 +181,7 @@ export default async function TodayPage() {
           autoAdvanceCorrect={effectiveSettings.autoAdvanceCorrect}
           showPosHint={effectiveSettings.showPosHint}
           hideTranslationSentences={effectiveSettings.hideTranslationSentences}
-          initialDailySession={result.dailySession ?? null}
+          initialDailySession={dailySession}
         />
       )}
     </main>

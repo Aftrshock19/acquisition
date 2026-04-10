@@ -1,5 +1,8 @@
 import { redirect } from "next/navigation";
+import { ReaderNextStepCard } from "@/components/reader/ReaderNextStepCard";
 import { ReaderView } from "@/components/reader/ReaderView";
+import { getTodayDailySessionRow } from "@/lib/loop/dailySessions";
+import { getListeningAssetForTextId } from "@/lib/loop/listening";
 import { getTextById } from "@/lib/loop/texts";
 import { getSavedWordsState } from "@/lib/reader/savedWords";
 import { getSupabaseUser } from "@/lib/supabase/auth";
@@ -109,7 +112,21 @@ export default async function ReaderPage({
     );
   }
 
-  const savedState = await getSavedWordState(supabase, user.id, text.lang);
+  const [savedState, listeningAsset, dailySession] = await Promise.all([
+    getSavedWordState(supabase, user.id, text.lang),
+    getListeningAssetForTextId(supabase, text.id),
+    getTodayDailySessionRow(supabase, user.id),
+  ]);
+  const readingDoneForText = Boolean(
+    dailySession?.reading_done &&
+      dailySession.reading_text_id === text.id,
+  );
+  const listeningDoneForText = listeningAsset
+    ? Boolean(
+        dailySession?.listening_done &&
+          dailySession.listening_asset_id === listeningAsset.id,
+      )
+    : readingDoneForText;
 
   return (
     <main className="app-shell">
@@ -124,6 +141,13 @@ export default async function ReaderPage({
         text={text}
         initialSavedWordIds={savedState.wordIds}
         initialSavedLemmas={savedState.lemmas}
+      />
+
+      <ReaderNextStepCard
+        textId={text.id}
+        listeningAssetId={listeningAsset?.id ?? null}
+        readingDone={readingDoneForText}
+        listeningDone={listeningDoneForText}
       />
     </main>
   );

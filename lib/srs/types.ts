@@ -82,7 +82,15 @@ export type DailySessionRow = {
   new_words_count: number;
   reviews_done: number;
   reading_done: boolean;
+  reading_text_id: string | null;
+  reading_completed_at: string | null;
   listening_done: boolean;
+  listening_asset_id: string | null;
+  listening_completed_at: string | null;
+  listening_max_position_seconds: number | null;
+  listening_required_seconds: number | null;
+  listening_transcript_opened: boolean;
+  listening_playback_rate: number | null;
   completed: boolean;
   created_at: string;
   updated_at: string;

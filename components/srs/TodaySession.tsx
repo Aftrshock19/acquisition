@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   useEffect,
   useEffectEvent,
@@ -779,11 +780,14 @@ export function TodaySession({
       {phase === "done" ? (
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 rounded-xl border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900/50">
           <h2 className="text-xl font-semibold tracking-tight">
-            Session complete
+            Flashcards done
           </h2>
           <p className="text-zinc-600 dark:text-zinc-400">
-            You are done for now. Come back tomorrow for more.
+            Enough words for now. Move on to one short reading before you finish for today.
           </p>
+          <Link href="/reading" className="app-button self-start">
+            Continue to reading
+          </Link>
         </div>
       ) : phase === "waiting" ? (
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 rounded-xl border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900/50">
