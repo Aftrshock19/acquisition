@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+figures/*.png
+output/*.csv
+output/*.md
+data/

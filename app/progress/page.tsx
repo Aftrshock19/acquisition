@@ -1,50 +1,20 @@
 import Link from "next/link";
 import { BackButton } from "@/components/BackButton";
+import { clampSessionDateRange, formatSessionDateLabel, getDefaultSessionDateRange } from "@/lib/analytics/date";
+import { getUserAnalyticsBundle } from "@/lib/analytics/service";
 import { getSupabaseUser } from "@/lib/supabase/auth";
-import {
-  CefrLadder,
-  type CefrLadderRowData,
-  ProgressHeroCard,
-  SecondaryMetricCard,
-  StatCard,
-} from "./_components";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-type SupabaseServerClient = NonNullable<
-  Awaited<ReturnType<typeof createSupabaseServerClient>>
->;
-
-type CefrBand = {
-  label: "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
-  min: number;
-  max: number;
-};
-
-const LEMMA_CEFR_BANDS = [
-  { label: "A1", min: 0, max: 1200 },
-  { label: "A2", min: 1200, max: 2000 },
-  { label: "B1", min: 2000, max: 2800 },
-  { label: "B2", min: 2800, max: 3600 },
-  { label: "C1", min: 3600, max: 4300 },
-  { label: "C2", min: 4300, max: 5000 },
-] as const satisfies readonly CefrBand[];
-
-type CountResult = {
-  learned: number;
-  error: { message: string } | null;
-};
-
-type CefrProgress = {
-  current: CefrBand;
-  next: CefrBand | null;
-  displayCount: number;
-  percent: number;
-  completedInBand: number;
-  remainingInBand: number;
-  bandSize: number;
-};
-
-export default async function ProgressPage() {
+export default async function ProgressPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const requestedFrom = getSearchParamValue(resolvedSearchParams.from);
+  const requestedTo = getSearchParamValue(resolvedSearchParams.to);
+  const range = clampSessionDateRange(requestedFrom, requestedTo, 14);
+  const defaultRange = getDefaultSessionDateRange(14);
   const supabase = await createSupabaseServerClient();
 
   if (!supabase) {
@@ -53,16 +23,7 @@ export default async function ProgressPage() {
         <BackButton />
         <section className="app-hero">
           <h1 className="app-title">Progress</h1>
-          <p className="app-subtitle">Your Spanish vocabulary profile</p>
-        </section>
-
-        <section className="app-card flex flex-col gap-3 p-8">
-          <h2 className="text-xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
-            Progress is unavailable
-          </h2>
-          <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Supabase is not configured yet, so your Spanish vocabulary profile cannot load.
-          </p>
+          <p className="app-subtitle">Session metrics are unavailable until Supabase is configured.</p>
         </section>
       </main>
     );
@@ -76,7 +37,7 @@ export default async function ProgressPage() {
         <BackButton />
         <section className="app-hero">
           <h1 className="app-title">Progress</h1>
-          <p className="app-subtitle">Your Spanish vocabulary profile</p>
+          <p className="app-subtitle">There was a problem loading your metrics.</p>
         </section>
 
         <section className="app-card-strong flex flex-col gap-3 border-red-200 bg-red-50/90 p-8 dark:border-red-900/50 dark:bg-red-950/30">
@@ -97,68 +58,24 @@ export default async function ProgressPage() {
         <BackButton />
         <section className="app-hero">
           <h1 className="app-title">Progress</h1>
-          <p className="app-subtitle">Your Spanish vocabulary profile</p>
+          <p className="app-subtitle">Sign in to view your session metrics and exports.</p>
         </section>
 
-        <section className="app-card flex flex-col gap-4 p-8">
-          <h2 className="text-xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
-            Sign in to view your profile
-          </h2>
-          <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            See how your lemma knowledge is growing over time once you{" "}
-            <Link
-              href="/login"
-              className="font-medium text-zinc-900 underline dark:text-zinc-100"
-            >
-              sign in
-            </Link>
-            .
-          </p>
+        <section className="app-card flex flex-col gap-3 p-8">
+          <Link href="/login" className="app-button self-start">
+            Sign in
+          </Link>
         </section>
       </main>
     );
   }
 
-  const [spanishEntryResult, lemmaProgressResult, verbLemmaResult] =
-    await Promise.all([
-      getSpanishEntryCounts(supabase, user.id),
-      getLemmaProgressCounts(supabase, user.id),
-      getVerbLemmaCounts(supabase, user.id),
-    ]);
-
-  const errors = [
-    spanishEntryResult.error,
-    lemmaProgressResult.error,
-    verbLemmaResult.error,
-  ].filter(Boolean);
-
-  if (errors.length > 0) {
-    return (
-      <main className="app-shell">
-        <BackButton />
-        <section className="app-hero">
-          <h1 className="app-title">Progress</h1>
-          <p className="app-subtitle">Your Spanish vocabulary profile</p>
-        </section>
-
-        <section className="app-card-strong flex flex-col gap-3 border-red-200 bg-red-50/90 p-8 dark:border-red-900/50 dark:bg-red-950/30">
-          <h2 className="text-xl font-semibold tracking-tight text-red-900 dark:text-red-100">
-            Error loading progress
-          </h2>
-          <p className="text-sm leading-6 text-red-800 dark:text-red-200">
-            {errors[0]?.message}
-          </p>
-        </section>
-      </main>
-    );
-  }
-
-  const spanishEntryCount = spanishEntryResult.learned;
-  const learnedLemmaCount = lemmaProgressResult.learned;
-  const learnedVerbLemmaCount = verbLemmaResult.learned;
-  const lemmaProfile = getCefrProgress(learnedLemmaCount, LEMMA_CEFR_BANDS);
-  const ladderRows = getCefrLadderRows(learnedLemmaCount, LEMMA_CEFR_BANDS);
-  const completedBands = ladderRows.filter((row) => row.tone === "completed").length;
+  const bundle = await getUserAnalyticsBundle(supabase, user.id, range);
+  const today = bundle.today;
+  const last7 = bundle.dailyAggregates.slice(-7);
+  const last14 = bundle.dailyAggregates.slice(-14);
+  const sessionsCompletedLast7 = last7.filter((day) => day.session_completed).length;
+  const daysActiveLast14 = last14.filter((day) => day.days_active_flag).length;
 
   return (
     <main className="app-shell">
@@ -166,284 +83,308 @@ export default async function ProgressPage() {
 
       <section className="app-hero">
         <h1 className="app-title">Progress</h1>
-        <p className="app-subtitle">Your Spanish vocabulary profile</p>
+        <p className="app-subtitle">A plain view of the session data the app will export for analysis.</p>
+      </section>
+
+      <section className="app-card-strong flex flex-col gap-5 p-5 sm:p-6">
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
+            Range
+          </p>
+          <h2 className="text-xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
+            {formatSessionDateLabel(range.from)} to {formatSessionDateLabel(range.to)}
+          </h2>
+          <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+            The cards, totals, and exports below all come from the same derived analytics bundle.
+          </p>
+        </div>
+
+        <form className="grid gap-3 sm:grid-cols-[1fr_1fr_auto_auto]">
+          <label className="flex flex-col gap-2 text-sm text-zinc-700 dark:text-zinc-200">
+            From
+            <input
+              type="date"
+              name="from"
+              defaultValue={range.from}
+              className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-950 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+            />
+          </label>
+          <label className="flex flex-col gap-2 text-sm text-zinc-700 dark:text-zinc-200">
+            To
+            <input
+              type="date"
+              name="to"
+              defaultValue={range.to}
+              className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-950 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+            />
+          </label>
+          <button type="submit" className="app-button self-end">
+            Apply
+          </button>
+          <Link
+            href={`/progress?from=${defaultRange.from}&to=${defaultRange.to}`}
+            className="app-button-secondary self-end text-center"
+          >
+            Last 14 days
+          </Link>
+        </form>
       </section>
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="Vocabulary profile"
-          value={`${lemmaProfile.current.label} vocabulary profile`}
-          detail="Estimated from mastered Spanish lemmas."
-          tone="strong"
-          badge="Estimated"
+        <MetricCard
+          label="Today session"
+          value={today ? formatTodayStatus(today.stage, today.session_completed) : "No session yet"}
+          detail={today ? `${today.flashcards_completed} of ${today.flashcards_assigned} flashcards completed.` : "No activity has been recorded for today yet."}
         />
-        <StatCard
-          label="Mastered lemmas"
-          value={formatNumber(learnedLemmaCount)}
-          detail="Primary progress signal for your Spanish vocabulary."
+        <MetricCard
+          label="Flashcards today"
+          value={today ? `${today.flashcards_completed}/${today.flashcards_assigned}` : "0/0"}
+          detail={today ? `${today.new_card_main_queue_attempts} new, ${today.review_card_main_queue_attempts} review.` : "No flashcard attempts recorded today."}
         />
-        <StatCard
-          label="Seen forms"
-          value={formatNumber(spanishEntryCount)}
-          detail="Learned Spanish word entries across forms."
+        <MetricCard
+          label="Accuracy today"
+          value={today?.accuracy !== null && today?.accuracy !== undefined ? formatPercent(today.accuracy) : "No attempts"}
+          detail="Correct flashcard attempts divided by total attempts today."
         />
-        <StatCard
-          label="Verb lemmas"
-          value={formatNumber(learnedVerbLemmaCount)}
-          detail="Unique learned Spanish verb lemmas."
+        <MetricCard
+          label="Logged active time"
+          value={today ? formatDuration(today.logged_active_time_seconds) : "0m"}
+          detail="Sum of submitted-attempt time, client-recorded reading time, and client-recorded listening time for today."
         />
       </section>
 
-      <ProgressHeroCard
-        eyebrow="Lemma-based progress"
-        badge="Estimated profile"
-        title={`${lemmaProfile.current.label} vocabulary profile`}
-        description="See how your lemma knowledge is growing over time. Built from the Spanish words you have actually learned in the app."
-        value={`${formatNumber(learnedLemmaCount)} mastered lemmas`}
-        progressLabel={getHeroProgressLabel(lemmaProfile)}
-        progressPercent={lemmaProfile.percent}
-        progressAriaLabel={`${lemmaProfile.current.label} vocabulary profile progress based on mastered Spanish lemmas`}
-        helper="This profile is estimated from learned Spanish lemmas. It reflects vocabulary range, not exam certification."
-        meta={[
-          {
-            label: "Current band",
-            value: `${lemmaProfile.current.label} range`,
-            detail: formatBandRange(lemmaProfile.current),
-          },
-          {
-            label: "Band progress",
-            value: `${Math.round(lemmaProfile.percent)}%`,
-            detail: `${formatNumber(lemmaProfile.completedInBand)} of ${formatNumber(
-              lemmaProfile.bandSize,
-            )} lemmas in this range`,
-          },
-        ]}
-      />
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          label="Reader today"
+          value={formatBoolean(today?.reader_completed ?? false)}
+          detail={`Saved words: ${today?.reader_saved_words ?? 0}`}
+        />
+        <MetricCard
+          label="Listening today"
+          value={formatBoolean(today?.listening_completed ?? false)}
+          detail="Marked complete only when the listening step is saved."
+        />
+        <MetricCard
+          label="Sessions completed"
+          value={`${sessionsCompletedLast7} / ${Math.min(7, last7.length)}`}
+          detail="Completed sessions across the last 7 tracked days."
+        />
+        <MetricCard
+          label="Days active"
+          value={`${daysActiveLast14} / ${Math.min(14, last14.length)}`}
+          detail="Days with any recorded study activity across the last 14 tracked days."
+        />
+      </section>
 
-      <section className="app-card flex flex-col gap-5 p-6 md:p-8">
+      <section className="grid gap-3 lg:grid-cols-2">
+        <SummaryCard
+          title="Stage totals"
+          rows={[
+            { label: "Started", value: String(bundle.summary.stage_totals.started) },
+            { label: "Flashcards completed", value: String(bundle.summary.stage_totals.flashcards_completed) },
+            { label: "Reading completed", value: String(bundle.summary.stage_totals.reading_completed) },
+            { label: "Listening completed", value: String(bundle.summary.stage_totals.listening_completed) },
+            { label: "Completed", value: String(bundle.summary.stage_totals.completed) },
+          ]}
+        />
+        <SummaryCard
+          title="Stage drop-off"
+          rows={[
+            { label: "Before flashcards complete", value: String(bundle.summary.stage_drop_off.before_flashcards_complete) },
+            { label: "Before reading complete", value: String(bundle.summary.stage_drop_off.before_reading_complete) },
+            { label: "Before listening complete", value: String(bundle.summary.stage_drop_off.before_listening_complete) },
+            { label: "Review correctness (retention proxy)", value: formatPercent(bundle.summary.review_retention_proxy.review_accuracy) },
+            { label: "Mean inter-review interval", value: formatHours(bundle.summary.review_retention_proxy.average_delta_hours) },
+          ]}
+        />
+      </section>
+
+      <section className="app-card flex flex-col gap-4 p-5 sm:p-6">
         <div className="flex flex-col gap-2">
-          <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-zinc-500 dark:text-zinc-400">
-            CEFR vocabulary ladder
-          </p>
-          <h2 className="text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
-            Lemma profile by band
-          </h2>
-          <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Each band shows estimated vocabulary coverage from mastered Spanish lemmas.
-          </p>
-        </div>
-
-        <CefrLadder rows={ladderRows} />
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <div className="flex flex-col gap-1">
-          <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-zinc-500 dark:text-zinc-400">
-            Secondary stats
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
+            Export
           </p>
           <h2 className="text-xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
-            Spanish learning detail
+            Dissertation export
           </h2>
           <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Supporting counts from the Spanish entries you have learned so far.
+            JSON downloads the full bundle. CSV downloads one dataset at a time with stable columns.
           </p>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <SecondaryMetricCard
-            label="Seen forms"
-            value={formatNumber(spanishEntryCount)}
-            detail="Spanish word entries currently represented in your learned set."
-          />
-          <SecondaryMetricCard
-            label="Verb lemmas"
-            value={formatNumber(learnedVerbLemmaCount)}
-            detail="Unique Spanish verb lemmas across your learned entries."
-          />
-          <SecondaryMetricCard
-            label="Spanish learning entries"
-            value={formatNumber(spanishEntryCount)}
-            detail="Current schema tracks learned Spanish entries at the word or form level."
-            emphasis="Current schema"
-          />
-          <SecondaryMetricCard
-            label="Bands completed"
-            value={`${completedBands} of ${LEMMA_CEFR_BANDS.length}`}
-            detail="CEFR vocabulary bands fully covered by mastered lemmas."
-            emphasis={lemmaProfile.next ? `${formatNumber(lemmaProfile.remainingInBand)} to ${lemmaProfile.next.label}` : "Top range covered"}
-          />
+        <div className="flex flex-wrap gap-3">
+          <Link href={buildExportHref("all", "json", range)} className="app-button">
+            Download JSON bundle
+          </Link>
+          <Link href={buildExportHref("daily_aggregates", "csv", range)} className="app-button-secondary">
+            Daily aggregates CSV
+          </Link>
+          <Link href={buildExportHref("sessions", "csv", range)} className="app-button-secondary">
+            Sessions CSV
+          </Link>
+          <Link href={buildExportHref("review_events", "csv", range)} className="app-button-secondary">
+            Review events CSV
+          </Link>
+          <Link href={buildExportHref("reading_events", "csv", range)} className="app-button-secondary">
+            Reading CSV
+          </Link>
+          <Link href={buildExportHref("listening_events", "csv", range)} className="app-button-secondary">
+            Listening CSV
+          </Link>
+          <Link href={buildExportHref("saved_words", "csv", range)} className="app-button-secondary">
+            Saved words CSV
+          </Link>
+        </div>
+
+        <Link
+          href={`/progress/debug?from=${range.from}&to=${range.to}`}
+          className="text-sm font-medium text-zinc-900 underline dark:text-zinc-100"
+        >
+          Open consistency checks
+        </Link>
+      </section>
+
+      <section className="app-card flex flex-col gap-4 p-5 sm:p-6">
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
+            Recent days
+          </p>
+          <h2 className="text-xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
+            Last 7 days
+          </h2>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full border-separate border-spacing-y-2 text-sm">
+            <thead>
+              <tr className="text-left text-zinc-500 dark:text-zinc-400">
+                <th className="px-3 py-2 font-medium">Date</th>
+                <th className="px-3 py-2 font-medium">Session</th>
+                <th className="px-3 py-2 font-medium">Flashcards</th>
+                <th className="px-3 py-2 font-medium">Accuracy</th>
+                <th className="px-3 py-2 font-medium">Reading</th>
+                <th className="px-3 py-2 font-medium">Listening</th>
+                <th className="px-3 py-2 font-medium">Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {last7.map((day) => (
+                <tr key={day.session_date} className="rounded-xl bg-zinc-50 text-zinc-900 dark:bg-zinc-900/60 dark:text-zinc-100">
+                  <td className="rounded-l-xl px-3 py-3">{formatSessionDateLabel(day.session_date)}</td>
+                  <td className="px-3 py-3">{formatTodayStatus(day.stage, day.session_completed)}</td>
+                  <td className="px-3 py-3">{day.flashcard_completed_count}/{day.assigned_flashcard_count}</td>
+                  <td className="px-3 py-3">{formatPercent(day.flashcard_accuracy)}</td>
+                  <td className="px-3 py-3">{formatBoolean(day.reading_completed)}</td>
+                  <td className="px-3 py-3">{formatBoolean(day.listening_completed)}</td>
+                  <td className="rounded-r-xl px-3 py-3">{formatDuration(day.total_time_seconds)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </section>
     </main>
   );
 }
 
-async function getSpanishEntryCounts(
-  supabase: SupabaseServerClient,
-  userId: string,
-): Promise<CountResult> {
-  const learnedResult = await supabase
-    .from("user_words")
-    .select("word_id", { count: "exact", head: true })
-    .eq("user_id", userId);
-
-  return {
-    learned: learnedResult.count ?? 0,
-    error: learnedResult.error
-      ? { message: learnedResult.error.message }
-      : null,
-  };
+function MetricCard({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+}) {
+  return (
+    <article className="app-card flex flex-col gap-3 p-4">
+      <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
+        {label}
+      </p>
+      <p className="text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
+        {value}
+      </p>
+      <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">{detail}</p>
+    </article>
+  );
 }
 
-async function getLemmaProgressCounts(
-  supabase: SupabaseServerClient,
-  userId: string,
-): Promise<CountResult> {
-  const learnedLemmaResult = await supabase
-    .from("user_words")
-    .select("words!inner(lemma)")
-    .eq("user_id", userId);
-
-  if (learnedLemmaResult.error) {
-    return {
-      learned: 0,
-      error: { message: learnedLemmaResult.error.message },
-    };
-  }
-
-  return {
-    learned: countDistinctWordField(learnedLemmaResult.data ?? [], "lemma"),
-    error: null,
-  };
+function SummaryCard({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: { label: string; value: string }[];
+}) {
+  return (
+    <section className="app-card flex flex-col gap-4 p-5 sm:p-6">
+      <h2 className="text-xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
+        {title}
+      </h2>
+      <dl className="grid gap-3">
+        {rows.map((row) => (
+          <div key={row.label} className="flex items-center justify-between gap-4 rounded-xl bg-zinc-50 px-4 py-3 dark:bg-zinc-900/60">
+            <dt className="text-sm text-zinc-600 dark:text-zinc-300">{row.label}</dt>
+            <dd className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
 }
 
-async function getVerbLemmaCounts(
-  supabase: SupabaseServerClient,
-  userId: string,
-): Promise<CountResult> {
-  const learnedVerbResult = await supabase
-    .from("user_words")
-    .select("words!inner(lemma, pos)")
-    .eq("user_id", userId)
-    .eq("words.pos", "verb");
-
-  if (learnedVerbResult.error) {
-    return {
-      learned: 0,
-      error: { message: learnedVerbResult.error.message },
-    };
-  }
-
-  return {
-    learned: countDistinctWordField(learnedVerbResult.data ?? [], "lemma"),
-    error: null,
-  };
-}
-
-function countDistinctWordField(
-  rows: { words: { lemma?: string | null } | { lemma?: string | null }[] | null }[],
-  field: "lemma",
+function buildExportHref(
+  dataset: string,
+  format: "json" | "csv",
+  range: { from: string; to: string },
 ) {
-  return new Set(
-    rows
-      .map((row) => {
-        const words = Array.isArray(row.words) ? row.words[0] : row.words;
-        return words?.[field] ?? null;
-      })
-      .filter((value): value is string => Boolean(value)),
-  ).size;
+  return `/api/progress/export?dataset=${dataset}&format=${format}&from=${range.from}&to=${range.to}`;
 }
 
-function getCefrProgress(learnedCount: number, bands: readonly CefrBand[]): CefrProgress {
-  const finalBand = bands[bands.length - 1];
-  const current =
-    [...bands].reverse().find((band) => learnedCount >= band.min) ?? bands[0];
-  const next = bands[bands.findIndex((band) => band.label === current.label) + 1] ?? null;
-  const displayCount = Math.min(learnedCount, finalBand.max);
-  const bandSize = Math.max(1, current.max - current.min);
-  const completedInBand = Math.max(0, Math.min(displayCount, current.max) - current.min);
-  const remainingInBand = Math.max(0, current.max - displayCount);
-  const rawPercent = (completedInBand / bandSize) * 100;
-  const percent =
-    learnedCount >= finalBand.max ? 100 : Math.max(0, Math.min(100, rawPercent));
-
-  return {
-    current,
-    next,
-    displayCount,
-    percent,
-    completedInBand,
-    remainingInBand,
-    bandSize,
-  };
-}
-
-function getCefrLadderRows(
-  learnedCount: number,
-  bands: readonly CefrBand[],
-): CefrLadderRowData[] {
-  const finalBand = bands[bands.length - 1];
-  const cappedCount = Math.min(learnedCount, finalBand.max);
-
-  return bands.map((band) => {
-    const bandSize = Math.max(1, band.max - band.min);
-    const completedInBand = Math.max(0, Math.min(cappedCount, band.max) - band.min);
-    const percent = learnedCount >= band.max
-      ? 100
-      : Math.max(0, Math.min(100, (completedInBand / bandSize) * 100));
-
-    if (learnedCount >= band.max) {
-      return {
-        label: band.label,
-        range: formatBandRange(band),
-        status: "Completed",
-        percent,
-        detail: `${formatNumber(bandSize)} of ${formatNumber(bandSize)} lemmas covered in this range.`,
-        ariaLabel: `${band.label} CEFR ladder progress`,
-        tone: "completed" as const,
-      };
-    }
-
-    if (learnedCount >= band.min) {
-      return {
-        label: band.label,
-        range: formatBandRange(band),
-        status: "Entered",
-        percent,
-        detail: `${formatNumber(completedInBand)} of ${formatNumber(bandSize)} lemmas covered in this range.`,
-        ariaLabel: `${band.label} CEFR ladder progress`,
-        tone: "active" as const,
-      };
-    }
-
-    return {
-      label: band.label,
-      range: formatBandRange(band),
-      status: "Not yet",
-      percent: 0,
-      detail: `Begins at ${formatNumber(band.min)} mastered lemmas.`,
-      ariaLabel: `${band.label} CEFR ladder progress`,
-      tone: "pending" as const,
-    };
-  });
-}
-
-function getHeroProgressLabel(progress: CefrProgress) {
-  if (!progress.next) {
-    return `Top range covered with ${formatNumber(progress.displayCount)} tracked lemmas`;
+function formatTodayStatus(stage: string | null | undefined, completed: boolean) {
+  if (completed) {
+    return "Complete";
   }
 
-  return `${formatNumber(progress.completedInBand)} of ${formatNumber(
-    progress.bandSize,
-  )} lemmas through ${progress.current.label}, ${formatNumber(
-    progress.remainingInBand,
-  )} to ${progress.next.label}`;
+  if (!stage) {
+    return "Not started";
+  }
+
+  return stage[0].toUpperCase() + stage.slice(1);
 }
 
-function formatBandRange(band: CefrBand) {
-  return `${formatNumber(band.min)}-${formatNumber(band.max)} lemmas`;
+function formatDuration(totalSeconds: number) {
+  const seconds = Math.max(0, Math.round(totalSeconds));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.round((seconds % 3600) / 60);
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+
+  return `${minutes}m`;
 }
 
-function formatNumber(value: number) {
-  return value.toLocaleString();
+function formatHours(value: number | null) {
+  if (value === null || Number.isNaN(value)) {
+    return "No review data";
+  }
+
+  return `${value.toFixed(1)}h`;
+}
+
+function formatPercent(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "No data";
+  }
+
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatBoolean(value: boolean) {
+  return value ? "Yes" : "No";
+}
+
+function getSearchParamValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
 }

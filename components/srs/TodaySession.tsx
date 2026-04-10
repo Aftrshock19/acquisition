@@ -167,7 +167,9 @@ export function TodaySession({
   );
   const initialCompletedCount = Math.max(
     0,
-    initialDailySession?.reviews_done ?? 0,
+    initialDailySession?.flashcard_completed_count ??
+      initialDailySession?.reviews_done ??
+      0,
   );
 
   const [mainIndex, setMainIndex] = useState(0);
@@ -199,6 +201,10 @@ export function TodaySession({
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const startedAtRef = useRef<number>(Date.now());
+  const currentAttemptRef = useRef<{
+    id: string;
+    shownAt: string;
+  } | null>(null);
   const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const correctionPlaceholderTimeoutRef =
     useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -254,6 +260,12 @@ export function TodaySession({
     setShowCorrectionPlaceholder(false);
     setPhase("prompt");
     startedAtRef.current = Date.now();
+    currentAttemptRef.current = current
+      ? {
+          id: crypto.randomUUID(),
+          shownAt: new Date().toISOString(),
+        }
+      : null;
   }, [current]);
 
   useEffect(() => {
@@ -477,10 +489,18 @@ export function TodaySession({
 
     setBusy(true);
     try {
+      const retryDueAtMs = correct ? null : Date.now() + retryDelayMs;
       const result = await recordReview({
         wordId: card.id,
         correct,
         cardType: card.cardType,
+        queueKind: card.kind,
+        queueSource: currentSource,
+        shownAt: currentAttemptRef.current?.shownAt,
+        submittedAt: new Date().toISOString(),
+        clientAttemptId: currentAttemptRef.current?.id,
+        retryScheduledFor:
+          retryDueAtMs === null ? null : new Date(retryDueAtMs).toISOString(),
         msSpent: Date.now() - startedAtRef.current,
         userAnswer,
         expected,
@@ -493,7 +513,7 @@ export function TodaySession({
         ? retryList
         : upsertRetrySorted(retryList, {
             card,
-            dueAt: Date.now() + retryDelayMs,
+            dueAt: retryDueAtMs ?? Date.now() + retryDelayMs,
           });
 
       setRetryList(nextRetryList);
@@ -628,11 +648,19 @@ export function TodaySession({
 
     setBusy(true);
     try {
+      const retryDueAtMs = outcome.retry ? Date.now() + retryDelayMs : null;
       const result = await recordReview({
         wordId: current.id,
         correct: outcome.correct,
         grade: outcome.grade,
         cardType: "normal",
+        queueKind: current.kind,
+        queueSource: currentSource,
+        shownAt: currentAttemptRef.current?.shownAt,
+        submittedAt: new Date().toISOString(),
+        clientAttemptId: currentAttemptRef.current?.id,
+        retryScheduledFor:
+          retryDueAtMs === null ? null : new Date(retryDueAtMs).toISOString(),
         msSpent: Date.now() - startedAtRef.current,
         userAnswer: outcome.userAnswer,
         expected: [
@@ -648,7 +676,7 @@ export function TodaySession({
       const nextRetryList = outcome.retry
         ? upsertRetrySorted(retryList, {
             card: current,
-            dueAt: Date.now() + retryDelayMs,
+            dueAt: retryDueAtMs ?? Date.now() + retryDelayMs,
           })
         : retryList;
 
@@ -821,6 +849,7 @@ export function TodaySession({
               initialSavedLemmas={initialSavedLemmas}
               interactionContext={interactiveTextContext}
               closeSignal={interactiveTextCloseSignal}
+              saveSource="flashcard"
             >
               <McqCard
                 card={current}
@@ -843,6 +872,7 @@ export function TodaySession({
               initialSavedLemmas={initialSavedLemmas}
               interactionContext={interactiveTextContext}
               closeSignal={interactiveTextCloseSignal}
+              saveSource="flashcard"
             >
               <SentenceCard
                 card={current}

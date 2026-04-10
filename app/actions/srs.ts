@@ -84,11 +84,15 @@ export type FlashcardDebugSnapshot = {
 };
 
 type DailySessionProgressState = {
-  flashcardTargetCount: number;
-  reviewsDone: number;
+  assignedFlashcardCount: number;
+  assignedNewWordsCount: number;
+  assignedReviewCardsCount: number;
+  flashcardCompletedCount: number;
   readingDone: boolean;
   listeningDone: boolean;
 };
+
+const SESSION_RESUME_THRESHOLD_MS = 15 * 60 * 1000;
 
 export type CompleteReadingStepResult =
   | {
@@ -193,7 +197,7 @@ export async function getDailyQueue(
   let filteredDueReviews = dueReviews;
 
   if (dueReviews.length > 0) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getTodaySessionDate();
     const { data: reviewedTodayRows, error: reviewedTodayError } = await supabase
       .from("user_words")
       .select("word_id")
@@ -247,7 +251,12 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     getTodaySavedWordsState(lang),
   ]);
   const effective = resolveEffectiveSettings(settings, recommended);
-  const completedToday = Math.max(0, existingDailySession?.reviews_done ?? 0);
+  const completedToday = Math.max(
+    0,
+    existingDailySession?.flashcard_completed_count ??
+      existingDailySession?.reviews_done ??
+      0,
+  );
   const remainingDailyLimit = Math.max(0, effective.effectiveDailyLimit - completedToday);
   const queueLimit = Math.max(1, remainingDailyLimit);
 
@@ -342,34 +351,33 @@ export async function recordReview(
     }
 
     const grade = resolveGrade(payload);
-    const correct = grade !== "again";
-    const rpcArgs = {
+    const queueSource = payload.queueSource ?? "main";
+    const retryScheduledFor =
+      queueSource === "main" && grade === "again" && payload.retryScheduledFor
+        ? payload.retryScheduledFor
+        : queueSource === "main" && grade === "again"
+          ? new Date(Date.now() + 10 * 60 * 1000).toISOString()
+          : null;
+
+    const { error } = await supabase.rpc("record_review", {
       p_word_id: payload.wordId,
       p_grade: grade,
       p_ms_spent: payload.msSpent,
       p_user_answer: payload.userAnswer ?? "",
       p_expected: payload.expected ?? [],
-    };
-
-    let { error } = await supabase.rpc("record_review", {
-      ...rpcArgs,
       p_card_type: payload.cardType ?? "cloze",
+      p_session_date: getTodaySessionDate(),
+      p_queue_kind: payload.queueKind ?? null,
+      p_queue_source: queueSource,
+      p_shown_at: payload.shownAt ?? null,
+      p_submitted_at: payload.submittedAt ?? null,
+      p_retry_scheduled_for: retryScheduledFor,
+      p_client_attempt_id: payload.clientAttemptId ?? null,
     });
 
-    if (isMissingCardTypeArgumentError(error?.message)) {
-      ({ error } = await supabase.rpc("record_review", rpcArgs));
-    }
-
     if (error) {
-      if (isMissingUpsertUserWordError(error.message)) {
-        await fallbackRecordReview(supabase, user.id, { ...payload, correct, grade });
-      } else {
-        return { ok: false, error: error.message };
-      }
+      return { ok: false, error: error.message };
     }
-
-    await syncUserWordReviewState(supabase, user.id, { ...payload, correct, grade });
-    await incrementDailySessionReviews(supabase, user.id);
 
     const debugSnapshot = await getFlashcardDebugSnapshot(payload.wordId);
 
@@ -389,18 +397,6 @@ function resolveGrade(payload: RecordReviewPayload): Grade {
 
 function isValidGrade(value: string): value is Grade {
   return value === "again" || value === "hard" || value === "good" || value === "easy";
-}
-
-function isMissingUpsertUserWordError(message: string) {
-  return message.includes("upsert_user_word");
-}
-
-function isMissingCardTypeArgumentError(message?: string) {
-  if (!message) return false;
-  return (
-    message.includes("Could not find the function public.record_review") &&
-    message.includes("p_card_type")
-  );
 }
 
 export type RecordExposureResult = { ok: true } | { ok: false; error: string };
@@ -448,23 +444,53 @@ export async function recordExposure(
 function getDailySessionProgressState(
   current:
     | {
+        assigned_flashcard_count?: number | null;
+        assigned_new_words_count?: number | null;
+        assigned_review_cards_count?: number | null;
+        flashcard_completed_count?: number | null;
         new_words_count?: number | null;
         reviews_done?: number | null;
         reading_done?: boolean | null;
         listening_done?: boolean | null;
       }
     | null,
-  fallbackFlashcardTargetCount = 0,
+  fallbackCounts?: {
+    assignedFlashcardCount?: number;
+    assignedNewWordsCount?: number;
+    assignedReviewCardsCount?: number;
+  },
 ): DailySessionProgressState {
-  const reviewsDone = Math.max(0, current?.reviews_done ?? 0);
+  const assignedFlashcardCount = Math.max(
+    0,
+    current?.assigned_flashcard_count ??
+      current?.new_words_count ??
+      fallbackCounts?.assignedFlashcardCount ??
+      0,
+  );
+  const assignedNewWordsCount = Math.max(
+    0,
+    current?.assigned_new_words_count ?? fallbackCounts?.assignedNewWordsCount ?? 0,
+  );
+  const assignedReviewCardsCount = Math.max(
+    0,
+    current?.assigned_review_cards_count ??
+      fallbackCounts?.assignedReviewCardsCount ??
+      0,
+  );
+  const flashcardCompletedCount = Math.max(
+    0,
+    current?.flashcard_completed_count ?? current?.reviews_done ?? 0,
+  );
 
   return {
-    flashcardTargetCount: Math.max(
-      reviewsDone,
-      current?.new_words_count ?? 0,
-      fallbackFlashcardTargetCount,
+    assignedFlashcardCount: Math.max(
+      assignedFlashcardCount,
+      flashcardCompletedCount,
+      assignedNewWordsCount + assignedReviewCardsCount,
     ),
-    reviewsDone,
+    assignedNewWordsCount,
+    assignedReviewCardsCount,
+    flashcardCompletedCount,
     readingDone: current?.reading_done ?? false,
     listeningDone: current?.listening_done ?? false,
   };
@@ -473,7 +499,7 @@ function getDailySessionProgressState(
 function resolveDailySessionStage(
   state: DailySessionProgressState,
 ): DailySessionRow["stage"] {
-  if (state.reviewsDone < state.flashcardTargetCount) {
+  if (state.flashcardCompletedCount < state.assignedFlashcardCount) {
     return "flashcards";
   }
 
@@ -541,11 +567,32 @@ async function upsertDailySession(
   if (!supabase || !user) return null;
 
   const sessionDate = getTodaySessionDate();
+  const now = new Date().toISOString();
+  const assignedReviewCardsCount = session.dueReviews.length;
+  const assignedNewWordsCount = session.newWords.length;
+  const assignedFlashcardCount = assignedReviewCardsCount + assignedNewWordsCount;
   const progress = getDailySessionProgressState(
     existingDailySession,
-    session.dueReviews.length + session.newWords.length,
+    {
+      assignedFlashcardCount,
+      assignedNewWordsCount,
+      assignedReviewCardsCount,
+    },
   );
   const stage = resolveDailySessionStage(progress);
+  const shouldResume = Boolean(
+    existingDailySession &&
+      existingDailySession.started_at &&
+      !existingDailySession.completed &&
+      existingDailySession.last_active_at &&
+      Date.now() - new Date(existingDailySession.last_active_at).getTime() >
+        SESSION_RESUME_THRESHOLD_MS,
+  );
+  const completed = getDailySessionCompleted(progress);
+  const flashcardsCompletedAt =
+    progress.assignedFlashcardCount === 0 || progress.flashcardCompletedCount >= progress.assignedFlashcardCount
+      ? existingDailySession?.flashcards_completed_at ?? now
+      : existingDailySession?.flashcards_completed_at ?? null;
 
   const { data, error } = await supabase
     .from("daily_sessions")
@@ -554,9 +601,52 @@ async function upsertDailySession(
         user_id: user.id,
         session_date: sessionDate,
         stage,
-        new_words_count: progress.flashcardTargetCount,
-        reviews_done: progress.reviewsDone,
-        completed: getDailySessionCompleted(progress),
+        assigned_flashcard_count: progress.assignedFlashcardCount,
+        assigned_new_words_count: progress.assignedNewWordsCount,
+        assigned_review_cards_count: progress.assignedReviewCardsCount,
+        new_words_count: progress.assignedFlashcardCount,
+        reviews_done: progress.flashcardCompletedCount,
+        flashcard_completed_count: progress.flashcardCompletedCount,
+        flashcard_new_completed_count:
+          existingDailySession?.flashcard_new_completed_count ?? 0,
+        flashcard_review_completed_count:
+          existingDailySession?.flashcard_review_completed_count ?? 0,
+        flashcard_attempts_count: existingDailySession?.flashcard_attempts_count ?? 0,
+        flashcard_retry_count: existingDailySession?.flashcard_retry_count ?? 0,
+        started_at: existingDailySession?.started_at ?? now,
+        last_active_at: now,
+        last_resumed_at: shouldResume
+          ? now
+          : existingDailySession?.last_resumed_at ?? null,
+        resume_count:
+          (existingDailySession?.resume_count ?? 0) + (shouldResume ? 1 : 0),
+        flashcards_completed_at: flashcardsCompletedAt,
+        reading_done: existingDailySession?.reading_done ?? false,
+        reading_text_id: existingDailySession?.reading_text_id ?? null,
+        reading_opened_at: existingDailySession?.reading_opened_at ?? null,
+        reading_completed_at: existingDailySession?.reading_completed_at ?? null,
+        reading_time_seconds: existingDailySession?.reading_time_seconds ?? 0,
+        listening_done: existingDailySession?.listening_done ?? false,
+        listening_asset_id: existingDailySession?.listening_asset_id ?? null,
+        listening_opened_at: existingDailySession?.listening_opened_at ?? null,
+        listening_playback_started_at:
+          existingDailySession?.listening_playback_started_at ?? null,
+        listening_completed_at:
+          existingDailySession?.listening_completed_at ?? null,
+        listening_max_position_seconds:
+          existingDailySession?.listening_max_position_seconds ?? null,
+        listening_required_seconds:
+          existingDailySession?.listening_required_seconds ?? null,
+        listening_transcript_opened:
+          existingDailySession?.listening_transcript_opened ?? false,
+        listening_playback_rate:
+          existingDailySession?.listening_playback_rate ?? null,
+        listening_time_seconds:
+          existingDailySession?.listening_time_seconds ?? 0,
+        completed,
+        completed_at: completed
+          ? existingDailySession?.completed_at ?? now
+          : existingDailySession?.completed_at ?? null,
       },
       { onConflict: "user_id,session_date" },
     )
@@ -567,55 +657,12 @@ async function upsertDailySession(
   return data as DailySessionRow;
 }
 
-async function incrementDailySessionReviews(
-  supabase: NonNullable<Awaited<ReturnType<typeof createSupabaseServerClient>>>,
-  userId: string,
-) {
-  const sessionDate = getTodaySessionDate();
-  const { data } = await supabase
-    .from("daily_sessions")
-    .select("reviews_done,new_words_count,reading_done,listening_done")
-    .eq("user_id", userId)
-    .eq("session_date", sessionDate)
-    .maybeSingle();
-
-  const current = data as
-    | {
-        reviews_done?: number | null;
-        new_words_count?: number | null;
-        reading_done?: boolean | null;
-        listening_done?: boolean | null;
-      }
-    | null;
-
-  const progress = getDailySessionProgressState(current);
-  const nextProgress: DailySessionProgressState = {
-    ...progress,
-    reviewsDone: progress.reviewsDone + 1,
-    flashcardTargetCount: Math.max(
-      progress.flashcardTargetCount,
-      progress.reviewsDone + 1,
-    ),
-  };
-  const stage = resolveDailySessionStage(nextProgress);
-
-  await supabase.from("daily_sessions").upsert(
-    {
-      user_id: userId,
-      session_date: sessionDate,
-      stage,
-      new_words_count: nextProgress.flashcardTargetCount,
-      reviews_done: nextProgress.reviewsDone,
-      completed: getDailySessionCompleted(nextProgress),
-    },
-    { onConflict: "user_id,session_date" },
-  );
-}
-
 export async function completeReadingStep({
   textId,
+  readingTimeSeconds = 0,
 }: {
   textId: string;
+  readingTimeSeconds?: number;
 }): Promise<CompleteReadingStepResult> {
   try {
     const { supabase, user, error: authError } = await getSupabaseServerContext();
@@ -666,13 +713,46 @@ export async function completeReadingStep({
           user_id: user.id,
           session_date: sessionDate,
           stage,
-          new_words_count: nextProgress.flashcardTargetCount,
-          reviews_done: nextProgress.reviewsDone,
+          assigned_flashcard_count: nextProgress.assignedFlashcardCount,
+          assigned_new_words_count: nextProgress.assignedNewWordsCount,
+          assigned_review_cards_count: nextProgress.assignedReviewCardsCount,
+          new_words_count: nextProgress.assignedFlashcardCount,
+          reviews_done: nextProgress.flashcardCompletedCount,
+          flashcard_completed_count: nextProgress.flashcardCompletedCount,
+          flashcard_new_completed_count:
+            currentDailySession?.flashcard_new_completed_count ?? 0,
+          flashcard_review_completed_count:
+            currentDailySession?.flashcard_review_completed_count ?? 0,
+          flashcard_attempts_count:
+            currentDailySession?.flashcard_attempts_count ?? 0,
+          flashcard_retry_count:
+            currentDailySession?.flashcard_retry_count ?? 0,
+          started_at: currentDailySession?.started_at ?? now,
+          last_active_at: now,
+          flashcards_completed_at:
+            currentDailySession?.flashcards_completed_at ??
+            (nextProgress.assignedFlashcardCount === 0 ||
+            nextProgress.flashcardCompletedCount >= nextProgress.assignedFlashcardCount
+              ? now
+              : null),
           reading_done: true,
           reading_text_id: textId,
+          reading_opened_at: currentDailySession?.reading_opened_at ?? now,
           reading_completed_at: now,
+          reading_time_seconds: Math.max(
+            Math.max(0, Math.round(readingTimeSeconds)),
+            currentDailySession?.reading_time_seconds ?? 0,
+          ),
           listening_done: nextListeningDone,
           listening_asset_id: listeningAsset?.id ?? null,
+          listening_opened_at:
+            listeningAsset === null || shouldResetListeningProgress
+              ? null
+              : currentDailySession?.listening_opened_at ?? null,
+          listening_playback_started_at:
+            listeningAsset === null || shouldResetListeningProgress
+              ? null
+              : currentDailySession?.listening_playback_started_at ?? null,
           listening_completed_at:
             listeningAsset === null
               ? currentDailySession?.listening_completed_at ?? now
@@ -695,7 +775,14 @@ export async function completeReadingStep({
             listeningAsset === null || shouldResetListeningProgress
               ? null
               : currentDailySession?.listening_playback_rate ?? null,
+          listening_time_seconds:
+            listeningAsset === null || shouldResetListeningProgress
+              ? 0
+              : currentDailySession?.listening_time_seconds ?? 0,
           completed: getDailySessionCompleted(nextProgress),
+          completed_at: getDailySessionCompleted(nextProgress)
+            ? currentDailySession?.completed_at ?? now
+            : currentDailySession?.completed_at ?? null,
         },
         { onConflict: "user_id,session_date" },
       )
@@ -741,12 +828,14 @@ export async function completeListeningStep({
   requiredListenSeconds,
   transcriptOpened,
   playbackRate,
+  listeningTimeSeconds = 0,
 }: {
   assetId: string;
   maxPositionSeconds: number;
   requiredListenSeconds: number;
   transcriptOpened: boolean;
   playbackRate: number;
+  listeningTimeSeconds?: number;
 }): Promise<CompleteListeningStepResult> {
   try {
     const { supabase, user, error: authError } = await getSupabaseServerContext();
@@ -793,13 +882,39 @@ export async function completeListeningStep({
           user_id: user.id,
           session_date: sessionDate,
           stage,
-          new_words_count: nextProgress.flashcardTargetCount,
-          reviews_done: nextProgress.reviewsDone,
+          assigned_flashcard_count: nextProgress.assignedFlashcardCount,
+          assigned_new_words_count: nextProgress.assignedNewWordsCount,
+          assigned_review_cards_count: nextProgress.assignedReviewCardsCount,
+          new_words_count: nextProgress.assignedFlashcardCount,
+          reviews_done: nextProgress.flashcardCompletedCount,
+          flashcard_completed_count: nextProgress.flashcardCompletedCount,
+          flashcard_new_completed_count:
+            currentDailySession?.flashcard_new_completed_count ?? 0,
+          flashcard_review_completed_count:
+            currentDailySession?.flashcard_review_completed_count ?? 0,
+          flashcard_attempts_count:
+            currentDailySession?.flashcard_attempts_count ?? 0,
+          flashcard_retry_count:
+            currentDailySession?.flashcard_retry_count ?? 0,
+          started_at: currentDailySession?.started_at ?? now,
+          last_active_at: now,
+          flashcards_completed_at:
+            currentDailySession?.flashcards_completed_at ??
+            (nextProgress.assignedFlashcardCount === 0 ||
+            nextProgress.flashcardCompletedCount >= nextProgress.assignedFlashcardCount
+              ? now
+              : null),
           reading_done: currentProgress.readingDone,
           reading_text_id:
             currentDailySession?.reading_text_id ?? listeningAsset.textId,
+          reading_opened_at: currentDailySession?.reading_opened_at ?? null,
+          reading_completed_at: currentDailySession?.reading_completed_at ?? null,
+          reading_time_seconds: currentDailySession?.reading_time_seconds ?? 0,
           listening_done: true,
           listening_asset_id: listeningAsset.id,
+          listening_opened_at: currentDailySession?.listening_opened_at ?? now,
+          listening_playback_started_at:
+            currentDailySession?.listening_playback_started_at ?? now,
           listening_completed_at: now,
           listening_max_position_seconds: Math.max(
             Math.max(0, Math.round(maxPositionSeconds)),
@@ -816,7 +931,14 @@ export async function completeListeningStep({
             (currentDailySession?.listening_asset_id === listeningAsset.id &&
               (currentDailySession?.listening_transcript_opened ?? false)),
           listening_playback_rate: playbackRate,
+          listening_time_seconds: Math.max(
+            Math.max(0, Math.round(listeningTimeSeconds)),
+            currentDailySession?.listening_time_seconds ?? 0,
+          ),
           completed: getDailySessionCompleted(nextProgress),
+          completed_at: getDailySessionCompleted(nextProgress)
+            ? currentDailySession?.completed_at ?? now
+            : currentDailySession?.completed_at ?? null,
         },
         { onConflict: "user_id,session_date" },
       )
@@ -854,95 +976,282 @@ export async function completeListeningStep({
   }
 }
 
-async function syncUserWordReviewState(
-  supabase: NonNullable<Awaited<ReturnType<typeof createSupabaseServerClient>>>,
-  userId: string,
-  payload: RecordReviewPayload,
-) {
-  const { data, error } = await supabase
-    .from("user_words")
-    .select(
-      "attempts,correct_attempts,reps_today,reps_today_date,difficulty,last_seen_at,last_graded_at",
-    )
-    .eq("user_id", userId)
-    .eq("word_id", payload.wordId)
-    .maybeSingle();
+export async function markReadingOpened({
+  textId,
+}: {
+  textId: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    if (!supabase) {
+      return { ok: false, error: "Supabase client could not be created on the server" };
+    }
 
-  if (error) return;
+    if (authError) {
+      return { ok: false, error: authError };
+    }
 
-  const current = data as
-    | {
-        attempts?: number | null;
-        correct_attempts?: number | null;
-        reps_today?: number | null;
-        reps_today_date?: string | null;
-        difficulty?: number | null;
-      }
-    | null;
+    if (!user) {
+      return { ok: false, error: "Not authenticated" };
+    }
 
-  const today = new Date().toISOString().slice(0, 10);
-  const sameDay = current?.reps_today_date === today;
-  const attempts = (current?.attempts ?? 0) + 1;
-  const correctAttempts = (current?.correct_attempts ?? 0) + (payload.correct ? 1 : 0);
-  const repsToday = sameDay ? (current?.reps_today ?? 0) + 1 : 1;
-  const accuracy = correctAttempts / Math.max(1, attempts);
-  const priorDifficulty = current?.difficulty ?? 0.5;
-  const difficulty = Math.max(
-    0,
-    Math.min(1, priorDifficulty + (payload.correct ? -0.05 : 0.08)),
-  );
-  const now = new Date().toISOString();
+    const sessionDate = getTodaySessionDate();
+    const now = new Date().toISOString();
+    const currentDailySession = await getTodayDailySessionRow(supabase, user.id);
+    const progress = getDailySessionProgressState(currentDailySession);
 
-  await supabase
-    .from("user_words")
-    .update({
-      attempts,
-      correct_attempts: correctAttempts,
-      accuracy,
-      difficulty,
-      last_seen_at: now,
-      last_graded_at: now,
-      reps_today: repsToday,
-      reps_today_date: today,
-    })
-    .eq("user_id", userId)
-    .eq("word_id", payload.wordId);
+    const { error } = await supabase.from("daily_sessions").upsert(
+      {
+        user_id: user.id,
+        session_date: sessionDate,
+        stage: currentDailySession?.stage ?? resolveDailySessionStage(progress),
+        assigned_flashcard_count: progress.assignedFlashcardCount,
+        assigned_new_words_count: progress.assignedNewWordsCount,
+        assigned_review_cards_count: progress.assignedReviewCardsCount,
+        new_words_count: progress.assignedFlashcardCount,
+        reviews_done: progress.flashcardCompletedCount,
+        flashcard_completed_count: progress.flashcardCompletedCount,
+        flashcard_new_completed_count:
+          currentDailySession?.flashcard_new_completed_count ?? 0,
+        flashcard_review_completed_count:
+          currentDailySession?.flashcard_review_completed_count ?? 0,
+        flashcard_attempts_count: currentDailySession?.flashcard_attempts_count ?? 0,
+        flashcard_retry_count: currentDailySession?.flashcard_retry_count ?? 0,
+        started_at: currentDailySession?.started_at ?? now,
+        last_active_at: now,
+        flashcards_completed_at: currentDailySession?.flashcards_completed_at ?? null,
+        reading_text_id: textId,
+        reading_opened_at: currentDailySession?.reading_opened_at ?? now,
+        reading_done: currentDailySession?.reading_done ?? false,
+        reading_completed_at: currentDailySession?.reading_completed_at ?? null,
+        reading_time_seconds: currentDailySession?.reading_time_seconds ?? 0,
+        listening_done: currentDailySession?.listening_done ?? false,
+        listening_asset_id: currentDailySession?.listening_asset_id ?? null,
+        listening_opened_at: currentDailySession?.listening_opened_at ?? null,
+        listening_playback_started_at:
+          currentDailySession?.listening_playback_started_at ?? null,
+        listening_completed_at: currentDailySession?.listening_completed_at ?? null,
+        listening_max_position_seconds:
+          currentDailySession?.listening_max_position_seconds ?? null,
+        listening_required_seconds:
+          currentDailySession?.listening_required_seconds ?? null,
+        listening_transcript_opened:
+          currentDailySession?.listening_transcript_opened ?? false,
+        listening_playback_rate:
+          currentDailySession?.listening_playback_rate ?? null,
+        listening_time_seconds:
+          currentDailySession?.listening_time_seconds ?? 0,
+        completed: currentDailySession?.completed ?? false,
+        completed_at: currentDailySession?.completed_at ?? null,
+      },
+      { onConflict: "user_id,session_date" },
+    );
+
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to mark the reader as opened",
+    };
+  }
 }
 
-async function fallbackRecordReview(
-  supabase: NonNullable<Awaited<ReturnType<typeof createSupabaseServerClient>>>,
-  userId: string,
-  payload: RecordReviewPayload,
-) {
-  const now = new Date();
-  const nextDue = new Date(
-    now.getTime() + (payload.correct ? 24 * 60 * 60 * 1000 : 10 * 60 * 1000),
-  ).toISOString();
+export async function markListeningOpened({
+  assetId,
+}: {
+  assetId: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    if (!supabase) {
+      return { ok: false, error: "Supabase client could not be created on the server" };
+    }
 
-  // Keep fallback resilient across schema drift: only depend on core queue columns.
-  const { error: upsertError } = await supabase.from("user_words").upsert(
-    {
-      user_id: userId,
-      word_id: payload.wordId,
-      status: "learning",
-      due_at: nextDue,
-    },
-    { onConflict: "user_id,word_id" },
-  );
-  if (upsertError) {
-    throw new Error(upsertError.message);
+    if (authError) {
+      return { ok: false, error: authError };
+    }
+
+    if (!user) {
+      return { ok: false, error: "Not authenticated" };
+    }
+
+    const [currentDailySession, listeningAsset] = await Promise.all([
+      getTodayDailySessionRow(supabase, user.id),
+      getListeningAssetById(supabase, assetId),
+    ]);
+
+    if (!listeningAsset) {
+      return { ok: false, error: "This listening asset could not be found." };
+    }
+
+    const sessionDate = getTodaySessionDate();
+    const now = new Date().toISOString();
+    const progress = getDailySessionProgressState(currentDailySession);
+
+    const { error } = await supabase.from("daily_sessions").upsert(
+      {
+        user_id: user.id,
+        session_date: sessionDate,
+        stage: currentDailySession?.stage ?? resolveDailySessionStage(progress),
+        assigned_flashcard_count: progress.assignedFlashcardCount,
+        assigned_new_words_count: progress.assignedNewWordsCount,
+        assigned_review_cards_count: progress.assignedReviewCardsCount,
+        new_words_count: progress.assignedFlashcardCount,
+        reviews_done: progress.flashcardCompletedCount,
+        flashcard_completed_count: progress.flashcardCompletedCount,
+        flashcard_new_completed_count:
+          currentDailySession?.flashcard_new_completed_count ?? 0,
+        flashcard_review_completed_count:
+          currentDailySession?.flashcard_review_completed_count ?? 0,
+        flashcard_attempts_count: currentDailySession?.flashcard_attempts_count ?? 0,
+        flashcard_retry_count: currentDailySession?.flashcard_retry_count ?? 0,
+        started_at: currentDailySession?.started_at ?? now,
+        last_active_at: now,
+        flashcards_completed_at: currentDailySession?.flashcards_completed_at ?? null,
+        reading_done: currentDailySession?.reading_done ?? false,
+        reading_text_id:
+          currentDailySession?.reading_text_id ?? listeningAsset.textId,
+        reading_opened_at: currentDailySession?.reading_opened_at ?? null,
+        reading_completed_at: currentDailySession?.reading_completed_at ?? null,
+        reading_time_seconds: currentDailySession?.reading_time_seconds ?? 0,
+        listening_done: currentDailySession?.listening_done ?? false,
+        listening_asset_id: listeningAsset.id,
+        listening_opened_at: currentDailySession?.listening_opened_at ?? now,
+        listening_playback_started_at:
+          currentDailySession?.listening_playback_started_at ?? null,
+        listening_completed_at: currentDailySession?.listening_completed_at ?? null,
+        listening_max_position_seconds:
+          currentDailySession?.listening_max_position_seconds ?? null,
+        listening_required_seconds:
+          currentDailySession?.listening_required_seconds ?? null,
+        listening_transcript_opened:
+          currentDailySession?.listening_transcript_opened ?? false,
+        listening_playback_rate:
+          currentDailySession?.listening_playback_rate ?? null,
+        listening_time_seconds:
+          currentDailySession?.listening_time_seconds ?? 0,
+        completed: currentDailySession?.completed ?? false,
+        completed_at: currentDailySession?.completed_at ?? null,
+      },
+      { onConflict: "user_id,session_date" },
+    );
+
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to mark listening as opened",
+    };
   }
+}
 
-  await supabase.from("review_events").insert({
-    user_id: userId,
-    word_id: payload.wordId,
-    card_type: payload.cardType ?? "cloze",
-    grade: payload.grade ?? (payload.correct ? "good" : "again"),
-    correct: payload.correct,
-    ms_spent: payload.msSpent,
-    user_answer: payload.userAnswer ?? "",
-    expected: payload.expected ?? [],
-  });
+export async function markListeningPlaybackStarted({
+  assetId,
+}: {
+  assetId: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    if (!supabase) {
+      return { ok: false, error: "Supabase client could not be created on the server" };
+    }
+
+    if (authError) {
+      return { ok: false, error: authError };
+    }
+
+    if (!user) {
+      return { ok: false, error: "Not authenticated" };
+    }
+
+    const currentDailySession = await getTodayDailySessionRow(supabase, user.id);
+    if (
+      currentDailySession?.listening_asset_id === assetId &&
+      currentDailySession.listening_playback_started_at
+    ) {
+      return { ok: true };
+    }
+
+    const now = new Date().toISOString();
+    const { error } = await supabase.from("daily_sessions").upsert(
+      {
+        user_id: user.id,
+        session_date: getTodaySessionDate(),
+        stage:
+          currentDailySession?.stage ??
+          resolveDailySessionStage(getDailySessionProgressState(currentDailySession)),
+        assigned_flashcard_count:
+          currentDailySession?.assigned_flashcard_count ?? currentDailySession?.new_words_count ?? 0,
+        assigned_new_words_count:
+          currentDailySession?.assigned_new_words_count ?? 0,
+        assigned_review_cards_count:
+          currentDailySession?.assigned_review_cards_count ?? 0,
+        new_words_count:
+          currentDailySession?.assigned_flashcard_count ?? currentDailySession?.new_words_count ?? 0,
+        reviews_done:
+          currentDailySession?.flashcard_completed_count ?? currentDailySession?.reviews_done ?? 0,
+        flashcard_completed_count:
+          currentDailySession?.flashcard_completed_count ?? currentDailySession?.reviews_done ?? 0,
+        flashcard_new_completed_count:
+          currentDailySession?.flashcard_new_completed_count ?? 0,
+        flashcard_review_completed_count:
+          currentDailySession?.flashcard_review_completed_count ?? 0,
+        flashcard_attempts_count:
+          currentDailySession?.flashcard_attempts_count ?? 0,
+        flashcard_retry_count:
+          currentDailySession?.flashcard_retry_count ?? 0,
+        started_at: currentDailySession?.started_at ?? now,
+        last_active_at: now,
+        flashcards_completed_at:
+          currentDailySession?.flashcards_completed_at ?? null,
+        reading_done: currentDailySession?.reading_done ?? false,
+        reading_text_id: currentDailySession?.reading_text_id ?? null,
+        reading_opened_at: currentDailySession?.reading_opened_at ?? null,
+        reading_completed_at: currentDailySession?.reading_completed_at ?? null,
+        reading_time_seconds: currentDailySession?.reading_time_seconds ?? 0,
+        listening_done: currentDailySession?.listening_done ?? false,
+        listening_asset_id: assetId,
+        listening_opened_at: currentDailySession?.listening_opened_at ?? now,
+        listening_playback_started_at: now,
+        listening_completed_at: currentDailySession?.listening_completed_at ?? null,
+        listening_max_position_seconds:
+          currentDailySession?.listening_max_position_seconds ?? null,
+        listening_required_seconds:
+          currentDailySession?.listening_required_seconds ?? null,
+        listening_transcript_opened:
+          currentDailySession?.listening_transcript_opened ?? false,
+        listening_playback_rate:
+          currentDailySession?.listening_playback_rate ?? null,
+        listening_time_seconds:
+          currentDailySession?.listening_time_seconds ?? 0,
+        completed: currentDailySession?.completed ?? false,
+        completed_at: currentDailySession?.completed_at ?? null,
+      },
+      { onConflict: "user_id,session_date" },
+    );
+
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to mark listening playback as started",
+    };
+  }
 }
 
 export async function getFlashcardDebugSnapshot(
@@ -966,7 +1275,7 @@ export async function getFlashcardDebugSnapshot(
     };
   }
 
-  const sessionDate = new Date().toISOString().slice(0, 10);
+  const sessionDate = getTodaySessionDate();
   const [dailySessionResult, userWordResult] = await Promise.all([
     supabase
       .from("daily_sessions")

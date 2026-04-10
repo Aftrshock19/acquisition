@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
-import { ReaderNextStepCard } from "@/components/reader/ReaderNextStepCard";
-import { ReaderView } from "@/components/reader/ReaderView";
+import { ReaderSession } from "@/components/reader/ReaderSession";
 import { getTodayDailySessionRow } from "@/lib/loop/dailySessions";
 import { getListeningAssetForTextId } from "@/lib/loop/listening";
 import { getTextById } from "@/lib/loop/texts";
@@ -137,14 +136,10 @@ export default async function ReaderPage({
         </p>
       </section>
 
-      <ReaderView
+      <ReaderSession
         text={text}
         initialSavedWordIds={savedState.wordIds}
         initialSavedLemmas={savedState.lemmas}
-      />
-
-      <ReaderNextStepCard
-        textId={text.id}
         listeningAssetId={listeningAsset?.id ?? null}
         readingDone={readingDoneForText}
         listeningDone={listeningDoneForText}

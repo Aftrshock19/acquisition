@@ -3,7 +3,11 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { completeListeningStep } from "@/app/actions/srs";
+import {
+  completeListeningStep,
+  markListeningOpened,
+  markListeningPlaybackStarted,
+} from "@/app/actions/srs";
 import { toReadingBlocks } from "@/lib/loop/reader";
 
 type ListeningPlayerProps = {
@@ -49,6 +53,13 @@ export function ListeningPlayer({
   );
   const [audioError, setAudioError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const playbackStartedLoggedRef = useRef(false);
+  const playStartedAtRef = useRef<number | null>(null);
+  const accumulatedPlayMsRef = useRef(0);
+
+  useEffect(() => {
+    void markListeningOpened({ assetId: asset.id });
+  }, [asset.id]);
 
   useEffect(() => {
     const audioElement = audioRef.current;
@@ -78,14 +89,29 @@ export function ListeningPlayer({
     const handlePlay = () => {
       setIsPlaying(true);
       setAudioError(null);
+      if (playStartedAtRef.current === null) {
+        playStartedAtRef.current = Date.now();
+      }
+      if (!playbackStartedLoggedRef.current) {
+        playbackStartedLoggedRef.current = true;
+        void markListeningPlaybackStarted({ assetId: asset.id });
+      }
     };
 
     const handlePause = () => {
       setIsPlaying(false);
+      if (playStartedAtRef.current !== null) {
+        accumulatedPlayMsRef.current += Date.now() - playStartedAtRef.current;
+        playStartedAtRef.current = null;
+      }
     };
 
     const handleEnded = () => {
       setIsPlaying(false);
+      if (playStartedAtRef.current !== null) {
+        accumulatedPlayMsRef.current += Date.now() - playStartedAtRef.current;
+        playStartedAtRef.current = null;
+      }
       setCurrentTime(audioElement.duration || asset.durationSeconds || 0);
       setMaxPositionSeconds((currentMax) =>
         Math.max(currentMax, audioElement.duration || 0),
@@ -94,6 +120,10 @@ export function ListeningPlayer({
 
     const handleError = () => {
       setIsPlaying(false);
+      if (playStartedAtRef.current !== null) {
+        accumulatedPlayMsRef.current += Date.now() - playStartedAtRef.current;
+        playStartedAtRef.current = null;
+      }
       setAudioError("The audio could not load. Check the file URL and try again.");
     };
 
@@ -106,6 +136,10 @@ export function ListeningPlayer({
     audioElement.addEventListener("error", handleError);
 
     return () => {
+      if (playStartedAtRef.current !== null) {
+        accumulatedPlayMsRef.current += Date.now() - playStartedAtRef.current;
+        playStartedAtRef.current = null;
+      }
       audioElement.removeEventListener("loadedmetadata", handleLoadedMetadata);
       audioElement.removeEventListener("durationchange", handleDurationChange);
       audioElement.removeEventListener("timeupdate", handleTimeUpdate);
@@ -114,7 +148,7 @@ export function ListeningPlayer({
       audioElement.removeEventListener("ended", handleEnded);
       audioElement.removeEventListener("error", handleError);
     };
-  }, [asset.durationSeconds]);
+  }, [asset.durationSeconds, asset.id]);
 
   useEffect(() => {
     const audioElement = audioRef.current;
@@ -137,6 +171,12 @@ export function ListeningPlayer({
     maxPositionSeconds / Math.max(requiredListenSeconds, 1),
   );
   const transcriptBlocks = asset.transcript ? toReadingBlocks(asset.transcript) : [];
+
+  function getListeningTimeSeconds() {
+    const liveMs =
+      playStartedAtRef.current === null ? 0 : Date.now() - playStartedAtRef.current;
+    return getRoundedSeconds(accumulatedPlayMsRef.current + liveMs);
+  }
 
   async function handleTogglePlayback() {
     const audioElement = audioRef.current;
@@ -180,6 +220,7 @@ export function ListeningPlayer({
         requiredListenSeconds,
         transcriptOpened: transcriptOpen,
         playbackRate,
+        listeningTimeSeconds: getListeningTimeSeconds(),
       });
 
       if (!result.ok) {
@@ -357,4 +398,8 @@ function formatTime(seconds: number) {
   const remainingSeconds = rounded % 60;
 
   return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
+}
+
+function getRoundedSeconds(value: number) {
+  return Math.max(0, Math.round(value / 1000));
 }

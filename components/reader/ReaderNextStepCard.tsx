@@ -10,6 +10,7 @@ type ReaderNextStepCardProps = {
   listeningAssetId: string | null;
   readingDone: boolean;
   listeningDone: boolean;
+  getReadingTimeSeconds?: () => number;
 };
 
 export function ReaderNextStepCard({
@@ -17,6 +18,7 @@ export function ReaderNextStepCard({
   listeningAssetId,
   readingDone,
   listeningDone,
+  getReadingTimeSeconds,
 }: ReaderNextStepCardProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -77,7 +79,10 @@ export function ReaderNextStepCard({
           onClick={() => {
             startTransition(async () => {
               setSubmitError(null);
-              const result = await completeReadingStep({ textId });
+              const result = await completeReadingStep({
+                textId,
+                readingTimeSeconds: getReadingTimeSeconds?.() ?? 0,
+              });
 
               if (!result.ok) {
                 setSubmitError(result.error);

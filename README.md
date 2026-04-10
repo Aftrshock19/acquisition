@@ -14,6 +14,19 @@ The Supabase database is organized into shared content tables and user-specific 
 
 `words` is the canonical vocabulary curriculum table. `user_words` is the source of truth for each user's current state for each word. `review_events` is the append-only history of graded reviews. `daily_sessions` tracks guided day-by-day loop progress. `user_settings` stores per-user preferences. `word_forms`, `texts`, and `audio` support inflected form resolution plus matched reading/listening content.
 
+Dissertation-facing instrumentation, metric definitions, export formats, and consistency checks are documented in [`docs/dissertation-metrics.md`](docs/dissertation-metrics.md).
+
+Evaluation chapter support (measures, analysis procedure, results scaffold, figure captions, and threats to validity) is in the [`docs/`](docs/) directory:
+
+- [`dissertation-evaluation-measures.md`](docs/dissertation-evaluation-measures.md) — Operationalised measure definitions for the Measures section
+- [`dissertation-analysis-procedure.md`](docs/dissertation-analysis-procedure.md) — Export, validation, and analysis workflow for the methodology section
+- [`dissertation-results-scaffold.md`](docs/dissertation-results-scaffold.md) — Results section scaffold with placeholders
+- [`dissertation-figure-table-captions.md`](docs/dissertation-figure-table-captions.md) — Draft captions for all generated figures and tables
+- [`dissertation-threats-to-validity.md`](docs/dissertation-threats-to-validity.md) — Threats-to-validity mapping tied to the implemented measures
+- [`evaluation-metric-wording.md`](docs/evaluation-metric-wording.md) — Precise metric wording guide for examiner-safe prose
+
+The reproducible analysis pipeline is in [`analysis/`](analysis/README.md).
+
 ### Seeding words
 
 The canonical vocabulary source is `supabase/seed/new_spa.csv`. The import flow is:

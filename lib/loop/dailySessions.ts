@@ -1,3 +1,4 @@
+import { getAppSessionDate } from "@/lib/analytics/date";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { DailySessionRow } from "@/lib/srs/types";
 
@@ -6,7 +7,7 @@ type SupabaseServerClient = NonNullable<
 >;
 
 export function getTodaySessionDate() {
-  return new Date().toISOString().slice(0, 10);
+  return getAppSessionDate();
 }
 
 export async function getTodayDailySessionRow(

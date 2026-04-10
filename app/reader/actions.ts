@@ -1,5 +1,6 @@
 "use server";
 
+import { getTodayDailySessionRow, getTodaySessionDate } from "@/lib/loop/dailySessions";
 import { getSupabaseUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { normalizeWordToken } from "@/lib/reader/tokenize";
@@ -69,9 +70,13 @@ export async function lookupReaderWordAction({
 export async function saveReaderWordAction({
   lang,
   wordId,
+  textId,
+  saveSource = "reader",
 }: {
   lang: string;
   wordId: string;
+  textId?: string | null;
+  saveSource?: "reader" | "flashcard";
 }): Promise<SaveReaderWordResult> {
   const supabase = await createSupabaseServerClient();
   if (!supabase) {
@@ -88,6 +93,7 @@ export async function saveReaderWordAction({
   }
 
   try {
+    const currentDailySession = await getTodayDailySessionRow(supabase, user.id);
     const deckId = await getManualSavedDeckId(supabase, lang);
     if (!deckId) {
       return { ok: false, error: "Manual saves are not available yet." };
@@ -116,10 +122,14 @@ export async function saveReaderWordAction({
           user_id: user.id,
           deck_id: deckId,
           word_id: wordId,
-          added_via: "reader",
+          added_via: saveSource,
+          session_date: getTodaySessionDate(),
+          daily_session_id: currentDailySession?.id ?? null,
+          text_id: textId ?? currentDailySession?.reading_text_id ?? null,
         },
         {
           onConflict: "user_id,deck_id,word_id",
+          ignoreDuplicates: true,
         },
       );
 

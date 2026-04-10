@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState, useTransition } from "react";
 import { lookupReaderWordAction, saveReaderWordAction } from "@/app/reader/actions";
+import { recordExposure } from "@/app/actions/srs";
 import type { ReaderLookupEntry, ReaderToken } from "@/lib/reader/types";
 
 export type SelectedWordToken = {
@@ -36,12 +37,22 @@ type UseInteractiveTextControllerOptions = {
   lang: string;
   initialSavedWordIds: string[];
   initialSavedLemmas: string[];
+  textId?: string | null;
+  saveSource?: "reader" | "flashcard";
+  trackReaderTapExposure?: boolean;
+  onWordTapped?: (wordId: string) => void;
+  onWordSaved?: (wordId: string) => void;
 };
 
 export function useInteractiveTextController({
   lang,
   initialSavedWordIds,
   initialSavedLemmas,
+  textId,
+  saveSource = "reader",
+  trackReaderTapExposure = false,
+  onWordTapped,
+  onWordSaved,
 }: UseInteractiveTextControllerOptions) {
   const [selectedToken, setSelectedToken] = useState<SelectedWordToken | null>(null);
   const [lookupState, setLookupState] = useState<InteractiveTextLookupState>(
@@ -111,6 +122,13 @@ export function useInteractiveTextController({
           ...current,
           [token.normalized]: entry.id,
         }));
+        onWordTapped?.(entry.id);
+        if (trackReaderTapExposure) {
+          void recordExposure({
+            wordId: entry.id,
+            kind: "reader_tap",
+          });
+        }
         setLookupState({
           status: "success",
           entry,
@@ -118,7 +136,7 @@ export function useInteractiveTextController({
         });
       });
     });
-  }, [lang, startLookupTransition]);
+  }, [lang, onWordTapped, startLookupTransition, trackReaderTapExposure]);
 
   const closePanel = useCallback(() => {
     lookupRequestRef.current += 1;
@@ -153,8 +171,11 @@ export function useInteractiveTextController({
       void saveReaderWordAction({
         lang,
         wordId: entry.id,
+        textId,
+        saveSource,
       }).then((result) => {
         if (result.ok) {
+          onWordSaved?.(entry.id);
           return;
         }
 
@@ -168,7 +189,10 @@ export function useInteractiveTextController({
     lookupState,
     savedNormalized,
     savedWordIds,
+    saveSource,
     selectedToken,
+    textId,
+    onWordSaved,
     startSaveTransition,
   ]);
 
