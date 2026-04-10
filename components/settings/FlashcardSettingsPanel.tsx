@@ -123,21 +123,6 @@ export function FlashcardSettingsPanel({
           </div>
         ) : null}
 
-        {variant === "today" ? (
-          <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-            <span>Retry delay:</span>
-            <input
-              type="number"
-              name="retry_delay_seconds"
-              min={10}
-              max={3600}
-              defaultValue={effective.retryDelaySeconds}
-              className="app-input w-16 px-2 py-1 text-xs"
-            />
-            <span>s</span>
-          </div>
-        ) : null}
-
         <p className="text-xs text-zinc-500">
           Effective families: {summarizeFamilies(effective.effectiveTypes)}
         </p>

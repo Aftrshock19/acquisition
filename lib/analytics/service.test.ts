@@ -67,6 +67,9 @@ const reviewEvents: AnalyticsReviewEventRow[] = [
     user_answer: "hola",
     expected: ["hola"],
     delta_hours: 0.2,
+    first_try: true,
+    retry_index: 0,
+    scheduler_outcome: "first_clean_success",
   },
   {
     id: "review-2",
@@ -88,6 +91,9 @@ const reviewEvents: AnalyticsReviewEventRow[] = [
     user_answer: "missed",
     expected: ["adios"],
     delta_hours: 26,
+    first_try: false,
+    retry_index: 0,
+    scheduler_outcome: "incorrect_lapse",
   },
   {
     id: "review-3",
@@ -109,6 +115,9 @@ const reviewEvents: AnalyticsReviewEventRow[] = [
     user_answer: "sun",
     expected: ["sun"],
     delta_hours: 48,
+    first_try: true,
+    retry_index: 0,
+    scheduler_outcome: "later_clean_review",
   },
   {
     id: "review-4",
@@ -130,6 +139,9 @@ const reviewEvents: AnalyticsReviewEventRow[] = [
     user_answer: "got it",
     expected: ["adios"],
     delta_hours: 26,
+    first_try: false,
+    retry_index: 1,
+    scheduler_outcome: "rescued_success",
   },
 ];
 

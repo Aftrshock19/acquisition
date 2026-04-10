@@ -27,6 +27,8 @@ Evaluation chapter support (measures, analysis procedure, results scaffold, figu
 
 The reproducible analysis pipeline is in [`analysis/`](analysis/README.md).
 
+Multi-participant study operations (enrollment, cohort export, researcher access) are documented in [`docs/study-operations.md`](docs/study-operations.md).
+
 ### Seeding words
 
 The canonical vocabulary source is `supabase/seed/new_spa.csv`. The import flow is:

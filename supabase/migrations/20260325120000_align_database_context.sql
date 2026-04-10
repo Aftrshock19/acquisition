@@ -155,9 +155,21 @@ ALTER TABLE public.review_events
   ADD COLUMN IF NOT EXISTS effective_difficulty numeric,
   ADD COLUMN IF NOT EXISTS reps_today int;
 
-UPDATE public.review_events
-SET created_at = COALESCE(created_at, happened_at, now()),
-    card_type = COALESCE(card_type, 'cloze');
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'review_events' AND column_name = 'happened_at'
+  ) THEN
+    UPDATE public.review_events
+    SET created_at = COALESCE(created_at, happened_at, now()),
+        card_type = COALESCE(card_type, 'cloze');
+  ELSE
+    UPDATE public.review_events
+    SET created_at = COALESCE(created_at, now()),
+        card_type = COALESCE(card_type, 'cloze');
+  END IF;
+END $$;
 
 ALTER TABLE public.review_events
   ALTER COLUMN created_at SET DEFAULT now(),

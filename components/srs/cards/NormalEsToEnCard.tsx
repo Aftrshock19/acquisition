@@ -27,7 +27,6 @@ type NormalEsToEnCardProps = {
   onReveal: () => void;
   onChoice: (choice: NormalReviewChoice) => void;
   onNext: () => void;
-  retryDelayMs: number;
 };
 
 export function NormalEsToEnCard({
@@ -41,7 +40,6 @@ export function NormalEsToEnCard({
   onReveal,
   onChoice,
   onNext,
-  retryDelayMs,
 }: NormalEsToEnCardProps) {
   const answered = submittedGrade !== null && submittedGrade !== undefined;
   const isAgain = submittedGrade === "again";
@@ -50,7 +48,7 @@ export function NormalEsToEnCard({
     ? "Try to recall it first, then reveal the answer and judge whether you had it before seeing it. Press Enter to reveal."
     : answered
       ? isAgain
-        ? "This card will repeat after the retry delay."
+        ? "This card will repeat after a few more cards."
         : null
       : "Choose I missed it if you only had it after seeing the answer.";
 
@@ -102,7 +100,7 @@ export function NormalEsToEnCard({
             }
             secondary={
               isAgain
-                ? `Will repeat in ${Math.max(1, Math.round(retryDelayMs / 1000))}s`
+                ? "Will repeat after a few more cards"
                 : undefined
             }
           />

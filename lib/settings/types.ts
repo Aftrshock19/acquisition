@@ -60,7 +60,6 @@ export type EffectiveFlashcardSettings = {
   effectiveTypes: FamilySettings;
   effectiveDirections: DirectionSettings;
   enabledModes: Record<EnabledFlashcardMode, boolean>;
-  retryDelaySeconds: number;
   autoAdvanceCorrect: boolean;
   showPosHint: boolean;
   showDefinitionFirst: boolean;

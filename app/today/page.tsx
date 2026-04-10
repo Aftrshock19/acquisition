@@ -177,11 +177,11 @@ export default async function TodayPage() {
           initialSavedWordIds={result.savedWords.wordIds}
           initialSavedLemmas={result.savedWords.lemmas}
           dailyLimit={effectiveSettings.dailyLimit}
-          retryDelayMs={effectiveSettings.retryDelaySeconds * 1000}
           autoAdvanceCorrect={effectiveSettings.autoAdvanceCorrect}
           showPosHint={effectiveSettings.showPosHint}
           hideTranslationSentences={effectiveSettings.hideTranslationSentences}
           initialDailySession={dailySession}
+          workloadPolicy={result.ok ? result.workloadPolicy : undefined}
         />
       )}
     </main>

@@ -9,7 +9,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { recordReview } from "@/app/actions/srs";
+import { recordReview, loadMoreReviewChunk, loadMoreNewWordsChunk } from "@/app/actions/srs";
+import type { WorkloadPolicy } from "@/lib/srs/workloadPolicy";
 import { BackButton } from "@/components/BackButton";
 import { InteractiveTextProvider } from "@/components/interactive-text/InteractiveTextProvider";
 import { LeftIcon } from "@/components/LeftIcon";
@@ -37,6 +38,7 @@ import {
   isCorrectClozeAnswer,
   splitDefinitionCandidates,
 } from "@/lib/srs/cloze";
+import { RetryQueue } from "@/lib/srs/retryQueue";
 import type { McqQuestionFormat } from "@/lib/settings/mcqQuestionFormats";
 import type { EnabledFlashcardMode } from "@/lib/settings/types";
 import type {
@@ -52,15 +54,14 @@ type Props = {
   initialSavedWordIds: string[];
   initialSavedLemmas: string[];
   dailyLimit: number;
-  retryDelayMs?: number;
   autoAdvanceCorrect?: boolean;
   showPosHint?: boolean;
   hideTranslationSentences?: boolean;
   initialDailySession?: DailySessionRow | null;
+  workloadPolicy?: WorkloadPolicy;
 };
 
-type RetryEntry = { card: UnifiedQueueCard; dueAt: number };
-type SessionPhase = "prompt" | "feedback" | "correction" | "waiting" | "done";
+type SessionPhase = "prompt" | "feedback" | "correction" | "done";
 const TEXT_SUCCESS_DELAY_MS = 1200;
 const CORRECTION_PLACEHOLDER_DELAY_MS = 1900;
 const FLASHCARD_LOOKUP_LANG = "es";
@@ -141,13 +142,6 @@ function allowContainedTypingCandidateMatch(
   return false;
 }
 
-function upsertRetrySorted(list: RetryEntry[], entry: RetryEntry) {
-  const filtered = list.filter((item) => item.card.id !== entry.card.id);
-  const index = filtered.findIndex((item) => item.dueAt > entry.dueAt);
-  if (index === -1) return [...filtered, entry];
-  return [...filtered.slice(0, index), entry, ...filtered.slice(index)];
-}
-
 export function TodaySession({
   enabledTypes,
   mcqQuestionFormats,
@@ -155,16 +149,24 @@ export function TodaySession({
   initialSavedWordIds,
   initialSavedLemmas,
   dailyLimit,
-  retryDelayMs = 90000,
   autoAdvanceCorrect = true,
   showPosHint = true,
   hideTranslationSentences = false,
   initialDailySession = null,
+  workloadPolicy,
 }: Props) {
   const { queue, enabledImplementedTypes, enabledUnimplementedTypes } = useMemo(
     () => buildUnifiedQueue(session, enabledTypes, mcqQuestionFormats),
     [session, enabledTypes, mcqQuestionFormats],
   );
+
+  const [extraCards, setExtraCards] = useState<UnifiedQueueCard[]>([]);
+  const allCards = useMemo(() => [...queue, ...extraCards], [queue, extraCards]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [reviewsExhausted, setReviewsExhausted] = useState(false);
+  const [newWordsExhausted, setNewWordsExhausted] = useState(false);
+  const [comebackDismissed, setComebackDismissed] = useState(false);
+  const seenWordIdsRef = useRef<Set<string>>(new Set());
   const initialCompletedCount = Math.max(
     0,
     initialDailySession?.flashcard_completed_count ??
@@ -174,11 +176,13 @@ export function TodaySession({
 
   const [mainIndex, setMainIndex] = useState(0);
   const [mainCompletedCount, setMainCompletedCount] = useState(0);
-  const [retryList, setRetryList] = useState<RetryEntry[]>([]);
+  const retryQueueRef = useRef(new RetryQueue<UnifiedQueueCard>());
+  const [retryPending, setRetryPending] = useState(0);
   const [current, setCurrent] = useState<UnifiedQueueCard | null>(
     queue[0] ?? null,
   );
   const [currentSource, setCurrentSource] = useState<"main" | "retry">("main");
+  const [currentRetryIndex, setCurrentRetryIndex] = useState(0);
   const [phase, setPhase] = useState<SessionPhase>(
     queue[0] ? "prompt" : "done",
   );
@@ -196,7 +200,6 @@ export function TodaySession({
   } | null>(null);
   const [showCorrectionPlaceholder, setShowCorrectionPlaceholder] =
     useState(false);
-  const [waitSeconds, setWaitSeconds] = useState(0);
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -213,9 +216,11 @@ export function TodaySession({
   useEffect(() => {
     setMainIndex(0);
     setMainCompletedCount(0);
-    setRetryList([]);
+    retryQueueRef.current.reset();
+    setRetryPending(0);
     setCurrent(queue[0] ?? null);
     setCurrentSource("main");
+    setCurrentRetryIndex(0);
     setPhase(queue[0] ? "prompt" : "done");
     setReviewedCards([]);
     setHistoryIndex(null);
@@ -224,7 +229,6 @@ export function TodaySession({
     setNormalSubmittedGrade(null);
     setFeedback(null);
     setShowCorrectionPlaceholder(false);
-    setWaitSeconds(0);
     setBusy(false);
     setSubmitError(null);
     startedAtRef.current = Date.now();
@@ -252,6 +256,10 @@ export function TodaySession({
   useEffect(() => {
     if (!current) return;
 
+    if (current.id) {
+      seenWordIdsRef.current.add(current.id);
+    }
+
     setSubmitError(null);
     setTypingInput("");
     setNormalRevealed(false);
@@ -277,34 +285,13 @@ export function TodaySession({
     }
   }, [phase, current]);
 
-  useEffect(() => {
-    if (phase !== "waiting" || retryList.length === 0) return;
-
-    const tick = () => {
-      const dueAt = retryList[0].dueAt;
-      const seconds = Math.max(0, Math.ceil((dueAt - Date.now()) / 1000));
-      setWaitSeconds(seconds);
-
-      if (seconds <= 0) {
-        const nextRetry = retryList[0];
-        setRetryList((items) => items.slice(1));
-        setCurrent(nextRetry.card);
-        setCurrentSource("retry");
-      }
-    };
-
-    tick();
-    const intervalId = setInterval(tick, 250);
-    return () => clearInterval(intervalId);
-  }, [phase, retryList]);
-
   const handleKeyDown = useEffectEvent((event: KeyboardEvent) => {
     if (busy || !current) return;
     if (event.key !== "Enter") return;
 
     if (phase === "feedback") {
       event.preventDefault();
-      advanceFromCurrentCard(retryList);
+      advanceFromCurrentCard();
       return;
     }
 
@@ -381,6 +368,52 @@ export function TodaySession({
     setHistoryIndex(null);
   }
 
+  async function handleLoadMoreReviews() {
+    setLoadingMore(true);
+    const result = await loadMoreReviewChunk([...seenWordIdsRef.current]);
+    setLoadingMore(false);
+    if (!result.ok || result.dueReviews.length === 0) {
+      setReviewsExhausted(true);
+      return;
+    }
+    const { queue: newCards } = buildUnifiedQueue(
+      { dueReviews: result.dueReviews, newWords: [] },
+      enabledTypes,
+      mcqQuestionFormats,
+    );
+    if (newCards.length === 0) {
+      setReviewsExhausted(true);
+      return;
+    }
+    setExtraCards((prev) => [...prev, ...newCards]);
+    beginCard(newCards[0], "main");
+    setCurrentRetryIndex(0);
+    setPhase("prompt");
+  }
+
+  async function handleLoadMoreNewWords() {
+    setLoadingMore(true);
+    const result = await loadMoreNewWordsChunk([...seenWordIdsRef.current]);
+    setLoadingMore(false);
+    if (!result.ok || result.newWords.length === 0) {
+      setNewWordsExhausted(true);
+      return;
+    }
+    const { queue: newCards } = buildUnifiedQueue(
+      { dueReviews: [], newWords: result.newWords },
+      enabledTypes,
+      mcqQuestionFormats,
+    );
+    if (newCards.length === 0) {
+      setNewWordsExhausted(true);
+      return;
+    }
+    setExtraCards((prev) => [...prev, ...newCards]);
+    beginCard(newCards[0], "main");
+    setCurrentRetryIndex(0);
+    setPhase("prompt");
+  }
+
   function renderNormalCard(
     card: Extract<UnifiedQueueCard, { cardType: "normal" }>,
     navigation: ReactNode,
@@ -399,8 +432,8 @@ export function TodaySession({
           onChoice={(choice) => {
             void handleNormalGrade(choice);
           }}
-          onNext={() => advanceFromCurrentCard(retryList)}
-          retryDelayMs={retryDelayMs}
+          onNext={() => advanceFromCurrentCard()}
+  
         />
       );
     }
@@ -418,13 +451,13 @@ export function TodaySession({
         onChoice={(choice) => {
           void handleNormalGrade(choice);
         }}
-        onNext={() => advanceFromCurrentCard(retryList)}
-        retryDelayMs={retryDelayMs}
+        onNext={() => advanceFromCurrentCard()}
+
       />
     );
   }
 
-  function advanceFromCurrentCard(nextRetryList: RetryEntry[]) {
+  function advanceFromCurrentCard() {
     if (!current) return;
 
     clearSuccessAdvanceTimeout();
@@ -436,42 +469,46 @@ export function TodaySession({
     setMainIndex(nextMainIndex);
     setMainCompletedCount(nextMainCompleted);
 
-    const now = Date.now();
-    const dueRetry =
-      nextRetryList.length > 0 && nextRetryList[0].dueAt <= now
-        ? nextRetryList[0]
-        : null;
+    // Check if a retry card is ready (count-based, no wall-clock delay)
+    const rq = retryQueueRef.current;
+    const dueRetry = rq.dequeue();
 
     if (dueRetry) {
-      setRetryList(nextRetryList.slice(1));
+      setRetryPending(rq.pendingCount);
       beginCard(dueRetry.card, "retry");
+      setCurrentRetryIndex(dueRetry.retryCount);
       return;
     }
 
-    if (nextMainIndex < queue.length) {
-      setRetryList(nextRetryList);
-      beginCard(queue[nextMainIndex], "main");
+    if (nextMainIndex < allCards.length) {
+      beginCard(allCards[nextMainIndex], "main");
+      setCurrentRetryIndex(0);
       return;
     }
 
-    if (nextRetryList.length > 0) {
-      setRetryList(nextRetryList);
-      setCurrent(null);
-      setPhase("waiting");
-      return;
+    // All main cards done — if retries remain, keep going through them
+    if (rq.hasPending) {
+      // Force-dequeue the next pending retry even if not yet "due"
+      // (all main cards are exhausted, so we serve retries immediately)
+      const forced = rq.dequeue();
+      if (forced) {
+        setRetryPending(rq.pendingCount);
+        beginCard(forced.card, "retry");
+        setCurrentRetryIndex(forced.retryCount);
+        return;
+      }
     }
 
-    setRetryList([]);
     setCurrent(null);
     setPhase("done");
   }
 
-  function scheduleSuccessAdvance(nextRetryList: RetryEntry[]) {
+  function scheduleSuccessAdvance() {
     clearSuccessAdvanceTimeout();
 
     successTimeoutRef.current = setTimeout(() => {
       successTimeoutRef.current = null;
-      advanceFromCurrentCard(nextRetryList);
+      advanceFromCurrentCard();
     }, TEXT_SUCCESS_DELAY_MS);
   }
 
@@ -489,7 +526,12 @@ export function TodaySession({
 
     setBusy(true);
     try {
-      const retryDueAtMs = correct ? null : Date.now() + retryDelayMs;
+      const rq = retryQueueRef.current;
+      const isFirstTry = currentSource === "main" || currentRetryIndex === 0;
+
+      // Record the answer event in the retry queue counter
+      rq.recordAnswer();
+
       const result = await recordReview({
         wordId: card.id,
         correct,
@@ -499,8 +541,9 @@ export function TodaySession({
         shownAt: currentAttemptRef.current?.shownAt,
         submittedAt: new Date().toISOString(),
         clientAttemptId: currentAttemptRef.current?.id,
-        retryScheduledFor:
-          retryDueAtMs === null ? null : new Date(retryDueAtMs).toISOString(),
+        retryScheduledFor: null,
+        firstTry: isFirstTry && currentSource !== "retry",
+        retryIndex: currentRetryIndex,
         msSpent: Date.now() - startedAtRef.current,
         userAnswer,
         expected,
@@ -509,14 +552,12 @@ export function TodaySession({
       if (!result.ok) {
         throw new Error(result.error);
       }
-      const nextRetryList = correct
-        ? retryList
-        : upsertRetrySorted(retryList, {
-            card,
-            dueAt: retryDueAtMs ?? Date.now() + retryDelayMs,
-          });
 
-      setRetryList(nextRetryList);
+      // Enqueue for retry if incorrect and budget remains
+      if (!correct) {
+        rq.enqueue(card);
+        setRetryPending(rq.pendingCount);
+      }
 
       appendReviewedCard({
         card,
@@ -535,7 +576,7 @@ export function TodaySession({
         });
         setPhase("feedback");
         if (autoAdvanceCorrect) {
-          scheduleSuccessAdvance(nextRetryList);
+          scheduleSuccessAdvance();
         }
         return;
       }
@@ -589,7 +630,7 @@ export function TodaySession({
         });
         setPhase("feedback");
         if (autoAdvanceCorrect) {
-          scheduleSuccessAdvance(retryList);
+          scheduleSuccessAdvance();
         }
         return;
       }
@@ -648,7 +689,12 @@ export function TodaySession({
 
     setBusy(true);
     try {
-      const retryDueAtMs = outcome.retry ? Date.now() + retryDelayMs : null;
+      const rq = retryQueueRef.current;
+      const isFirstTry = currentSource !== "retry";
+
+      // Record the answer event in the retry queue counter
+      rq.recordAnswer();
+
       const result = await recordReview({
         wordId: current.id,
         correct: outcome.correct,
@@ -659,8 +705,9 @@ export function TodaySession({
         shownAt: currentAttemptRef.current?.shownAt,
         submittedAt: new Date().toISOString(),
         clientAttemptId: currentAttemptRef.current?.id,
-        retryScheduledFor:
-          retryDueAtMs === null ? null : new Date(retryDueAtMs).toISOString(),
+        retryScheduledFor: null,
+        firstTry: isFirstTry,
+        retryIndex: currentRetryIndex,
         msSpent: Date.now() - startedAtRef.current,
         userAnswer: outcome.userAnswer,
         expected: [
@@ -673,14 +720,13 @@ export function TodaySession({
       if (!result.ok) {
         throw new Error(result.error);
       }
-      const nextRetryList = outcome.retry
-        ? upsertRetrySorted(retryList, {
-            card: current,
-            dueAt: retryDueAtMs ?? Date.now() + retryDelayMs,
-          })
-        : retryList;
 
-      setRetryList(nextRetryList);
+      // Enqueue for retry if incorrect and budget remains
+      if (outcome.retry) {
+        rq.enqueue(current);
+        setRetryPending(rq.pendingCount);
+      }
+
       appendReviewedCard({
         card: current,
         source: currentSource,
@@ -690,7 +736,7 @@ export function TodaySession({
 
       setPhase("feedback");
       if (outcome.correct && autoAdvanceCorrect) {
-        scheduleSuccessAdvance(nextRetryList);
+        scheduleSuccessAdvance();
       }
     } catch (error) {
       setSubmitError(
@@ -793,11 +839,27 @@ export function TodaySession({
 
     clearSuccessAdvanceTimeout();
 
-    advanceFromCurrentCard(retryList);
+    advanceFromCurrentCard();
   }
 
   return (
     <div className="flex flex-col gap-6">
+      {workloadPolicy?.isComeback && !comebackDismissed ? (
+        <div className="mx-auto flex w-full max-w-2xl items-start justify-between gap-4 rounded-xl border border-amber-200 bg-amber-50/90 p-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
+          <p>
+            Welcome back! You have a larger backlog than usual — today&apos;s session is slightly longer to help you catch up.
+          </p>
+          <button
+            type="button"
+            className="shrink-0 text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200"
+            onClick={() => setComebackDismissed(true)}
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      ) : null}
+
       {enabledImplementedTypes.length > 1 ? (
         <section className="app-card-muted p-4 text-sm text-zinc-600 dark:text-zinc-300">
           Cards are mixed evenly across your enabled types:{" "}
@@ -816,18 +878,34 @@ export function TodaySession({
           <Link href="/reading" className="app-button self-start">
             Continue to reading
           </Link>
-        </div>
-      ) : phase === "waiting" ? (
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 rounded-xl border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900/50">
-          <SessionProgressBar
-            completedCount={completedCount}
-            progressPercent={progressPercent}
-            progressTotal={progressTotal}
-          />
-          <h2 className="text-xl font-semibold tracking-tight">Quick pause</h2>
-          <p className="text-zinc-600 dark:text-zinc-400">
-            Next retry in {waitSeconds}s
-          </p>
+
+          <div className="mt-2 border-t border-zinc-200 pt-4 dark:border-zinc-700">
+            <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+              Want to keep going? You can always do more.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              {!reviewsExhausted ? (
+                <button
+                  type="button"
+                  className="app-button-secondary text-sm"
+                  disabled={loadingMore}
+                  onClick={() => void handleLoadMoreReviews()}
+                >
+                  {loadingMore ? "Loading…" : `Load ${workloadPolicy?.continuationReviewChunk ?? 12} more reviews`}
+                </button>
+              ) : null}
+              {!newWordsExhausted ? (
+                <button
+                  type="button"
+                  className="app-button-secondary text-sm"
+                  disabled={loadingMore}
+                  onClick={() => void handleLoadMoreNewWords()}
+                >
+                  {loadingMore ? "Loading…" : `Learn ${workloadPolicy?.continuationNewChunk ?? 5} new words`}
+                </button>
+              ) : null}
+            </div>
+          </div>
         </div>
       ) : current ? (
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
@@ -860,8 +938,8 @@ export function TodaySession({
                 onSelect={(option) => {
                   void handleChoiceSelect(option);
                 }}
-                onNext={() => advanceFromCurrentCard(retryList)}
-                retryDelayMs={retryDelayMs}
+                onNext={() => advanceFromCurrentCard()}
+        
                 navigation={flashcardNavigation}
               />
             </InteractiveTextProvider>
@@ -891,7 +969,7 @@ export function TodaySession({
                 onCheck={() => {
                   void handleTypingCheck();
                 }}
-                onNext={() => advanceFromCurrentCard(retryList)}
+                onNext={() => advanceFromCurrentCard()}
                 navigation={flashcardNavigation}
               />
             </InteractiveTextProvider>
@@ -912,7 +990,7 @@ export function TodaySession({
               onCheck={() => {
                 void handleTypingCheck();
               }}
-              onNext={() => advanceFromCurrentCard(retryList)}
+              onNext={() => advanceFromCurrentCard()}
               navigation={flashcardNavigation}
             />
           ) : current.cardType === "normal" ? (
@@ -927,8 +1005,8 @@ export function TodaySession({
               onSelect={(option) => {
                 void handleChoiceSelect(option);
               }}
-              onNext={() => advanceFromCurrentCard(retryList)}
-              retryDelayMs={retryDelayMs}
+              onNext={() => advanceFromCurrentCard()}
+      
               navigation={flashcardNavigation}
             />
           ) : null}

@@ -21,7 +21,6 @@ type AudioCardProps = {
     | null;
   onSelect: (option: string) => void;
   onNext: () => void;
-  retryDelayMs: number;
   navigation?: ReactNode;
 };
 
@@ -33,7 +32,6 @@ export function AudioCard({
   feedback,
   onSelect,
   onNext,
-  retryDelayMs,
   navigation,
 }: AudioCardProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -48,7 +46,6 @@ export function AudioCard({
         correct={feedback.correct}
         expected={feedback.expected}
         onNext={onNext}
-        retryDelayMs={retryDelayMs}
         busy={busy}
       />
     );
@@ -121,13 +118,11 @@ function FeedbackBlock({
   correct,
   expected,
   onNext,
-  retryDelayMs,
   busy,
 }: {
   correct: boolean;
   expected: string;
   onNext: () => void;
-  retryDelayMs: number;
   busy: boolean;
 }) {
   return (
@@ -137,9 +132,7 @@ function FeedbackBlock({
         title={correct ? "Correct" : "Incorrect"}
         detail={`Expected: ${expected}`}
         secondary={
-          !correct
-            ? `Will repeat in ${Math.max(1, Math.round(retryDelayMs / 1000))}s`
-            : undefined
+          !correct ? "Will repeat after a few more cards" : undefined
         }
       />
       {correct ? (

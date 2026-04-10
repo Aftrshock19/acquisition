@@ -112,9 +112,21 @@ ALTER TABLE public.review_events
   ADD CONSTRAINT review_events_queue_source_check
     CHECK (queue_source IN ('main', 'retry'));
 
-UPDATE public.review_events
-SET session_date = COALESCE(session_date, created_at::date, happened_at::date),
-    submitted_at = COALESCE(submitted_at, created_at, happened_at);
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'review_events' AND column_name = 'happened_at'
+  ) THEN
+    UPDATE public.review_events
+    SET session_date = COALESCE(session_date, created_at::date, happened_at::date),
+        submitted_at = COALESCE(submitted_at, created_at, happened_at);
+  ELSE
+    UPDATE public.review_events
+    SET session_date = COALESCE(session_date, created_at::date),
+        submitted_at = COALESCE(submitted_at, created_at);
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS review_events_user_session_date_idx
   ON public.review_events (user_id, session_date DESC);

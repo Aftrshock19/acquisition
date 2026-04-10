@@ -44,7 +44,7 @@ describe("normal card UI", () => {
         onReveal={() => {}}
         onChoice={() => {}}
         onNext={() => {}}
-        retryDelayMs={90000}
+
       />,
     );
 
@@ -67,7 +67,7 @@ describe("normal card UI", () => {
         onReveal={() => {}}
         onChoice={() => {}}
         onNext={() => {}}
-        retryDelayMs={90000}
+
       />,
     );
 
@@ -92,7 +92,7 @@ describe("normal card UI", () => {
         onReveal={() => {}}
         onChoice={() => {}}
         onNext={() => {}}
-        retryDelayMs={90000}
+
       />,
     );
 

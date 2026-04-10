@@ -43,7 +43,6 @@ describe("McqCard", () => {
           feedback={null}
           onSelect={() => {}}
           onNext={() => {}}
-          retryDelayMs={90000}
         />
       </InteractiveTextProvider>,
     );

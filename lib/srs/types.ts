@@ -124,6 +124,38 @@ export type ReviewState = {
   repetitions: number;
 };
 
+// ---------------------------------------------------------------------------
+// SRS v2: research-shaped spaced-repetition state
+// ---------------------------------------------------------------------------
+
+export type SrsState = "new" | "learning" | "review";
+
+export type SrsWordState = {
+  srs_state: SrsState;
+  difficulty: number; // [0, 1], default 0.55
+  stability_days: number; // expected recallable duration in days
+  learned_level: number; // integer >= 0, product/analytics ladder
+  reps: number;
+  lapses: number;
+  successful_first_try_reviews: number;
+  consecutive_first_try_correct: number;
+  last_reviewed_at: string | null; // ISO timestamp
+  next_due: string; // ISO timestamp
+  last_result: "correct" | "incorrect" | null;
+  last_was_first_try: boolean;
+};
+
+export type SrsReviewOutcome = {
+  correct: boolean;
+  first_try: boolean; // true only if answered before any same-session retry
+  retry_index: number; // 0 = first presentation, 1+ = retry
+};
+
+export type SrsSchedulerResult = {
+  state: SrsWordState;
+  next_due: string; // ISO timestamp
+};
+
 export type ExposureKind =
   | "reader_tap"
   | "reader_seen"
@@ -141,6 +173,8 @@ export type RecordReviewPayload = {
   submittedAt?: string;
   clientAttemptId?: string;
   retryScheduledFor?: string | null;
+  firstTry: boolean;
+  retryIndex: number;
   msSpent: number;
   userAnswer: string;
   expected: string[];

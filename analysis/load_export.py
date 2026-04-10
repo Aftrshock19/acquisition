@@ -1,10 +1,15 @@
 """
-Load and validate the JSON export bundle produced by /api/progress/export.
+Load and validate JSON export bundles produced by /api/progress/export
+(single-user) or /api/admin/progress/export (cohort).
 
 Usage:
     from load_export import load_bundle, validate_bundle
 
-The loader returns a dict with typed pandas DataFrames for each dataset.
+The loader returns an ExportBundle with typed pandas DataFrames for each
+dataset.  Cohort exports (identified by a top-level ``participants`` array)
+are automatically merged into combined DataFrames with an
+``anonymous_user_id`` column distinguishing participants.
+
 Schema validation raises immediately if the export shape has changed.
 """
 
@@ -60,6 +65,12 @@ REVIEW_EVENTS_REQUIRED = {
     "grade",
     "correct",
     "ms_spent",
+    # SRS v2 fields (present in exports from 2026-04-10 onwards;
+    # older exports may have these as null/missing — _check_columns
+    # tolerates missing columns in empty DataFrames)
+    "first_try",
+    "retry_index",
+    "scheduler_outcome",
 }
 
 SAVED_WORDS_REQUIRED = {
@@ -113,9 +124,29 @@ class ExportBundle:
     def anonymous_user_id(self) -> str:
         return self.meta.get("anonymous_user_id", "unknown")
 
+    @property
+    def is_cohort(self) -> bool:
+        return self.meta.get("cohort_key") is not None
+
+    @property
+    def participant_count(self) -> int:
+        return self.meta.get("participant_count", 1)
+
+    @property
+    def participant_ids(self) -> list[str]:
+        if not self.is_cohort or self.daily_aggregates.empty:
+            return [self.anonymous_user_id]
+        return sorted(self.daily_aggregates["anonymous_user_id"].unique().tolist())
+
 
 def load_bundle(path: str | Path) -> ExportBundle:
-    """Load a JSON export bundle from disk and return an ExportBundle."""
+    """Load a JSON export bundle from disk and return an ExportBundle.
+
+    Supports both single-user exports (from /api/progress/export) and
+    cohort exports (from /api/admin/progress/export).  Cohort exports are
+    identified by the presence of a top-level ``participants`` array and
+    are automatically merged into combined DataFrames.
+    """
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Export file not found: {path}")
@@ -123,6 +154,15 @@ def load_bundle(path: str | Path) -> ExportBundle:
     with open(path, "r", encoding="utf-8") as f:
         raw: dict[str, Any] = json.load(f)
 
+    # Detect cohort export
+    if "participants" in raw:
+        return _load_cohort_bundle(raw)
+
+    return _load_single_user_bundle(raw)
+
+
+def _load_single_user_bundle(raw: dict[str, Any]) -> ExportBundle:
+    """Load a single-user export bundle."""
     datasets = raw.get("datasets", {})
 
     daily_aggregates = _to_df(datasets.get("daily_aggregates", []))
@@ -132,34 +172,7 @@ def load_bundle(path: str | Path) -> ExportBundle:
     reading_events = _to_df(datasets.get("reading_events", []))
     listening_events = _to_df(datasets.get("listening_events", []))
 
-    # Parse dates
-    if not daily_aggregates.empty and "session_date" in daily_aggregates.columns:
-        daily_aggregates["session_date"] = pd.to_datetime(
-            daily_aggregates["session_date"]
-        ).dt.date
-
-    if not sessions.empty and "session_date" in sessions.columns:
-        sessions["session_date"] = pd.to_datetime(sessions["session_date"]).dt.date
-
-    if not review_events.empty and "session_date" in review_events.columns:
-        review_events["session_date"] = pd.to_datetime(
-            review_events["session_date"]
-        ).dt.date
-
-    if not saved_words.empty and "session_date" in saved_words.columns:
-        saved_words["session_date"] = pd.to_datetime(
-            saved_words["session_date"]
-        ).dt.date
-
-    if not reading_events.empty and "session_date" in reading_events.columns:
-        reading_events["session_date"] = pd.to_datetime(
-            reading_events["session_date"]
-        ).dt.date
-
-    if not listening_events.empty and "session_date" in listening_events.columns:
-        listening_events["session_date"] = pd.to_datetime(
-            listening_events["session_date"]
-        ).dt.date
+    _parse_session_dates(daily_aggregates, sessions, review_events, saved_words, reading_events, listening_events)
 
     meta = {
         "format_version": raw.get("format_version"),
@@ -182,6 +195,130 @@ def load_bundle(path: str | Path) -> ExportBundle:
     )
 
 
+def _load_cohort_bundle(raw: dict[str, Any]) -> ExportBundle:
+    """Load a cohort export by merging per-participant data."""
+    all_daily: list[pd.DataFrame] = []
+    all_sessions: list[pd.DataFrame] = []
+    all_reviews: list[pd.DataFrame] = []
+    all_saved: list[pd.DataFrame] = []
+    all_reading: list[pd.DataFrame] = []
+    all_listening: list[pd.DataFrame] = []
+
+    participants = raw.get("participants", [])
+    metric_definitions: dict[str, Any] = {}
+
+    for p in participants:
+        datasets = p.get("datasets", {})
+        pid = p.get("anonymous_user_id", "unknown")
+
+        for ds_name, ds_rows in datasets.items():
+            df = _to_df(ds_rows)
+            if df.empty:
+                continue
+            # Ensure anonymous_user_id column is the participant_id
+            df["anonymous_user_id"] = pid
+
+            if ds_name == "daily_aggregates":
+                all_daily.append(df)
+            elif ds_name == "sessions":
+                all_sessions.append(df)
+            elif ds_name == "review_events":
+                all_reviews.append(df)
+            elif ds_name == "saved_words":
+                all_saved.append(df)
+            elif ds_name == "reading_events":
+                all_reading.append(df)
+            elif ds_name == "listening_events":
+                all_listening.append(df)
+
+        if not metric_definitions and p.get("metric_definitions"):
+            metric_definitions = p["metric_definitions"]
+
+    daily_aggregates = pd.concat(all_daily, ignore_index=True) if all_daily else pd.DataFrame()
+    sessions = pd.concat(all_sessions, ignore_index=True) if all_sessions else pd.DataFrame()
+    review_events = pd.concat(all_reviews, ignore_index=True) if all_reviews else pd.DataFrame()
+    saved_words = pd.concat(all_saved, ignore_index=True) if all_saved else pd.DataFrame()
+    reading_events = pd.concat(all_reading, ignore_index=True) if all_reading else pd.DataFrame()
+    listening_events = pd.concat(all_listening, ignore_index=True) if all_listening else pd.DataFrame()
+
+    _parse_session_dates(daily_aggregates, sessions, review_events, saved_words, reading_events, listening_events)
+
+    if not metric_definitions:
+        metric_definitions = raw.get("metric_definitions", {})
+
+    meta = {
+        "format_version": raw.get("format_version"),
+        "exported_at": raw.get("exported_at"),
+        "app_session_time_zone": raw.get("app_session_time_zone"),
+        "cohort_key": raw.get("cohort_key"),
+        "participant_count": raw.get("participant_count", len(participants)),
+        "range": raw.get("range", {}),
+    }
+
+    # Build an aggregated summary across all participants
+    summary: dict[str, Any] = {}
+    per_participant_summaries = [p.get("summary", {}) for p in participants if p.get("summary")]
+    if per_participant_summaries:
+        summary = _merge_summaries(per_participant_summaries)
+
+    return ExportBundle(
+        meta=meta,
+        daily_aggregates=daily_aggregates,
+        sessions=sessions,
+        review_events=review_events,
+        saved_words=saved_words,
+        reading_events=reading_events,
+        listening_events=listening_events,
+        summary=summary,
+        metric_definitions=metric_definitions,
+    )
+
+
+def _merge_summaries(summaries: list[dict[str, Any]]) -> dict[str, Any]:
+    """Merge per-participant summaries into cohort-level totals."""
+    merged: dict[str, Any] = {}
+    sum_keys = [
+        "total_sessions_started",
+        "total_sessions_completed",
+        "total_flashcard_attempts",
+        "total_flashcard_retries",
+        "total_reader_saved_words",
+        "total_reading_completions",
+        "total_listening_completions",
+        "total_time_seconds",
+        "days_active",
+    ]
+    for key in sum_keys:
+        merged[key] = sum(s.get(key, 0) for s in summaries)
+
+    # Compute cohort-level rates from totals
+    if merged["total_sessions_started"] > 0:
+        merged["daily_session_completion_rate"] = (
+            merged["total_sessions_completed"] / merged["total_sessions_started"]
+        )
+    else:
+        merged["daily_session_completion_rate"] = None
+
+    if merged["total_flashcard_attempts"] > 0:
+        correct = sum(
+            round(s.get("flashcard_accuracy", 0) or 0 * s.get("total_flashcard_attempts", 0))
+            for s in summaries
+        )
+        merged["flashcard_accuracy"] = correct / merged["total_flashcard_attempts"] if merged["total_flashcard_attempts"] else None
+    else:
+        merged["flashcard_accuracy"] = None
+
+    merged["participant_count"] = len(summaries)
+    return merged
+
+
+def _parse_session_dates(*dataframes: pd.DataFrame) -> None:
+    """Parse session_date columns to date objects in-place."""
+    for df in dataframes:
+        if not df.empty and "session_date" in df.columns:
+            df["session_date"] = pd.to_datetime(df["session_date"]).dt.date
+
+
 def validate_bundle(bundle: ExportBundle) -> list[str]:
     """
     Validate the export bundle schema.  Returns a list of error messages.
@@ -199,7 +336,7 @@ def validate_bundle(bundle: ExportBundle) -> list[str]:
     if not bundle.meta.get("format_version"):
         errors.append("Missing format_version in export metadata.")
 
-    if not bundle.meta.get("anonymous_user_id"):
+    if not bundle.is_cohort and not bundle.meta.get("anonymous_user_id"):
         errors.append("Missing anonymous_user_id in export metadata.")
 
     r = bundle.meta.get("range", {})
@@ -247,6 +384,11 @@ if __name__ == "__main__":
 
     print("Validation PASSED")
     print(f"  Format version: {bundle.meta['format_version']}")
+    if bundle.is_cohort:
+        print(f"  Cohort: {bundle.meta.get('cohort_key', 'unknown')}")
+        print(f"  Participants: {bundle.participant_count}")
+    else:
+        print(f"  User: {bundle.anonymous_user_id}")
     print(f"  Date range: {bundle.date_range[0]} to {bundle.date_range[1]}")
     print(f"  Daily aggregates: {len(bundle.daily_aggregates)} rows")
     print(f"  Sessions: {len(bundle.sessions)} rows")

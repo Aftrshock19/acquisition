@@ -578,21 +578,6 @@ export function FlashcardSettingsForm({
           Shared options
         </h2>
         <div className="mt-4 flex flex-col gap-4 text-sm">
-          <label className="flex items-center gap-3">
-            <span className="w-40 text-zinc-700 dark:text-zinc-200">
-              Retry delay
-            </span>
-            <input
-              type="number"
-              name="retry_delay_seconds"
-              min={10}
-              max={3600}
-              defaultValue={userSettings.retry_delay_seconds}
-              className="app-input app-input-no-spinner w-20 px-2 py-1 text-sm"
-            />
-            <span className="text-xs text-zinc-500">seconds</span>
-          </label>
-
           <label className="app-toggle">
             <input
               type="checkbox"

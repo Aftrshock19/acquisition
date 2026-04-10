@@ -80,7 +80,14 @@ def main() -> None:
             print(f"  - {err}")
         sys.exit(1)
 
-    print(f"Loaded export: {bundle.date_range[0]} to {bundle.date_range[1]}")
+    if bundle.is_cohort:
+        print(
+            f"Loaded cohort export: {bundle.meta.get('cohort_key', 'unknown')} "
+            f"({bundle.participant_count} participants), "
+            f"{bundle.date_range[0]} to {bundle.date_range[1]}"
+        )
+    else:
+        print(f"Loaded export: {bundle.date_range[0]} to {bundle.date_range[1]}")
 
     # Ensure output directories
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
@@ -91,6 +98,13 @@ def main() -> None:
         print("No daily aggregate data. Generating empty summary only.")
         _write_summary(bundle, da, [])
         return
+
+    # For cohort exports, aggregate per-date across participants so that the
+    # existing plotting functions work without modification.
+    if bundle.is_cohort and "anonymous_user_id" in da.columns:
+        # Save per-participant data for CSV export
+        _write_per_participant_table(da)
+        da = _aggregate_cohort_daily(da)
 
     # Convert session_date to proper datetime for plotting
     da["date"] = pd.to_datetime(da["session_date"])
@@ -129,6 +143,108 @@ def main() -> None:
 
     print(f"\nDone. Figures saved to {FIGURES_DIR}/")
     print(f"Tables and summary saved to {OUTPUT_DIR}/")
+
+
+# ---------------------------------------------------------------------------
+# Cohort aggregation helpers
+# ---------------------------------------------------------------------------
+
+def _aggregate_cohort_daily(da: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate per-participant daily rows into cohort-level daily totals.
+
+    Sum-able columns are summed; rate columns are recomputed from the
+    aggregated numerators/denominators.
+    """
+    sum_cols = [
+        "session_started",
+        "session_completed",
+        "assigned_flashcard_count",
+        "assigned_new_words_count",
+        "assigned_review_cards_count",
+        "flashcard_completed_count",
+        "flashcard_new_completed_count",
+        "flashcard_review_completed_count",
+        "flashcard_attempts_count",
+        "flashcard_retry_count",
+        "reader_saved_words_count",
+        "reading_completed",
+        "listening_completed",
+        "reading_time_seconds",
+        "listening_time_seconds",
+        "flashcard_time_seconds",
+        "total_time_seconds",
+        "workload_assigned_units",
+        "workload_completed_units",
+    ]
+    # Only include columns that exist
+    available_sum = [c for c in sum_cols if c in da.columns]
+
+    # Convert booleans to int for summing
+    for col in available_sum:
+        if da[col].dtype == bool:
+            da[col] = da[col].astype(int)
+
+    agg = da.groupby("session_date", as_index=False)[available_sum].sum()
+
+    # Recompute rate columns from totals
+    agg["flashcard_accuracy"] = agg.apply(
+        lambda r: None if r["flashcard_attempts_count"] == 0 else None, axis=1
+    )
+    # We need correct counts — not available after aggregation, so use a
+    # weighted average from the per-participant data
+    correct_by_date = (
+        da.assign(
+            _correct=da["flashcard_accuracy"].fillna(0) * da["flashcard_attempts_count"]
+        )
+        .groupby("session_date")["_correct"]
+        .sum()
+    )
+    agg = agg.set_index("session_date")
+    agg["flashcard_accuracy"] = (
+        correct_by_date / agg["flashcard_attempts_count"].replace(0, float("nan"))
+    )
+    agg["review_correctness_proxy"] = None  # Cannot recompute without raw review events
+    agg["days_active_flag"] = (
+        (agg["flashcard_attempts_count"] > 0)
+        | (agg["reader_saved_words_count"] > 0)
+        | (agg["reading_completed"] > 0)
+        | (agg["listening_completed"] > 0)
+    )
+    agg["workload_completion_rate"] = (
+        agg["workload_completed_units"] / agg["workload_assigned_units"].replace(0, float("nan"))
+    )
+
+    return agg.reset_index()
+
+
+def _write_per_participant_table(da: pd.DataFrame) -> None:
+    """Write a per-participant summary CSV for cohort exports."""
+    if "anonymous_user_id" not in da.columns:
+        return
+
+    summary_rows = []
+    for pid, group in da.groupby("anonymous_user_id"):
+        active_days = group[
+            (group.get("flashcard_attempts_count", 0) > 0)
+            | (group.get("reader_saved_words_count", 0) > 0)
+            | (group.get("reading_completed", False).astype(bool))
+            | (group.get("listening_completed", False).astype(bool))
+        ]
+        summary_rows.append({
+            "participant_id": pid,
+            "total_days": len(group),
+            "active_days": len(active_days),
+            "total_sessions_started": int(group["session_started"].sum()),
+            "total_sessions_completed": int(group["session_completed"].sum()),
+            "total_flashcard_attempts": int(group["flashcard_attempts_count"].sum()),
+            "total_time_seconds": int(group["total_time_seconds"].sum()),
+            "total_reader_saved_words": int(group["reader_saved_words_count"].sum()),
+        })
+
+    pd.DataFrame(summary_rows).to_csv(
+        OUTPUT_DIR / "per_participant_summary.csv", index=False
+    )
+    print("  Wrote per_participant_summary.csv")
 
 
 # ---------------------------------------------------------------------------

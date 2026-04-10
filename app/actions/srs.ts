@@ -10,6 +10,12 @@ import {
 } from "@/lib/loop/listening";
 import { EMPTY_SAVED_WORDS_STATE, getSavedWordsState, type SavedWordsState } from "@/lib/reader/savedWords";
 import { MAX_DUE_REVIEWS, MAX_NEW_WORDS } from "@/lib/srs/constants";
+import {
+  computeWorkloadPolicy,
+  CONTINUATION_REVIEW_CHUNK,
+  CONTINUATION_NEW_CHUNK,
+  type WorkloadPolicy,
+} from "@/lib/srs/workloadPolicy";
 import type {
   TodaySession,
   DueReviewItem,
@@ -41,9 +47,9 @@ export type TodayFlashcardsResult =
       ok: true;
       session: TodaySession;
       dailySession: DailySessionRow | null;
+      workloadPolicy: WorkloadPolicy;
       effectiveSettings: {
         dailyLimit: number;
-        retryDelaySeconds: number;
         autoAdvanceCorrect: boolean;
         showPosHint: boolean;
         showDefinitionFirst: boolean;
@@ -64,7 +70,6 @@ export type TodayFlashcardsResult =
       dailySession?: DailySessionRow | null;
       effectiveSettings: {
         dailyLimit: number;
-        retryDelaySeconds: number;
         autoAdvanceCorrect: boolean;
         showPosHint: boolean;
         showDefinitionFirst: boolean;
@@ -120,6 +125,7 @@ export async function getDailyQueue(
   lang: string,
   newLimit?: number,
   reviewLimit?: number,
+  excludeWordIds?: string[],
 ): Promise<GetDailyQueueResult> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -164,7 +170,8 @@ export async function getDailyQueue(
     p_lang: lang,
     p_new_limit: limitNew,
     p_review_limit: limitReview,
-  });
+    p_exclude_word_ids: excludeWordIds ?? [],
+  } as never);
 
   if (error) {
     return {
@@ -243,12 +250,18 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     recommended,
     existingDailySession,
     savedWords,
+    p50ReviewMs,
+    daysSinceLastSession,
+    overdueCount,
   ] = await Promise.all([
     getUserSettings(),
     getMcqQuestionFormatsPreference(),
     recommendSettings(),
     getTodayDailySession(),
     getTodaySavedWordsState(lang),
+    getP50ReviewMs(),
+    getDaysSinceLastSession(),
+    getOverdueCount(),
   ]);
   const effective = resolveEffectiveSettings(settings, recommended);
   const completedToday = Math.max(
@@ -258,11 +271,19 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
       0,
   );
   const remainingDailyLimit = Math.max(0, effective.effectiveDailyLimit - completedToday);
-  const queueLimit = Math.max(1, remainingDailyLimit);
+
+  const workloadPolicy = computeWorkloadPolicy({
+    p50ReviewMs,
+    daysSinceLastSession,
+    overdueCount,
+    scheduledNewCount: MAX_NEW_WORDS,
+  });
+
+  const newLimit    = workloadPolicy.recommendedNewWords;
+  const reviewLimit = workloadPolicy.recommendedReviews;
 
   const effectiveSettings = {
     dailyLimit: effective.effectiveDailyLimit,
-    retryDelaySeconds: effective.retryDelaySeconds,
     autoAdvanceCorrect: effective.autoAdvanceCorrect,
     showPosHint: effective.showPosHint,
     showDefinitionFirst: effective.showDefinitionFirst,
@@ -271,11 +292,7 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     enabledTypes: effective.enabledModes,
   };
 
-  const queueResult = await getDailyQueue(
-    lang,
-    queueLimit,
-    queueLimit,
-  );
+  const queueResult = await getDailyQueue(lang, newLimit, reviewLimit);
 
   if (!queueResult.ok) {
     return {
@@ -297,6 +314,7 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     ok: true,
     session,
     dailySession,
+    workloadPolicy,
     effectiveSettings,
     savedWords,
   };
@@ -316,6 +334,84 @@ async function getTodaySavedWordsState(language: string): Promise<SavedWordsStat
   }
 
   return getSavedWordsState(supabase, user.id, language);
+}
+
+async function getP50ReviewMs(): Promise<number | null> {
+  const { supabase, user } = await getSupabaseServerContext();
+  if (!supabase || !user) return null;
+
+  const { data } = await supabase
+    .from("review_events")
+    .select("ms_spent")
+    .eq("user_id", user.id)
+    .eq("correct", true)
+    .not("ms_spent", "is", null)
+    .gt("ms_spent", 0)
+    .lt("ms_spent", 120000)
+    .order("submitted_at", { ascending: false })
+    .limit(200);
+
+  const values = (data ?? []).map((r) => r.ms_spent as number).filter(Boolean);
+  if (values.length === 0) return null;
+
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)] ?? null;
+}
+
+async function getDaysSinceLastSession(): Promise<number | null> {
+  const { supabase, user } = await getSupabaseServerContext();
+  if (!supabase || !user) return null;
+
+  const today = getTodaySessionDate();
+
+  const { data } = await supabase
+    .from("daily_sessions")
+    .select("session_date")
+    .eq("user_id", user.id)
+    .lt("session_date", today)
+    .order("session_date", { ascending: false })
+    .limit(1);
+
+  const lastDate = (data ?? [])[0]?.session_date;
+  if (!lastDate) return null;
+
+  const diffMs = new Date(today).getTime() - new Date(lastDate).getTime();
+  return Math.floor(diffMs / 86400000);
+}
+
+async function getOverdueCount(): Promise<number> {
+  const { supabase, user } = await getSupabaseServerContext();
+  if (!supabase || !user) return 0;
+
+  const { count } = await supabase
+    .from("user_words")
+    .select("word_id", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .lte("next_due", new Date().toISOString());
+
+  return count ?? 0;
+}
+
+export type LoadMoreResult =
+  | { ok: true; dueReviews: DueReviewItem[]; newWords: Word[] }
+  | { ok: false; error: string };
+
+export async function loadMoreReviewChunk(
+  excludeWordIds: string[],
+  lang = "es",
+): Promise<LoadMoreResult> {
+  const result = await getDailyQueue(lang, 0, CONTINUATION_REVIEW_CHUNK, excludeWordIds);
+  if (!result.ok) return { ok: false, error: result.error ?? "Failed to load reviews" };
+  return { ok: true, dueReviews: result.session.dueReviews, newWords: [] };
+}
+
+export async function loadMoreNewWordsChunk(
+  excludeWordIds: string[],
+  lang = "es",
+): Promise<LoadMoreResult> {
+  const result = await getDailyQueue(lang, CONTINUATION_NEW_CHUNK, 0, excludeWordIds);
+  if (!result.ok) return { ok: false, error: result.error ?? "Failed to load new words" };
+  return { ok: true, dueReviews: [], newWords: result.session.newWords };
 }
 
 export type RecordReviewResult =
@@ -352,12 +448,7 @@ export async function recordReview(
 
     const grade = resolveGrade(payload);
     const queueSource = payload.queueSource ?? "main";
-    const retryScheduledFor =
-      queueSource === "main" && grade === "again" && payload.retryScheduledFor
-        ? payload.retryScheduledFor
-        : queueSource === "main" && grade === "again"
-          ? new Date(Date.now() + 10 * 60 * 1000).toISOString()
-          : null;
+    const retryScheduledFor = payload.retryScheduledFor ?? null;
 
     const { error } = await supabase.rpc("record_review", {
       p_word_id: payload.wordId,
@@ -373,6 +464,8 @@ export async function recordReview(
       p_submitted_at: payload.submittedAt ?? null,
       p_retry_scheduled_for: retryScheduledFor,
       p_client_attempt_id: payload.clientAttemptId ?? null,
+      p_first_try: payload.firstTry ?? true,
+      p_retry_index: payload.retryIndex ?? 0,
     });
 
     if (error) {

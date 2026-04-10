@@ -98,4 +98,14 @@ Dissertation-chapter-ready support documents are available in `docs/`:
 
 ## Cohort export
 
-Cohort-level (multi-user) export is not currently implemented. The app has no admin role system or protected admin routes. See the "Cohort export" section in [`analysis/README.md`](../analysis/README.md) for the documented extension path.
+Cohort-level export is implemented via a researcher-protected admin layer:
+
+- **Enrollment:** `study_enrollments` table with stable participant IDs (`P001`, `P002`, ...) assigned at enrollment time.
+- **Access control:** `RESEARCHER_EMAILS` env-var allowlist + `SUPABASE_SERVICE_ROLE_KEY` for cross-user queries.
+- **Export route:** `/api/admin/progress/export?format=json&cohort=default&from=...&to=...`
+- **Researcher ops page:** `/admin/study` shows cohort status and activity summaries.
+- **Enrollment API:** `POST /api/admin/enroll` enrolls participants by email.
+
+The cohort export reuses the same `getUserAnalyticsBundle` and `buildJsonExport` functions as the single-user export, looping over enrolled participants. The analysis pipeline (`analysis/build_report.py`) automatically detects cohort exports and produces both per-participant and aggregate outputs.
+
+For full operational procedures, see [`docs/study-operations.md`](./study-operations.md).

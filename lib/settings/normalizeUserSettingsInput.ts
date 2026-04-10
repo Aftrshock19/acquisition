@@ -13,7 +13,6 @@ export type RawSettingsInput = Partial<{
   include_cloze_es_to_en: string | boolean;
   include_normal_en_to_es: string | boolean;
   include_normal_es_to_en: string | boolean;
-  retry_delay_seconds: string | number;
   auto_advance_correct: string | boolean;
   show_pos_hint: string | boolean;
   show_definition_first: string | boolean;
@@ -34,11 +33,6 @@ export function normalizeUserSettingsInput(raw: RawSettingsInput): Partial<UserS
   if (raw.manual_daily_card_limit !== undefined) {
     const n = clampNumber(raw.manual_daily_card_limit, 10, 200, 30);
     out.manual_daily_card_limit = n;
-  }
-
-  if (raw.retry_delay_seconds !== undefined) {
-    const n = clampNumber(raw.retry_delay_seconds, 10, 3600, 90);
-    out.retry_delay_seconds = n;
   }
 
   if (raw.auto_advance_correct !== undefined) {

@@ -7,6 +7,13 @@ export type AnalyticsDateRange = {
 
 export type AnalyticsSessionRow = DailySessionRow;
 
+export type SchedulerOutcome =
+  | "first_clean_success"
+  | "second_clean_success"
+  | "later_clean_review"
+  | "rescued_success"
+  | "incorrect_lapse";
+
 export type AnalyticsReviewEventRow = {
   id: string;
   user_id: string;
@@ -28,6 +35,9 @@ export type AnalyticsReviewEventRow = {
   user_answer: string;
   expected: string[];
   delta_hours: number | null;
+  first_try: boolean | null;
+  retry_index: number | null;
+  scheduler_outcome: SchedulerOutcome | null;
 };
 
 export type AnalyticsSavedWordRow = {
