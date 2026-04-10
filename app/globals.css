@@ -3,6 +3,8 @@
 :root {
   --background: #f4f4f3;
   --foreground: #18181b;
+  --correct-colour: #15803d;
+  --incorrect-colour: #be123c;
   --surface: rgba(255, 255, 255, 0.84);
   --surface-strong: rgba(255, 255, 255, 0.96);
   --surface-muted: rgba(244, 244, 245, 0.82);
@@ -18,6 +20,8 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-correct-colour: var(--correct-colour);
+  --color-incorrect-colour: var(--incorrect-colour);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -26,6 +30,8 @@
   :root {
     --background: #0d0d10;
     --foreground: #f2f2f3;
+    --correct-colour: #bbf7d0;
+    --incorrect-colour: #fda4af;
     --surface: rgba(24, 24, 27, 0.82);
     --surface-strong: rgba(24, 24, 27, 0.94);
     --surface-muted: rgba(39, 39, 42, 0.72);

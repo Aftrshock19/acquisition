@@ -127,7 +127,7 @@ export async function saveReaderWordAction({
       throw new Error(deckMembershipError.message);
     }
 
-    return { ok: true, wordId };
+    return { ok: true, wordId, highlightForms: [] };
   } catch (error) {
     return {
       ok: false,

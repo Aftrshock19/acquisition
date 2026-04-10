@@ -10,6 +10,7 @@ import {
 } from "react";
 import { recordReview } from "@/app/actions/srs";
 import { BackButton } from "@/components/BackButton";
+import { InteractiveTextProvider } from "@/components/interactive-text/InteractiveTextProvider";
 import { LeftIcon } from "@/components/LeftIcon";
 import { RightIcon } from "@/components/RightIcon";
 import { SettingsButton } from "@/components/SettingsButton";
@@ -25,6 +26,11 @@ import {
   TYPE_LABELS,
   type UnifiedQueueCard,
 } from "@/components/srs/logic/buildUnifiedQueue";
+import {
+  getNormalReviewOutcome,
+  getNormalReviewResultLabel,
+  type NormalReviewChoice,
+} from "@/lib/srs/normalReview";
 import {
   formatDefinitionCandidates,
   isCorrectClozeAnswer,
@@ -42,6 +48,8 @@ type Props = {
   enabledTypes: Record<EnabledFlashcardMode, boolean>;
   mcqQuestionFormats: McqQuestionFormat[];
   session: TodaySessionData;
+  initialSavedWordIds: string[];
+  initialSavedLemmas: string[];
   dailyLimit: number;
   retryDelayMs?: number;
   autoAdvanceCorrect?: boolean;
@@ -54,6 +62,7 @@ type RetryEntry = { card: UnifiedQueueCard; dueAt: number };
 type SessionPhase = "prompt" | "feedback" | "correction" | "waiting" | "done";
 const TEXT_SUCCESS_DELAY_MS = 1200;
 const CORRECTION_PLACEHOLDER_DELAY_MS = 1900;
+const FLASHCARD_LOOKUP_LANG = "es";
 const REVIEWED_SENTENCE_SUPPORT_EXPANDED_STORAGE_KEY =
   "reviewed-sentence-support-expanded";
 type ReviewedCardSnapshot = {
@@ -142,6 +151,8 @@ export function TodaySession({
   enabledTypes,
   mcqQuestionFormats,
   session,
+  initialSavedWordIds,
+  initialSavedLemmas,
   dailyLimit,
   retryDelayMs = 90000,
   autoAdvanceCorrect = true,
@@ -372,8 +383,8 @@ export function TodaySession({
           submittedGrade={normalSubmittedGrade}
           navigation={navigation}
           onReveal={() => setNormalRevealed(true)}
-          onGrade={(grade) => {
-            void handleNormalGrade(grade);
+          onChoice={(choice) => {
+            void handleNormalGrade(choice);
           }}
           onNext={() => advanceFromCurrentCard(retryList)}
           retryDelayMs={retryDelayMs}
@@ -391,8 +402,8 @@ export function TodaySession({
         submittedGrade={normalSubmittedGrade}
         navigation={navigation}
         onReveal={() => setNormalRevealed(true)}
-        onGrade={(grade) => {
-          void handleNormalGrade(grade);
+        onChoice={(choice) => {
+          void handleNormalGrade(choice);
         }}
         onNext={() => advanceFromCurrentCard(retryList)}
         retryDelayMs={retryDelayMs}
@@ -601,7 +612,7 @@ export function TodaySession({
     });
   }
 
-  async function handleNormalGrade(grade: Grade) {
+  async function handleNormalGrade(choice: NormalReviewChoice) {
     if (
       !current ||
       current.cardType !== "normal" ||
@@ -612,17 +623,17 @@ export function TodaySession({
       return;
     }
 
-    const correct = grade !== "again";
+    const outcome = getNormalReviewOutcome(choice);
 
     setBusy(true);
     try {
       const result = await recordReview({
         wordId: current.id,
-        correct,
-        grade,
+        correct: outcome.correct,
+        grade: outcome.grade,
         cardType: "normal",
         msSpent: Date.now() - startedAtRef.current,
-        userAnswer: `[self-rated:${grade}]`,
+        userAnswer: outcome.userAnswer,
         expected: [
           current.direction === "en_to_es"
             ? current.lemma
@@ -633,23 +644,23 @@ export function TodaySession({
       if (!result.ok) {
         throw new Error(result.error);
       }
-      const nextRetryList = correct
-        ? retryList
-        : upsertRetrySorted(retryList, {
+      const nextRetryList = outcome.retry
+        ? upsertRetrySorted(retryList, {
             card: current,
             dueAt: Date.now() + retryDelayMs,
-          });
+          })
+        : retryList;
 
       setRetryList(nextRetryList);
       appendReviewedCard({
         card: current,
         source: currentSource,
-        grade,
+        grade: outcome.grade,
       });
-      setNormalSubmittedGrade(grade);
+      setNormalSubmittedGrade(outcome.grade);
 
       setPhase("feedback");
-      if (correct && autoAdvanceCorrect) {
+      if (outcome.correct && autoAdvanceCorrect) {
         scheduleSuccessAdvance(nextRetryList);
       }
     } catch (error) {
@@ -700,6 +711,15 @@ export function TodaySession({
   );
   const progressPercent =
     progressTotal > 0 ? (100 * completedCount) / progressTotal : 0;
+  const interactiveTextCloseSignal = current
+    ? `${current.id}:${phase}:${historyIndex ?? "live"}`
+    : `${phase}:${historyIndex ?? "live"}`;
+  const interactiveTextContext =
+    current?.cardType === "sentences"
+      ? "sentence_card"
+      : current?.cardType === "mcq" && current.questionFormat === "sentence"
+        ? "mcq_sentence"
+        : "flashcard";
 
   if (enabledImplementedTypes.length === 0) {
     return (
@@ -790,6 +810,57 @@ export function TodaySession({
               snapshot={viewedSnapshot}
               navigation={flashcardNavigation}
             />
+          ) : current.cardType === "mcq" ? (
+            <InteractiveTextProvider
+              lang={FLASHCARD_LOOKUP_LANG}
+              initialSavedWordIds={initialSavedWordIds}
+              initialSavedLemmas={initialSavedLemmas}
+              interactionContext={interactiveTextContext}
+              closeSignal={interactiveTextCloseSignal}
+            >
+              <McqCard
+                card={current}
+                busy={busy}
+                submitError={submitError}
+                showPosHint={showPosHint}
+                feedback={feedback}
+                onSelect={(option) => {
+                  void handleChoiceSelect(option);
+                }}
+                onNext={() => advanceFromCurrentCard(retryList)}
+                retryDelayMs={retryDelayMs}
+                navigation={flashcardNavigation}
+              />
+            </InteractiveTextProvider>
+          ) : current.cardType === "sentences" ? (
+            <InteractiveTextProvider
+              lang={FLASHCARD_LOOKUP_LANG}
+              initialSavedWordIds={initialSavedWordIds}
+              initialSavedLemmas={initialSavedLemmas}
+              interactionContext={interactiveTextContext}
+              closeSignal={interactiveTextCloseSignal}
+            >
+              <SentenceCard
+                card={current}
+                value={typingInput}
+                busy={busy}
+                submitError={submitError}
+                showPosHint={showPosHint}
+                hideTranslation={hideTranslationSentences}
+                feedback={feedback}
+                correctionPlaceholder={
+                  feedback?.expected
+                }
+                correctionPlaceholderVisible={showCorrectionPlaceholder}
+                inputRef={typingInputRef}
+                onChange={handleTypingInputChange}
+                onCheck={() => {
+                  void handleTypingCheck();
+                }}
+                onNext={() => advanceFromCurrentCard(retryList)}
+                navigation={flashcardNavigation}
+              />
+            </InteractiveTextProvider>
           ) : current.cardType === "cloze" ? (
             <ClozeCard
               card={current}
@@ -824,41 +895,6 @@ export function TodaySession({
               }}
               onNext={() => advanceFromCurrentCard(retryList)}
               retryDelayMs={retryDelayMs}
-              navigation={flashcardNavigation}
-            />
-          ) : current.cardType === "mcq" ? (
-            <McqCard
-              card={current}
-              busy={busy}
-              submitError={submitError}
-              showPosHint={showPosHint}
-              feedback={feedback}
-              onSelect={(option) => {
-                void handleChoiceSelect(option);
-              }}
-              onNext={() => advanceFromCurrentCard(retryList)}
-              retryDelayMs={retryDelayMs}
-              navigation={flashcardNavigation}
-            />
-          ) : current.cardType === "sentences" ? (
-            <SentenceCard
-              card={current}
-              value={typingInput}
-              busy={busy}
-              submitError={submitError}
-              showPosHint={showPosHint}
-              hideTranslation={hideTranslationSentences}
-              feedback={feedback}
-              correctionPlaceholder={
-                feedback?.expected
-              }
-              correctionPlaceholderVisible={showCorrectionPlaceholder}
-              inputRef={typingInputRef}
-              onChange={handleTypingInputChange}
-              onCheck={() => {
-                void handleTypingCheck();
-              }}
-              onNext={() => advanceFromCurrentCard(retryList)}
               navigation={flashcardNavigation}
             />
           ) : null}
@@ -1017,6 +1053,7 @@ function ReviewedNormalCard({
   const answerLabel = card.direction === "en_to_es" ? "Word" : "Meaning";
   const answerValue =
     card.direction === "en_to_es" ? card.lemma : (card.definition ?? "—");
+  const resultLabel = getNormalReviewResultLabel(grade);
 
   return (
     <div className="mt-5 flex flex-col gap-5">
@@ -1041,9 +1078,9 @@ function ReviewedNormalCard({
         </p>
       </div>
 
-      {grade ? (
+      {resultLabel ? (
         <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-200">
-          Grade: <span className="font-medium capitalize">{grade}</span>
+          Result: <span className="font-medium">{resultLabel}</span>
         </div>
       ) : null}
     </div>
@@ -1176,22 +1213,11 @@ function ReviewedSentenceSupport({
   translation: string | null;
   englishSentence: string | null;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(() =>
+    readStoredBoolean(REVIEWED_SENTENCE_SUPPORT_EXPANDED_STORAGE_KEY),
+  );
   const wordTranslation = translation?.trim() || null;
   const normalizedEnglishSentence = englishSentence?.trim() || null;
-
-  useEffect(() => {
-    try {
-      const savedState = window.localStorage.getItem(
-        REVIEWED_SENTENCE_SUPPORT_EXPANDED_STORAGE_KEY,
-      );
-      if (savedState === "true") {
-        setExpanded(true);
-      }
-    } catch {
-      // Ignore unavailable storage and keep the default collapsed state.
-    }
-  }, []);
 
   useEffect(() => {
     try {
@@ -1237,6 +1263,18 @@ function ReviewedSentenceSupport({
       ) : null}
     </div>
   );
+}
+
+function readStoredBoolean(key: string) {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    return window.localStorage.getItem(key) === "true";
+  } catch {
+    return false;
+  }
 }
 
 function ReviewedFeedback({

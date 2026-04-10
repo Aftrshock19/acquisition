@@ -1,14 +1,9 @@
 import { redirect } from "next/navigation";
 import { ReaderView } from "@/components/reader/ReaderView";
 import { getTextById } from "@/lib/loop/texts";
+import { getSavedWordsState } from "@/lib/reader/savedWords";
 import { getSupabaseUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-
-type SupabaseServerClient = NonNullable<
-  Awaited<ReturnType<typeof createSupabaseServerClient>>
->;
-
-const MANUAL_SAVED_DECK_KEY = "manual_saved";
 
 export default async function ReaderPage({
   params,
@@ -135,47 +130,9 @@ export default async function ReaderPage({
 }
 
 async function getSavedWordState(
-  supabase: SupabaseServerClient,
+  supabase: NonNullable<Awaited<ReturnType<typeof createSupabaseServerClient>>>,
   userId: string,
   language: string,
 ) {
-  try {
-    const { data: deck, error: deckError } = await supabase
-      .from("decks")
-      .select("id")
-      .eq("key", MANUAL_SAVED_DECK_KEY)
-      .eq("language", language)
-      .maybeSingle();
-
-    if (deckError || !deck) {
-      return { wordIds: [], lemmas: [] };
-    }
-
-    const { data: memberships, error: membershipError } = await supabase
-      .from("user_deck_words")
-      .select("word_id")
-      .eq("user_id", userId)
-      .eq("deck_id", deck.id);
-
-    if (membershipError || !memberships || memberships.length === 0) {
-      return { wordIds: [], lemmas: [] };
-    }
-
-    const wordIds = memberships.map((membership) => membership.word_id);
-    const { data: savedWords, error: savedWordsError } = await supabase
-      .from("words")
-      .select("id, lemma")
-      .in("id", wordIds);
-
-    if (savedWordsError || !savedWords) {
-      return { wordIds, lemmas: [] };
-    }
-
-    return {
-      wordIds,
-      lemmas: savedWords.map((word) => word.lemma),
-    };
-  } catch {
-    return { wordIds: [], lemmas: [] };
-  }
+  return getSavedWordsState(supabase, userId, language);
 }

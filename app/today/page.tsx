@@ -133,6 +133,8 @@ export default async function TodayPage() {
           enabledTypes={effectiveSettings.enabledTypes}
           mcqQuestionFormats={effectiveSettings.mcqQuestionFormats}
           session={session}
+          initialSavedWordIds={result.savedWords.wordIds}
+          initialSavedLemmas={result.savedWords.lemmas}
           dailyLimit={effectiveSettings.dailyLimit}
           retryDelayMs={effectiveSettings.retryDelaySeconds * 1000}
           autoAdvanceCorrect={effectiveSettings.autoAdvanceCorrect}

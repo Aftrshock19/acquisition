@@ -2,6 +2,7 @@
 
 import { createSupabaseServerClient, getSupabaseServerContext } from "@/lib/supabase/server";
 import { getSupabaseUser } from "@/lib/supabase/auth";
+import { EMPTY_SAVED_WORDS_STATE, getSavedWordsState, type SavedWordsState } from "@/lib/reader/savedWords";
 import { MAX_DUE_REVIEWS, MAX_NEW_WORDS } from "@/lib/srs/constants";
 import type {
   TodaySession,
@@ -46,6 +47,7 @@ export type TodayFlashcardsResult =
         >;
         enabledTypes: Record<EnabledFlashcardMode, boolean>;
       };
+      savedWords: SavedWordsState;
     }
   | {
       ok: false;
@@ -66,6 +68,7 @@ export type TodayFlashcardsResult =
         >;
         enabledTypes: Record<EnabledFlashcardMode, boolean>;
       };
+      savedWords: SavedWordsState;
     };
 
 export type FlashcardDebugSnapshot = {
@@ -200,11 +203,13 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     mcqQuestionFormats,
     recommended,
     existingDailySession,
+    savedWords,
   ] = await Promise.all([
     getUserSettings(),
     getMcqQuestionFormatsPreference(),
     recommendSettings(),
     getTodayDailySession(),
+    getTodaySavedWordsState(lang),
   ]);
   const effective = resolveEffectiveSettings(settings, recommended);
   const completedToday = Math.max(0, existingDailySession?.reviews_done ?? 0);
@@ -237,6 +242,7 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
       error: queueResult.error,
       dailySession: null,
       effectiveSettings,
+      savedWords,
     };
   }
 
@@ -248,6 +254,7 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     session,
     dailySession,
     effectiveSettings,
+    savedWords,
   };
 }
 
@@ -265,6 +272,15 @@ async function getTodayDailySession(): Promise<DailySessionRow | null> {
 
   if (error) return null;
   return data as DailySessionRow | null;
+}
+
+async function getTodaySavedWordsState(language: string): Promise<SavedWordsState> {
+  const { supabase, user } = await getSupabaseServerContext();
+  if (!supabase || !user) {
+    return EMPTY_SAVED_WORDS_STATE;
+  }
+
+  return getSavedWordsState(supabase, user.id, language);
 }
 
 export type RecordReviewResult =

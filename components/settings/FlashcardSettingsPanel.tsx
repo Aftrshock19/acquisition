@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import type { EffectiveFlashcardSettings, UserSettingsRow } from "@/lib/settings/types";
+import type { RawSettingsInput } from "@/lib/settings/normalizeUserSettingsInput";
 import { updateUserSettingsAction } from "@/app/actions/settings";
 
 export type FlashcardSettingsPanelProps = {
@@ -23,8 +24,12 @@ export function FlashcardSettingsPanel({
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     startTransition(() => {
+      const input = Object.fromEntries(formData.entries()) as RawSettingsInput & {
+        mcq_question_formats?: string;
+      };
+
       void updateUserSettingsAction(
-        Object.fromEntries(formData.entries()) as any,
+        input,
       ).then((res) => {
         if (!res.ok) setError(res.error);
         else setError(null);

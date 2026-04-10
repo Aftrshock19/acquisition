@@ -40,7 +40,7 @@ export function AudioCard({
 
   useEffect(() => {
     void playCardAudio(card, audioRef.current);
-  }, [card.id]);
+  }, [card]);
 
   if (feedback) {
     return (

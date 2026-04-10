@@ -7,6 +7,10 @@ import {
   FlashcardSuccessActions,
 } from "@/components/srs/cards/FlashcardContainer";
 import type { Grade } from "@/lib/srs/types";
+import {
+  getNormalReviewResultLabel,
+  type NormalReviewChoice,
+} from "@/lib/srs/normalReview";
 import type { UnifiedQueueCard } from "@/components/srs/logic/buildUnifiedQueue";
 
 type NormalEnToEsCardProps = {
@@ -21,7 +25,7 @@ type NormalEnToEsCardProps = {
   submittedGrade?: Grade | null;
   navigation?: ReactNode;
   onReveal: () => void;
-  onGrade: (grade: Grade) => void;
+  onChoice: (choice: NormalReviewChoice) => void;
   onNext: () => void;
   retryDelayMs: number;
 };
@@ -35,19 +39,20 @@ export function NormalEnToEsCard({
   submittedGrade,
   navigation,
   onReveal,
-  onGrade,
+  onChoice,
   onNext,
   retryDelayMs,
 }: NormalEnToEsCardProps) {
   const answered = submittedGrade !== null && submittedGrade !== undefined;
   const isAgain = submittedGrade === "again";
+  const resultLabel = getNormalReviewResultLabel(submittedGrade);
   const helperText = !revealed
-    ? "Reveal the answer, then choose a grade."
+    ? "Try to recall it first, then reveal the answer and judge whether you had it before seeing it. Press Enter to reveal."
     : answered
       ? isAgain
-        ? "Use Next or the right arrow to continue."
+        ? "This card will repeat after the retry delay."
         : null
-      : "Again repeats this card after the retry delay.";
+      : "Choose I missed it if you only had it after seeing the answer.";
 
   return (
     <div className="flex flex-col gap-6">
@@ -94,7 +99,7 @@ export function NormalEnToEsCard({
             tone={isAgain ? "error" : "success"}
             title={
               <>
-                Grade: <span className="capitalize">{submittedGrade}</span>
+                Result: <span>{resultLabel ?? submittedGrade}</span>
               </>
             }
             secondary={
@@ -117,7 +122,7 @@ export function NormalEnToEsCard({
           )}
         </>
       ) : (
-        <NormalGradeButtons busy={busy} onGrade={onGrade} />
+        <NormalGradeButtons busy={busy} onChoice={onChoice} />
       )}
 
       {helperText ? <p className="text-sm text-zinc-500">{helperText}</p> : null}
@@ -127,36 +132,24 @@ export function NormalEnToEsCard({
 
 function NormalGradeButtons({
   busy,
-  onGrade,
+  onChoice,
 }: {
   busy: boolean;
-  onGrade: (grade: Grade) => void;
+  onChoice: (choice: NormalReviewChoice) => void;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
       <GradeButton
-        label="Again"
-        className="border-red-300 text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-200 dark:hover:bg-red-950/50"
+        label="I missed it"
+        className="border-rose-200 text-rose-700 hover:bg-rose-50/50 dark:border-rose-900/70 dark:text-rose-300 dark:hover:bg-rose-950/20"
         disabled={busy}
-        onClick={() => onGrade("again")}
+        onClick={() => onChoice("missed")}
       />
       <GradeButton
-        label="Hard"
-        className="border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-800 dark:text-amber-200 dark:hover:bg-amber-950/50"
-        disabled={busy}
-        onClick={() => onGrade("hard")}
-      />
-      <GradeButton
-        label="Good"
-        className="border-blue-300 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-200 dark:hover:bg-blue-950/50"
-        disabled={busy}
-        onClick={() => onGrade("good")}
-      />
-      <GradeButton
-        label="Easy"
+        label="I got it"
         className="border-green-300 text-green-700 hover:bg-green-50 dark:border-green-800 dark:text-green-200 dark:hover:bg-green-950/50"
         disabled={busy}
-        onClick={() => onGrade("easy")}
+        onClick={() => onChoice("got_it")}
       />
     </div>
   );

@@ -154,6 +154,6 @@ export function exposureUpdateHalfLife(
   let eta = baseEta + k * ewmaAbsSurprise;
   eta = Math.max(etaMin, Math.min(etaMax, eta));
 
-  let halfLifeAfter = halfLifeHours * Math.exp(eta * surpriseWeighted);
+  const halfLifeAfter = halfLifeHours * Math.exp(eta * surpriseWeighted);
   return Math.max(minHl, Math.min(maxHl, halfLifeAfter));
 }

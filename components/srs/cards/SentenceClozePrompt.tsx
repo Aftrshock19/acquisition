@@ -7,10 +7,12 @@ export function SentenceClozePrompt({
   sentence,
   className = "mt-4 text-xl font-medium tracking-tight text-zinc-900 dark:text-zinc-100",
   blankContent,
+  renderTextPart,
 }: {
   sentence: string;
   className?: string;
   blankContent?: ReactNode;
+  renderTextPart?: (part: string, index: number) => ReactNode;
 }) {
   const parts = sentence.split(SENTENCE_CLOZE_BLANK_TOKEN);
 
@@ -19,7 +21,7 @@ export function SentenceClozePrompt({
       {parts.map((part, index) => (
         <Fragment key={`${part}-${index}`}>
           {index > 0 ? blankContent ?? <SentenceBlank /> : null}
-          {part}
+          {renderTextPart ? renderTextPart(part, index) : part}
         </Fragment>
       ))}
     </p>

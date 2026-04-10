@@ -103,7 +103,7 @@ export function FlashcardSuccessActions({
         Next
       </button>
       <p className="text-sm text-zinc-500">
-        Advancing automatically. Press Next, Enter, or &gt; to continue now.
+        Advancing automatically. Press Next or Enter to continue now.
       </p>
     </>
   );

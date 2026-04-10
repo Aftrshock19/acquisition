@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { InteractiveText } from "@/components/interactive-text/InteractiveText";
 import {
   FlashcardContainer,
   FlashcardFeedbackPanel,
@@ -61,6 +62,13 @@ export function McqCard({
           <SentenceClozePrompt
             sentence={card.sentenceData.sentence}
             className="mt-4 text-xl font-medium tracking-tight text-zinc-900 dark:text-zinc-100"
+            renderTextPart={(part, index) => (
+              <InteractiveText
+                text={part}
+                tokenKeyPrefix={`mcq-card-${card.id}-${index}`}
+                preserveFocusOnPress
+              />
+            )}
           />
         ) : null}
         {showPosHint && card.hint ? (
