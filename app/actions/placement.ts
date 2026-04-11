@@ -450,6 +450,9 @@ export async function submitPlacementAnswer(
           placement_status: "estimated",
           placement_source: "baseline_only",
           placement_last_recalibrated_at: new Date().toISOString(),
+          has_seen_intro: true,
+          onboarding_completed_at: new Date().toISOString(),
+          onboarding_entry_mode: "baseline",
         },
         { onConflict: "user_id" },
       );

@@ -1,8 +1,13 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getUserSettings } from "@/lib/settings/getUserSettings";
+import { shouldRedirectToIntro } from "@/lib/onboarding/state";
 
 export default async function HomePage() {
   const { signedIn } = await getUserSettings();
+  if (signedIn && (await shouldRedirectToIntro())) {
+    redirect("/onboarding");
+  }
 
   return (
     <main className="app-shell">

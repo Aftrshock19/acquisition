@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { BackButton } from '@/components/BackButton';
 import { getUserSettings } from '@/lib/settings/getUserSettings';
@@ -75,6 +76,20 @@ export default async function SettingsPage() {
           recommended={recommended}
           effective={effective}
         />
+      </div>
+      <div className="app-card flex flex-col gap-2 p-6">
+        <h2 className="text-base font-semibold tracking-tight">
+          Placement check
+        </h2>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          Retake the short diagnostic any time to reset your starting point.
+        </p>
+        <Link
+          href="/placement"
+          className="self-start text-sm font-medium text-zinc-900 underline underline-offset-4 dark:text-zinc-100"
+        >
+          Retake placement
+        </Link>
       </div>
     </main>
   );

@@ -1,9 +1,14 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getTodayFlashcards } from "@/app/actions/srs";
 import { TodaySession } from "@/components/srs/TodaySession";
 import { getPlacementBannerState } from "@/lib/placement/status";
+import { shouldRedirectToIntro } from "@/lib/onboarding/state";
 
 export default async function TodayPage() {
+  if (await shouldRedirectToIntro()) {
+    redirect("/onboarding");
+  }
   const todayShellClassName = "app-shell";
   const [result, placementBanner] = await Promise.all([
     getTodayFlashcards("es"),

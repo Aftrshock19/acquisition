@@ -45,6 +45,12 @@ export type UserSettingsRow = {
   show_definition_first: boolean;
   hide_translation_sentences: boolean;
   scheduler_variant: "baseline" | "adaptive";
+  has_seen_intro: boolean;
+  onboarding_completed_at: string | null;
+  onboarding_entry_mode?: "beginner_default" | "baseline" | "self_certified" | null;
+  self_certified_cefr_level?: "A1" | "A2" | "B1" | "B2" | "C1" | null;
+  placement_status?: string | null;
+  current_frontier_rank?: number | null;
   created_at: string;
   updated_at: string;
 };

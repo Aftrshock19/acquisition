@@ -259,6 +259,8 @@ function makeSettings(overrides: Partial<UserSettingsRow> = {}): UserSettingsRow
     show_definition_first: true,
     hide_translation_sentences: false,
     scheduler_variant: "baseline",
+    has_seen_intro: false,
+    onboarding_completed_at: null,
     created_at: new Date(0).toISOString(),
     updated_at: new Date(0).toISOString(),
     ...overrides,
