@@ -91,19 +91,21 @@ const bucketCoverage = BUCKETS.map((b) => ({
   coverage: coverageAt(b),
 }));
 
-// Dense curve sampled on a log-x scale, clamped to MAX_RANK so the plot is
-// bounded and only shows the [1, 5000] region we actually care about.
+// Dense rank-anchored curve clamped to MAX_RANK. We store (rank, coverage)
+// only — the runtime helper derives the on-screen x position from rank via
+// topNXPosition, so the curve and the marker always share a single source of
+// truth for the x mapping.
 const MAX_RANK = BUCKETS[BUCKETS.length - 1];
-const SAMPLE_COUNT = 80;
+const SAMPLE_COUNT = 120;
 const logMax = Math.log(MAX_RANK);
-const curve: Array<{ x: number; y: number }> = [];
+const curve: Array<{ rank: number; coverage: number }> = [];
+const seenRanks = new Set<number>();
 for (let i = 0; i < SAMPLE_COUNT; i++) {
   const t = i / (SAMPLE_COUNT - 1);
   const rank = Math.max(1, Math.round(Math.exp(t * logMax)));
-  curve.push({
-    x: Math.log(rank) / logMax,
-    y: coverageAt(rank),
-  });
+  if (seenRanks.has(rank)) continue;
+  seenRanks.add(rank);
+  curve.push({ rank, coverage: coverageAt(rank) });
 }
 
 const fileHeader = `/**
@@ -121,7 +123,10 @@ const fileHeader = `/**
  *   unique types:    ${ranked.length}
  */
 
-export type CoveragePoint = { readonly x: number; readonly y: number };
+export type CoverageRankPoint = {
+  readonly rank: number;
+  readonly coverage: number;
+};
 
 export type CoverageBucket = {
   readonly bucket: number;
@@ -143,10 +148,15 @@ export const COVERAGE_BUCKETS: readonly CoverageBucket[] = ${JSON.stringify(
   2,
 )} as const;
 
-export const COVERAGE_CURVE: readonly CoveragePoint[] = ${JSON.stringify(
+/**
+ * Monotone-increasing (rank, coverage) samples from the app's reading
+ * corpus. The runtime helper computes the on-screen x position from rank
+ * so the curve and the marker share a single x mapping.
+ */
+export const COVERAGE_CURVE: readonly CoverageRankPoint[] = ${JSON.stringify(
   curve.map((p) => ({
-    x: Number(p.x.toFixed(6)),
-    y: Number(p.y.toFixed(6)),
+    rank: p.rank,
+    coverage: Number(p.coverage.toFixed(6)),
   })),
   null,
   2,

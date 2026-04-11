@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   COVERAGE_CORPUS_STATS,
+  COVERAGE_MAX_RANK,
   TOP_N_BUCKETS,
   bucketXPosition,
   coverageCurveSamples,
   coverageFractionForBucket,
+  coverageFractionForTopN,
   coverageGraphState,
+  topNFromXPosition,
+  topNXPosition,
 } from "./coverageGraph";
 
 describe("coverage graph helper", () => {
@@ -105,7 +109,7 @@ describe("coverage graph helper", () => {
     expect(coverageCurveSamples(0).length).toBe(2);
   });
 
-  it("bucketXPosition grows with bucket, uses log scale, stays in (0,1]", () => {
+  it("bucketXPosition grows with bucket, is non-linear, stays in (0,1]", () => {
     const positions = TOP_N_BUCKETS.map(bucketXPosition);
     for (let i = 1; i < positions.length; i++) {
       expect(positions[i]).toBeGreaterThan(positions[i - 1]);
@@ -114,23 +118,57 @@ describe("coverage graph helper", () => {
       expect(p).toBeGreaterThan(0);
       expect(p).toBeLessThanOrEqual(1);
     }
-    // Log scale keeps the first bucket well away from 0 (linear would give 0.02).
-    expect(bucketXPosition(100)).toBeGreaterThan(0.4);
+    // Softened mapping still pulls top-100 well above the linear position
+    // (100/5000 = 0.02) without being as aggressive as pure log.
+    expect(bucketXPosition(100)).toBeGreaterThan(0.3);
+    expect(bucketXPosition(100)).toBeLessThan(0.55);
     expect(bucketXPosition(5000)).toBeCloseTo(1);
   });
 
-  it("interpolating the curve at a bucket's x is close to its coverage fraction", () => {
-    // The curve is sampled on log-rank; nearest precomputed sample may not
-    // fall exactly on a bucket's log-rank position, so allow a small delta.
+  it("topNXPosition stays within [0,1] and is monotone", () => {
+    const ranks = [1, 10, 50, 100, 250, 500, 1000, 2000, 3500, 5000];
+    let prev = -Infinity;
+    for (const r of ranks) {
+      const x = topNXPosition(r);
+      expect(x).toBeGreaterThanOrEqual(0);
+      expect(x).toBeLessThanOrEqual(1);
+      expect(x).toBeGreaterThanOrEqual(prev);
+      prev = x;
+    }
+    expect(topNXPosition(1)).toBeCloseTo(0);
+    expect(topNXPosition(COVERAGE_MAX_RANK)).toBeCloseTo(1);
+  });
+
+  it("topNFromXPosition inverts topNXPosition for representative ranks", () => {
+    const ranks = [10, 50, 100, 250, 500, 1000, 2000, 3500, 5000];
+    for (const r of ranks) {
+      const x = topNXPosition(r);
+      const round = topNFromXPosition(x);
+      // Rounding + log inversion loses a little precision; 2% is plenty.
+      expect(Math.abs(round - r) / r).toBeLessThan(0.02);
+    }
+  });
+
+  it("interpolating the curve at a bucket's x matches its coverage fraction", () => {
+    // Curve and marker now share the same x mapping, so interpolation at
+    // a bucket's softened x should land on the precomputed bucket value.
+    const samples = coverageCurveSamples(200);
     for (const b of TOP_N_BUCKETS) {
       const targetX = bucketXPosition(b);
-      const samples = coverageCurveSamples(200);
       const nearest = samples.reduce((best, s) =>
         Math.abs(s.x - targetX) < Math.abs(best.x - targetX) ? s : best,
       );
       expect(Math.abs(nearest.y - coverageFractionForBucket(b))).toBeLessThan(
-        0.05,
+        0.03,
       );
+    }
+  });
+
+  it("coverageFractionForTopN agrees with bucket values at preset ranks", () => {
+    for (const b of TOP_N_BUCKETS) {
+      expect(
+        Math.abs(coverageFractionForTopN(b) - coverageFractionForBucket(b)),
+      ).toBeLessThan(0.03);
     }
   });
 });

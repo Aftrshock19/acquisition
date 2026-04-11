@@ -21,12 +21,14 @@ import {
   COVERAGE_BUCKETS,
   COVERAGE_CORPUS_STATS,
   COVERAGE_CURVE,
-  type CoveragePoint,
 } from "./coverageData";
+
+export type CoveragePoint = { readonly x: number; readonly y: number };
 
 export const TOP_N_BUCKETS = [100, 500, 1000, 2000, 5000] as const;
 export type TopNBucket = (typeof TOP_N_BUCKETS)[number];
 
+export const COVERAGE_MIN_RANK = 10;
 export const COVERAGE_MAX_RANK = 5000;
 
 export { COVERAGE_CORPUS_STATS };
@@ -42,11 +44,11 @@ export type CoverageGraphState = {
 };
 
 const CAPTIONS: Record<TopNBucket, string> = {
-  100: "These very common words already unlock a noticeable part of simple Spanish.",
-  500: "With 500 common words, a lot more of everyday text starts to look familiar.",
-  1000: "At around 1,000 common words, you start recognising something in almost every sentence.",
-  2000: "By 2,000, many everyday texts feel much more followable, even with some gaps.",
-  5000: "By 5,000, you can recognise a large share of typical text — but each extra word adds less than the early ones did.",
+  100: "A small start changes a lot. Very quickly, Spanish stops feeling completely unknown.",
+  500: "You are no longer staring at a wall of text. Familiar words begin anchoring what you read.",
+  1000: "At this point, you can often hold onto the message even when some words are missing.",
+  2000: "More and more of each text starts connecting. This is where reading begins to feel genuinely rewarding.",
+  5000: "You have built strong momentum. Much more of real Spanish is now accessible, and progress keeps compounding.",
 };
 
 const BUCKET_COVERAGE: Record<TopNBucket, number> = (() => {
@@ -83,34 +85,37 @@ export function coverageGraphState(bucket: TopNBucket): CoverageGraphState {
 }
 
 /**
- * Samples along the estimated-coverage curve for SVG rendering, taken from
- * the precomputed build-time dataset. X is log-scaled rank in [0,1]; Y is
- * estimated text coverage in [0,1]. Monotone non-decreasing on both axes.
- * If the caller asks for a different sample count than the stored curve,
- * we resample by linear interpolation on x.
+ * Samples along the estimated-coverage curve for SVG rendering. The stored
+ * dataset is rank-anchored; we project each (rank, coverage) pair to screen
+ * space via topNXPosition, so the curve and any marker drawn with the same
+ * helper stay in exact agreement. X in [0,1], Y in [0,1], monotone on both.
+ * If the caller asks for fewer/more samples than are stored, we resample by
+ * linear interpolation on the softened x axis.
  */
 export function coverageCurveSamples(
   sampleCount = COVERAGE_CURVE.length,
 ): CoveragePoint[] {
   if (sampleCount < 2) sampleCount = 2;
-  if (sampleCount === COVERAGE_CURVE.length) {
-    return COVERAGE_CURVE.map((p) => ({ x: p.x, y: p.y }));
-  }
+  const base: CoveragePoint[] = COVERAGE_CURVE.map((p) => ({
+    x: topNXPosition(p.rank),
+    y: p.coverage,
+  }));
+  if (sampleCount === base.length) return base;
   const out: CoveragePoint[] = [];
   for (let i = 0; i < sampleCount; i++) {
     const t = i / (sampleCount - 1);
-    out.push({ x: t, y: interpolateCurveY(t) });
+    out.push({ x: t, y: interpolateCurveYFrom(base, t) });
   }
   return out;
 }
 
-function interpolateCurveY(x: number): number {
-  if (x <= COVERAGE_CURVE[0].x) return COVERAGE_CURVE[0].y;
-  const last = COVERAGE_CURVE[COVERAGE_CURVE.length - 1];
+function interpolateCurveYFrom(base: CoveragePoint[], x: number): number {
+  if (x <= base[0].x) return base[0].y;
+  const last = base[base.length - 1];
   if (x >= last.x) return last.y;
-  for (let i = 1; i < COVERAGE_CURVE.length; i++) {
-    const a = COVERAGE_CURVE[i - 1];
-    const b = COVERAGE_CURVE[i];
+  for (let i = 1; i < base.length; i++) {
+    const a = base[i - 1];
+    const b = base[i];
     if (x <= b.x) {
       const span = b.x - a.x;
       const t = span <= 0 ? 0 : (x - a.x) / span;
@@ -120,11 +125,84 @@ function interpolateCurveY(x: number): number {
   return last.y;
 }
 
+function interpolateCurveY(x: number): number {
+  return interpolateCurveYFrom(
+    COVERAGE_CURVE.map((p) => ({ x: topNXPosition(p.rank), y: p.coverage })),
+    x,
+  );
+}
+
 /**
  * Where (on 0..1) the selected bucket sits along the log-scaled x-axis.
  * Matches the x-coordinate used when sampling the curve so the marker
  * lands exactly on it.
  */
 export function bucketXPosition(bucket: TopNBucket): number {
-  return Math.log(bucket) / Math.log(COVERAGE_MAX_RANK);
+  return topNXPosition(bucket);
+}
+
+/** Log-scaled x-position for any top-N value in [1, COVERAGE_MAX_RANK]. */
+const X_SOFTENING = 2.5;
+
+export function topNXPosition(topN: number): number {
+  const clamped = Math.max(1, Math.min(COVERAGE_MAX_RANK, topN));
+  const raw = Math.log(clamped) / Math.log(COVERAGE_MAX_RANK);
+  return Math.pow(raw, X_SOFTENING);
+}
+
+/**
+ * Estimated coverage fraction for any top-N (not just the preset buckets),
+ * interpolated from the precomputed curve. Intended for driving a continuous
+ * slider. Clamps topN to [1, COVERAGE_MAX_RANK].
+ */
+export function coverageFractionForTopN(topN: number): number {
+  return interpolateCurveY(topNXPosition(topN));
+}
+
+/** Nearest-by-log-distance preset bucket for a free-form top-N value. */
+export function nearestBucket(topN: number): TopNBucket {
+  const x = topNXPosition(topN);
+  let best: TopNBucket = TOP_N_BUCKETS[0];
+  let bestDist = Infinity;
+  for (const b of TOP_N_BUCKETS) {
+    const d = Math.abs(bucketXPosition(b) - x);
+    if (d < bestDist) {
+      bestDist = d;
+      best = b;
+    }
+  }
+  return best;
+}
+
+export type TopNGraphState = {
+  topN: number;
+  caption: string;
+  coverageFraction: number;
+  coveragePercent: number;
+  nearestBucket: TopNBucket;
+};
+
+/**
+ * Continuous version of coverageGraphState: works for any top-N, picks the
+ * most fitting preset caption by nearest log-rank distance, and returns
+ * interpolated coverage.
+ */
+
+export function topNGraphState(topN: number): TopNGraphState {
+  const clamped = Math.max(1, Math.min(COVERAGE_MAX_RANK, Math.round(topN)));
+  const frac = coverageFractionForTopN(clamped);
+  const bucket = nearestBucket(clamped);
+  return {
+    topN: clamped,
+    caption: CAPTIONS[bucket],
+    coverageFraction: frac,
+    coveragePercent: Math.round(frac * 100),
+    nearestBucket: bucket,
+  };
+}
+
+export function topNFromXPosition(x: number): number {
+  const clamped = Math.max(0, Math.min(1, x));
+  const raw = Math.pow(clamped, 1 / X_SOFTENING);
+  return Math.round(Math.exp(raw * Math.log(COVERAGE_MAX_RANK)));
 }

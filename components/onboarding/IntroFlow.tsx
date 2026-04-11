@@ -17,12 +17,13 @@ import {
   type StartBranchStep,
 } from "@/lib/onboarding/introNavigation";
 import {
+  COVERAGE_MAX_RANK,
   TOP_N_BUCKETS,
-  bucketXPosition,
   coverageCurveSamples,
-  coverageFractionForBucket,
-  coverageGraphState,
-  type TopNBucket,
+  coverageFractionForTopN,
+  topNFromXPosition,
+  topNGraphState,
+  topNXPosition,
 } from "@/lib/onboarding/coverageGraph";
 
 export { INTRO_PAGE_COUNT };
@@ -65,7 +66,7 @@ export function IntroFlow({ initialPage = 0 }: IntroFlowProps) {
         setError(res.error);
         return;
       }
-      router.push("/today");
+      router.push("/");
     });
   };
 
@@ -92,7 +93,7 @@ export function IntroFlow({ initialPage = 0 }: IntroFlowProps) {
         setError(res.error);
         return;
       }
-      router.push("/today");
+      router.push("/");
     });
   };
 
@@ -317,9 +318,12 @@ function StepLine({
 }
 
 /* ─── Screen 5 ────────────────────────────────────────────────────────── */
+const SLIDER_STEPS = 1000;
+
 function FrequencyGraphPage() {
-  const [bucket, setBucket] = useState<TopNBucket>(500);
-  const state = coverageGraphState(bucket);
+  const [topN, setTopN] = useState<number>(500);
+  const state = topNGraphState(topN);
+  const sliderValue = Math.round(topNXPosition(topN) * SLIDER_STEPS);
   return (
     <div className="flex flex-col gap-5" data-testid="intro-frequency-page">
       <h1 className="app-title">How much text opens up as you learn more words</h1>
@@ -329,33 +333,52 @@ function FrequencyGraphPage() {
         far sooner.
       </p>
 
-      <CoverageSvg bucket={bucket} />
+      <CoverageSvg topN={topN} />
 
-      <div
-        className="flex flex-wrap gap-2"
-        role="radiogroup"
-        aria-label="How many common words you know"
-      >
-        {TOP_N_BUCKETS.map((b) => {
-          const active = b === bucket;
-          return (
-            <button
-              key={b}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              onClick={() => setBucket(b)}
-              className={
-                active
-                  ? "rounded-full bg-zinc-900 px-4 py-1.5 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
-                  : "rounded-full border border-zinc-300 px-4 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              }
-              data-testid={`intro-freq-bucket-${b}`}
-            >
-              Top {b.toLocaleString()}
-            </button>
-          );
-        })}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-baseline justify-between">
+          <label
+            htmlFor="intro-freq-slider"
+            className="text-sm font-medium text-zinc-700 dark:text-zinc-300"
+          >
+            Common words you know
+          </label>
+          <span className="text-sm tabular-nums text-zinc-900 dark:text-zinc-100">
+            Top {topN.toLocaleString()}
+          </span>
+        </div>
+        <input
+          id="intro-freq-slider"
+          type="range"
+          min={0}
+          max={SLIDER_STEPS}
+          step={1}
+          value={sliderValue}
+          onChange={(e) =>
+            setTopN(topNFromXPosition(Number(e.target.value) / SLIDER_STEPS))
+          }
+          aria-label="How many common words you know"
+          aria-valuemin={1}
+          aria-valuemax={COVERAGE_MAX_RANK}
+          aria-valuenow={topN}
+          aria-valuetext={`Top ${topN.toLocaleString()}`}
+          className="w-full accent-zinc-900 dark:accent-zinc-100"
+          data-testid="intro-freq-slider"
+        />
+        <div className="relative h-3 px-0.5 text-[10px] tabular-nums text-zinc-500">
+          {TOP_N_BUCKETS.map((b) => {
+            const leftPct = topNXPosition(b) * 100;
+            return (
+              <span
+                key={b}
+                className="absolute -translate-x-1/2"
+                style={{ left: `${leftPct}%` }}
+              >
+                {b.toLocaleString()}
+              </span>
+            );
+          })}
+        </div>
       </div>
 
       <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
@@ -383,12 +406,12 @@ function FrequencyGraphPage() {
   );
 }
 
-function CoverageSvg({ bucket }: { bucket: TopNBucket }) {
-  const width = 320;
-  const height = 160;
-  const padX = 28;
-  const padTop = 12;
-  const padBottom = 24;
+function CoverageSvg({ topN }: { topN: number }) {
+  const width = 520;
+  const height = 200;
+  const padX = 32;
+  const padTop = 14;
+  const padBottom = 28;
   const samples = coverageCurveSamples(80);
   const innerW = width - padX * 2;
   const innerH = height - padTop - padBottom;
@@ -406,8 +429,8 @@ function CoverageSvg({ bucket }: { bucket: TopNBucket }) {
     .join(" ");
 
   const { px: markerX, py: markerY } = project(
-    bucketXPosition(bucket),
-    coverageFractionForBucket(bucket),
+    topNXPosition(topN),
+    coverageFractionForTopN(topN),
   );
   const baselineY = padTop + innerH;
   const gridYs = [0, 0.25, 0.5, 0.75, 1];
@@ -416,10 +439,10 @@ function CoverageSvg({ bucket }: { bucket: TopNBucket }) {
     <div className="overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        className="h-40 w-full"
+        className="block h-auto w-full"
         role="img"
-        aria-label={`Estimated text coverage from knowing the top ${bucket.toLocaleString()} most common words: about ${Math.round(
-          coverageFractionForBucket(bucket) * 100,
+        aria-label={`Estimated text coverage from knowing the top ${topN.toLocaleString()} most common words: about ${Math.round(
+          coverageFractionForTopN(topN) * 100,
         )} percent`}
       >
         <defs>

@@ -4,15 +4,12 @@ import { revalidatePath } from "next/cache";
 import { getSupabaseServerContext } from "@/lib/supabase/server";
 import {
   BEGINNER_DEFAULT_FRONTIER,
-  CEFR_LEVELS,
   cefrOption,
   isCefrLevel,
   type CefrLevel,
 } from "@/lib/onboarding/cefr";
 
 export type MarkIntroSeenResult = { ok: true } | { ok: false; error: string };
-export { CEFR_LEVELS };
-export type { CefrLevel };
 
 /**
  * Marks the first-run introduction as seen for the current user.
