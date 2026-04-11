@@ -22,6 +22,11 @@ import * as path from "path";
 
 import { bandForRank, MAX_TRACKED_RANK } from "../lib/placement/bands";
 import { CHECKPOINTS } from "../lib/placement/checkpoints";
+import { classifyCognate } from "../lib/placement/cognate";
+import {
+  classifyMorphology,
+  effectiveDiagnosticRank,
+} from "../lib/placement/morphology";
 
 config({ path: path.resolve(__dirname, "..", ".env.local") });
 config({ path: path.resolve(__dirname, "..", ".env") });
@@ -224,6 +229,20 @@ async function main() {
     const bandEnd = word.rank;
     const sentence = extractSentence(word.example_sentence);
 
+    const cognate = classifyCognate(word.lemma, gloss);
+    const morphology = classifyMorphology(word.lemma, word.pos);
+    const lemmaRank = word.rank; // source words table already ranks by lemma.
+    const effRank = effectiveDiagnosticRank(lemmaRank, morphology);
+
+    const fairnessFields = {
+      cognate_class: cognate.cognateClass,
+      cognate_similarity: Number(cognate.similarity.toFixed(3)),
+      morphology_class: morphology.morphologyClass,
+      is_inflected_form: morphology.isInflectedForm,
+      lemma_rank: lemmaRank,
+      effective_diagnostic_rank: effRank,
+    };
+
     // Recognition item
     rows.push({
       language: lang,
@@ -243,6 +262,7 @@ async function main() {
       ambiguity_flag: false,
       quality_status: "approved",
       source: "auto_from_words",
+      ...fairnessFields,
     });
 
     // Recall item (simple meaning recall)
@@ -264,10 +284,57 @@ async function main() {
       ambiguity_flag: false,
       quality_status: "approved",
       source: "auto_from_words",
+      ...fairnessFields,
     });
   }
 
   console.log(`[placement] generated ${rows.length} candidate item rows`);
+
+  // Composition report: how many strong/weak/non-cognate and how many
+  // base/marked items per checkpoint. The diagnostic needs non-cognate base
+  // forms available across the full range; this report flags bare spots.
+  const compositionByCp = new Map<
+    number,
+    {
+      total: number;
+      strong: number;
+      weak: number;
+      non: number;
+      base: number;
+      marked: number;
+    }
+  >();
+  for (const r of rows) {
+    const rank = r.frequency_rank as number;
+    const cpIdx = nearestCpIndex(rank);
+    const entry = compositionByCp.get(cpIdx) ?? {
+      total: 0,
+      strong: 0,
+      weak: 0,
+      non: 0,
+      base: 0,
+      marked: 0,
+    };
+    entry.total += 1;
+    const c = r.cognate_class as string;
+    if (c === "strong_cognate") entry.strong += 1;
+    else if (c === "weak_cognate") entry.weak += 1;
+    else entry.non += 1;
+    const m = r.morphology_class as string;
+    if (m === "irregular_or_marked_inflection") entry.marked += 1;
+    else if (m === "base") entry.base += 1;
+    compositionByCp.set(cpIdx, entry);
+  }
+  for (const cp of CHECKPOINTS) {
+    const e = compositionByCp.get(cp.index);
+    if (!e) continue;
+    const pct = (n: number) => `${Math.round((n / e.total) * 100)}%`;
+    console.log(
+      `[placement] cp ${cp.index} (~${cp.center}): ${e.total} rows ` +
+        `| non ${pct(e.non)} weak ${pct(e.weak)} strong ${pct(e.strong)} ` +
+        `| base ${pct(e.base)} marked ${pct(e.marked)}`,
+    );
+  }
 
   const chunks = chunk(rows, 500);
   let inserted = 0;
@@ -331,6 +398,23 @@ function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
+}
+
+function nearestCpIndex(rank: number): number {
+  if (rank <= CHECKPOINTS[0].center) return 0;
+  const top = CHECKPOINTS[CHECKPOINTS.length - 1];
+  if (rank >= top.center) return top.index;
+  const t = Math.log(rank);
+  let bestIdx = 0;
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const c of CHECKPOINTS) {
+    const d = Math.abs(Math.log(c.center) - t);
+    if (d < bestDist) {
+      bestDist = d;
+      bestIdx = c.index;
+    }
+  }
+  return bestIdx;
 }
 
 main().catch((e) => {

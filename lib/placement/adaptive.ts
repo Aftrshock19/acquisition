@@ -1,18 +1,38 @@
 /**
- * Adaptive placement engine.
+ * Adaptive placement engine — v3 (floor-based, cognate/morphology fair).
  *
- * Two phases:
- *   1. **Coarse routing.** Hop between log-spaced checkpoints by ±coarseJump
- *      indices based on whether the previous answer was correct, until both
- *      a confirmed comfortable checkpoint (`floorIdx`) and a struggling
- *      checkpoint (`ceilingIdx`) bracket the learner's frontier.
- *   2. **Local refinement.** Once the bracket is narrow, ask a couple more
- *      items inside it (one of which can be recall) to confirm.
+ * The old v2 engine advanced one checkpoint per correct answer with a
+ * coarse-jump of ±2. That let one lucky hit rocket a user upward, and made
+ * the test vulnerable to transparent cognates and rare inflected forms.
  *
- * Stops on whichever fires first after min items: precision_reached,
- * consecutive_wrong_ceiling, top_of_bank_reached, or max_items.
+ * v3 replaces single-item routing with **floor modules**. Each floor maps
+ * one-to-one to a checkpoint and runs for up to `itemsPerFloor` items (5
+ * default). Floors resolve with one of four outcomes:
  *
- * Pure functions only — no DB access. Caller wires this into a server action.
+ *   - cleared           (≥4/5 correct AND non-cognate support present, or
+ *                        5/5 on the top floor with ≥2 non-cognate correct)
+ *   - tentative_cleared (4/5 without non-cognate support; 4/5 on top floor)
+ *   - unresolved        (3/5 — hold at this level, don't climb)
+ *   - failed            (≤2/5, or mathematically impossible to reach 4/5)
+ *
+ * Routing rules:
+ *   - A floor in progress serves its next item at the same checkpoint.
+ *   - `cleared` / `tentative_cleared` ⇒ advance by exactly +1 checkpoint.
+ *   - `failed` ⇒ drop by exactly -1 checkpoint.
+ *   - `unresolved` ⇒ stop upward progression.
+ *   - No skipping in the lower/mid range; no coarse-jump anywhere.
+ *
+ * Stopping rules (any fires):
+ *   - precision_reached: the floor immediately above a cleared floor has
+ *     been failed or unresolved, producing a tight bracket.
+ *   - floor_failed_at_bottom: cp 0 failed with no cleared floor below.
+ *   - top_of_bank_reached: top floor cleared.
+ *   - consecutive_wrong_ceiling: config.consecutiveWrongStop in a row.
+ *   - max_items: config hard cap.
+ *
+ * Pure functions only — no DB. The caller supplies `PlacementResponseRecord`s
+ * whose `bandStart` / `bandEnd` already encode the intended checkpoint
+ * center (see app/actions/placement.ts for the round-trip).
  */
 
 import {
@@ -23,9 +43,14 @@ import {
   checkpointByIndex,
   nearestCheckpointIndex,
 } from "./checkpoints";
+import { lexicalWeightForCognate, type CognateClass } from "./cognate";
+import type { MorphologyClass } from "./morphology";
 import {
   DEFAULT_PLACEMENT_CONFIG,
   type AdaptivePlacementEstimate,
+  type FloorOutcome,
+  type FloorState,
+  type FrontierEvidenceQuality,
   type PlacementAlgorithmConfig,
   type PlacementEstimateStatus,
   type PlacementItemType,
@@ -34,65 +59,158 @@ import {
   type PlacementStopReason,
 } from "./types";
 
-// ── Derived state from response history ────────────────────
+// ── Floor construction ────────────────────────────────────
 
-type CheckpointStat = {
-  index: number;
-  answered: number;
-  correct: number;
-};
-
-function checkpointStats(
+/**
+ * Walk the response history in order and produce one FloorState per
+ * contiguous run at the same checkpoint. A user who goes 4→5→4 produces
+ * three separate floor modules so that each visit is scored on its own
+ * merits — but in practice the engine never re-opens a closed floor
+ * (repeat visits only happen when walking downward after a failure).
+ */
+function buildFloors(
   responses: readonly PlacementResponseRecord[],
-): Map<number, CheckpointStat> {
-  const m = new Map<number, CheckpointStat>();
+  config: PlacementAlgorithmConfig,
+): FloorState[] {
+  const floors: FloorState[] = [];
+  let current: FloorState | null = null;
   for (const r of responses) {
-    const center = Math.round((r.bandStart + r.bandEnd) / 2);
-    const idx = nearestCheckpointIndex(center);
-    const cur = m.get(idx) ?? { index: idx, answered: 0, correct: 0 };
-    cur.answered += 1;
-    if (r.isCorrect) cur.correct += 1;
-    m.set(idx, cur);
+    const cpIdx = r.floorIndex ?? nearestCheckpointIndex(
+      Math.round((r.bandStart + r.bandEnd) / 2),
+    );
+    // Start a new floor when the checkpoint changes, when no floor is open,
+    // or when the current floor has already hit its target item count. We
+    // keep appending same-cp items into an already-resolved floor (e.g. the
+    // 5th item after an early 4/5 clear) so fairness rules can downgrade the
+    // outcome as more evidence arrives.
+    const needNewFloor =
+      current === null ||
+      current.checkpointIndex !== cpIdx ||
+      current.itemsServed >= config.itemsPerFloor;
+    let floor: FloorState;
+    if (needNewFloor) {
+      floor = {
+        checkpointIndex: cpIdx,
+        floorSequence: floors.length,
+        itemsServed: 0,
+        correct: 0,
+        weightedTotal: 0,
+        weightedCorrect: 0,
+        nonCognateServed: 0,
+        nonCognateCorrect: 0,
+        markedFormsServed: 0,
+        markedFormsCorrect: 0,
+        outcome: "in_progress",
+      };
+      floors.push(floor);
+      current = floor;
+    } else {
+      floor = current!;
+    }
+    // Fallback weights for legacy rows without classifier metadata.
+    const cognateClass: CognateClass = r.cognateClass ?? "non_cognate";
+    const morphClass: MorphologyClass = r.morphologyClass ?? "base";
+    const lexW = r.lexicalWeight ?? lexicalWeightForCognate(cognateClass);
+    const morphW = r.morphologyWeight ?? 1.0;
+    const w = lexW * morphW;
+    floor.itemsServed += 1;
+    floor.weightedTotal += w;
+    if (r.isCorrect) {
+      floor.correct += 1;
+      floor.weightedCorrect += w;
+    }
+    if (cognateClass === "non_cognate") {
+      floor.nonCognateServed += 1;
+      if (r.isCorrect) floor.nonCognateCorrect += 1;
+    }
+    if (morphClass === "irregular_or_marked_inflection") {
+      floor.markedFormsServed += 1;
+      if (r.isCorrect) floor.markedFormsCorrect += 1;
+    }
+    floor.outcome = resolveOutcome(floor, config);
   }
-  return m;
+  return floors;
 }
 
+/**
+ * Compute a floor's outcome given its current item tally. Called repeatedly
+ * as items arrive; safe to invoke when itemsServed < itemsPerFloor.
+ */
+export function resolveOutcome(
+  f: Omit<FloorState, "outcome"> & { outcome?: FloorOutcome },
+  config: PlacementAlgorithmConfig = DEFAULT_PLACEMENT_CONFIG,
+): FloorOutcome {
+  const target = config.itemsPerFloor;
+  const served = f.itemsServed;
+  const correct = f.correct;
+  const wrong = served - correct;
+  const isTop = f.checkpointIndex === TOP_CHECKPOINT_INDEX;
+  const nonCognateSupport =
+    f.nonCognateServed === 0 || f.nonCognateCorrect >= 1;
+  const topNonCognateSupport = f.nonCognateCorrect >= config.topFloorMinNonCognateCorrect;
+
+  // Early fail: too many wrong to ever reach the clear threshold.
+  if (correct + (target - served) < config.tentativeThreshold) {
+    return "failed";
+  }
+
+  // Early clear: ≥ clearThreshold correct already and not top floor.
+  if (!isTop && correct >= config.clearThreshold) {
+    return nonCognateSupport ? "cleared" : "tentative_cleared";
+  }
+
+  // Top floor early clear: needs full sweep, can only resolve at target.
+  if (isTop && served >= target) {
+    if (correct >= config.clearThresholdTop && topNonCognateSupport) {
+      return "cleared";
+    }
+    if (correct >= config.clearThreshold) {
+      return "tentative_cleared";
+    }
+    if (correct >= config.tentativeThreshold) {
+      return "unresolved";
+    }
+    return "failed";
+  }
+
+  // Still collecting evidence.
+  if (served < target) return "in_progress";
+
+  // Floor complete (non-top path).
+  if (correct >= config.clearThreshold) {
+    return nonCognateSupport ? "cleared" : "tentative_cleared";
+  }
+  if (correct >= config.tentativeThreshold) return "unresolved";
+  // wrong >= target - tentativeThreshold + 1 ⇒ failed handled above.
+  void wrong;
+  return "failed";
+}
+
+// ── Bracket derivation from floor outcomes ────────────────
+
 type Bracket = {
-  /** Highest checkpoint index where the learner has shown comfort. -1 if none. */
   floorIdx: number;
-  /** Lowest checkpoint index where the learner has clearly failed. TOP+1 if none. */
   ceilingIdx: number;
 };
 
 const NO_BRACKET: Bracket = { floorIdx: -1, ceilingIdx: TOP_CHECKPOINT_INDEX + 1 };
 
-function deriveBracket(stats: Map<number, CheckpointStat>): Bracket {
+function deriveBracket(floors: readonly FloorState[]): Bracket {
   let floorIdx = -1;
   let ceilingIdx = TOP_CHECKPOINT_INDEX + 1;
-
-  // Sort checkpoint indices ascending so we walk from easy → hard.
-  const indices = [...stats.keys()].sort((a, b) => a - b);
-  for (const idx of indices) {
-    const s = stats.get(idx)!;
-    const accuracy = s.correct / s.answered;
-    // Comfortable: every answer at this checkpoint is correct.
-    // (Single-item checkpoints are common in coarse phase.)
-    if (s.correct === s.answered && idx > floorIdx) {
-      floorIdx = idx;
+  for (const f of floors) {
+    if (f.outcome === "cleared" || f.outcome === "tentative_cleared") {
+      if (f.checkpointIndex > floorIdx) floorIdx = f.checkpointIndex;
     }
-    // Struggling: at least one wrong AND accuracy ≤ 0.5.
-    if (s.answered - s.correct >= 1 && accuracy <= 0.5 && idx < ceilingIdx) {
-      ceilingIdx = idx;
+    if (f.outcome === "failed" || f.outcome === "unresolved") {
+      if (f.checkpointIndex < ceilingIdx) ceilingIdx = f.checkpointIndex;
     }
   }
-
-  // Bracket sanity: if floor crossed ceiling (oscillation), pin floor below ceiling.
-  if (floorIdx >= ceilingIdx) {
-    floorIdx = ceilingIdx - 1;
-  }
-
+  if (floorIdx >= ceilingIdx) floorIdx = ceilingIdx - 1;
   return { floorIdx, ceilingIdx };
 }
+
+// ── Consecutive wrong (kept for ceiling-stop rule) ────────
 
 function trailingConsecutiveWrong(
   responses: readonly PlacementResponseRecord[],
@@ -124,7 +242,6 @@ function maxConsecutiveWrong(
 // ── planNextItem ───────────────────────────────────────────
 
 export type PlanContext = {
-  /** Optional prior checkpoint index from a previous run or settings hint. */
   priorCheckpointIndex?: number | null;
 };
 
@@ -134,19 +251,26 @@ export function planNextItem(
   context: PlanContext = {},
 ): PlacementPlan {
   const itemsAnswered = responses.length;
-  const stats = checkpointStats(responses);
-  const bracket = itemsAnswered === 0 ? NO_BRACKET : deriveBracket(stats);
+  const floors = buildFloors(responses, config);
+  const bracket = floors.length === 0 ? NO_BRACKET : deriveBracket(floors);
   const consecWrong = trailingConsecutiveWrong(responses);
   const recallAnswered = responses.filter((r) => r.itemType === "recall").length;
-
   const remainingBudget = Math.max(0, config.maxItems - itemsAnswered);
+
+  const lastFloor = floors[floors.length - 1] ?? null;
+  const currentFloorItemsServed = lastFloor && lastFloor.outcome === "in_progress"
+    ? lastFloor.itemsServed
+    : 0;
+  const currentFloorSequence = lastFloor?.floorSequence ?? null;
 
   // ── Stopping rules ──────────────────────────────────────
   const stopDecision = decideStop({
     itemsAnswered,
+    floors,
     bracket,
     consecWrong,
     config,
+    lastFloor,
   });
 
   if (stopDecision.shouldStop) {
@@ -162,15 +286,16 @@ export function planNextItem(
       reason: stopDecision.reason,
       shouldStop: true,
       stopReason: stopDecision.stopReason,
+      currentFloorSequence,
+      currentFloorItemsServed,
+      floors,
     };
   }
 
   // ── Pick next checkpoint ────────────────────────────────
   const nextIdx = pickNextCheckpoint({
-    itemsAnswered,
-    bracket,
-    stats,
-    config,
+    floors,
+    lastFloor,
     priorIdx: context.priorCheckpointIndex ?? null,
   });
 
@@ -182,9 +307,7 @@ export function planNextItem(
   const inRefinement = bracketGap !== null && bracketGap <= 2;
   const stage = inRefinement ? "refine" : "coarse";
 
-  // Reserve a couple of recall items for the refinement phase, only after
-  // the bracket has tightened, so the harder modality probes the *frontier*
-  // rather than waste questions during routing.
+  // Reserve recall items for the refinement phase and near the frontier.
   const itemType: PlacementItemType =
     inRefinement && recallAnswered < config.recallItemCount && itemsAnswered >= config.minItems - 2
       ? "recall"
@@ -199,26 +322,53 @@ export function planNextItem(
       bracket.ceilingIdx <= TOP_CHECKPOINT_INDEX ? bracket.ceilingIdx : null,
     itemsAnswered,
     remainingBudget,
-    reason:
-      itemsAnswered === 0
-        ? `cold start at checkpoint ${nextIdx} (rank ${CHECKPOINTS[nextIdx].center})`
-        : inRefinement
-          ? `refining bracket [${bracket.floorIdx},${bracket.ceilingIdx}] → ${nextIdx}`
-          : `coarse routing → ${nextIdx} (floor=${bracket.floorIdx}, ceil=${bracket.ceilingIdx})`,
+    reason: buildReason({ floors, lastFloor, nextIdx, inRefinement, itemsAnswered }),
     shouldStop: false,
     stopReason: "in_progress",
+    currentFloorSequence: lastFloor?.outcome === "in_progress"
+      ? currentFloorSequence
+      : floors.length, // next served item opens a new floor
+    currentFloorItemsServed,
+    floors,
   };
+}
+
+function buildReason(args: {
+  floors: readonly FloorState[];
+  lastFloor: FloorState | null;
+  nextIdx: number;
+  inRefinement: boolean;
+  itemsAnswered: number;
+}): string {
+  if (args.itemsAnswered === 0) {
+    return `cold start at checkpoint ${args.nextIdx} (rank ${CHECKPOINTS[args.nextIdx].center})`;
+  }
+  if (args.lastFloor?.outcome === "in_progress") {
+    return `floor ${args.lastFloor.checkpointIndex} in progress (${args.lastFloor.correct}/${args.lastFloor.itemsServed})`;
+  }
+  if (args.lastFloor) {
+    const direction =
+      args.nextIdx > args.lastFloor.checkpointIndex
+        ? "up"
+        : args.nextIdx < args.lastFloor.checkpointIndex
+          ? "down"
+          : "hold";
+    return `floor ${args.lastFloor.checkpointIndex} → ${args.lastFloor.outcome}; step ${direction} to ${args.nextIdx}`;
+  }
+  return `next floor ${args.nextIdx}`;
 }
 
 // ── Stop decision ──────────────────────────────────────────
 
 function decideStop(args: {
   itemsAnswered: number;
+  floors: readonly FloorState[];
   bracket: Bracket;
   consecWrong: number;
   config: PlacementAlgorithmConfig;
+  lastFloor: FloorState | null;
 }): { shouldStop: boolean; stopReason: PlacementStopReason; reason: string } {
-  const { itemsAnswered, bracket, consecWrong, config } = args;
+  const { itemsAnswered, floors, bracket, consecWrong, config, lastFloor } = args;
 
   if (itemsAnswered >= config.maxItems) {
     return {
@@ -228,14 +378,9 @@ function decideStop(args: {
     };
   }
 
-  // Below the minimum, we never stop. This guarantees we administer enough
-  // items to support the precision/ceiling rules below.
-  if (itemsAnswered < config.minItems) {
-    return { shouldStop: false, stopReason: "in_progress", reason: "below minItems" };
-  }
-
-  // Ceiling rule: 5 consecutive wrong after the warm-up.
-  if (consecWrong >= config.consecutiveWrongStop) {
+  // Consecutive wrong ceiling — still a useful safety net and applies any
+  // time after minItems is satisfied.
+  if (itemsAnswered >= config.minItems && consecWrong >= config.consecutiveWrongStop) {
     return {
       shouldStop: true,
       stopReason: "consecutive_wrong_ceiling",
@@ -243,20 +388,48 @@ function decideStop(args: {
     };
   }
 
-  // Top-of-bank: cleared the highest checkpoint and never failed → no
-  // ceiling exists. Reporting "exact rank" here is forbidden by the spec.
-  if (
-    bracket.floorIdx === TOP_CHECKPOINT_INDEX &&
-    bracket.ceilingIdx > TOP_CHECKPOINT_INDEX
-  ) {
+  // Top-of-bank cleared.
+  const topFloor = floors.find(
+    (f) => f.checkpointIndex === TOP_CHECKPOINT_INDEX && f.outcome === "cleared",
+  );
+  if (topFloor) {
     return {
       shouldStop: true,
       stopReason: "top_of_bank_reached",
-      reason: "cleared top checkpoint with no failures",
+      reason: "top floor cleared",
     };
   }
 
-  // Precision: floor and ceiling exist and the gap between them is tight.
+  // Below minItems we keep going unless a *definitive* bracket already
+  // exists. A definitive bracket means: a cleared floor with a failed floor
+  // immediately above it (no unresolved in between).
+  const definitiveBracket =
+    bracket.floorIdx >= 0 &&
+    bracket.ceilingIdx <= TOP_CHECKPOINT_INDEX &&
+    bracket.ceilingIdx - bracket.floorIdx === 1 &&
+    floors.some(
+      (f) => f.checkpointIndex === bracket.ceilingIdx && f.outcome === "failed",
+    );
+
+  if (itemsAnswered < config.minItems && !definitiveBracket) {
+    return { shouldStop: false, stopReason: "in_progress", reason: "below minItems" };
+  }
+
+  // Floor at cp 0 failed with no cleared floor anywhere ⇒ below the bank.
+  if (
+    lastFloor &&
+    lastFloor.checkpointIndex === 0 &&
+    lastFloor.outcome === "failed" &&
+    bracket.floorIdx < 0
+  ) {
+    return {
+      shouldStop: true,
+      stopReason: "floor_failed_at_bottom",
+      reason: "failed the lowest floor with no comfort zone",
+    };
+  }
+
+  // Precision: cleared floor with a failed/unresolved floor one step above.
   if (
     bracket.floorIdx >= 0 &&
     bracket.ceilingIdx <= TOP_CHECKPOINT_INDEX &&
@@ -265,7 +438,16 @@ function decideStop(args: {
     return {
       shouldStop: true,
       stopReason: "precision_reached",
-      reason: `bracket [${bracket.floorIdx},${bracket.ceilingIdx}] tight enough`,
+      reason: `bracket [${bracket.floorIdx},${bracket.ceilingIdx}] tight`,
+    };
+  }
+
+  // Unresolved floor above a cleared floor with no further room to climb.
+  if (lastFloor && lastFloor.outcome === "unresolved" && bracket.floorIdx >= 0) {
+    return {
+      shouldStop: true,
+      stopReason: "floor_unresolved",
+      reason: `floor ${lastFloor.checkpointIndex} unresolved above cleared floor ${bracket.floorIdx}`,
     };
   }
 
@@ -275,43 +457,40 @@ function decideStop(args: {
 // ── Next-checkpoint selection ──────────────────────────────
 
 function pickNextCheckpoint(args: {
-  itemsAnswered: number;
-  bracket: Bracket;
-  stats: Map<number, CheckpointStat>;
-  config: PlacementAlgorithmConfig;
+  floors: readonly FloorState[];
+  lastFloor: FloorState | null;
   priorIdx: number | null;
 }): number {
-  const { itemsAnswered, bracket, stats, config, priorIdx } = args;
-
-  if (itemsAnswered === 0) {
-    const start = priorIdx ?? DEFAULT_START_INDEX;
-    return clampIndex(start);
+  if (!args.lastFloor) {
+    // Cold start.
+    return clampIndex(args.priorIdx ?? DEFAULT_START_INDEX);
   }
 
-  const hasFloor = bracket.floorIdx >= 0;
-  const hasCeiling = bracket.ceilingIdx <= TOP_CHECKPOINT_INDEX;
+  const last = args.lastFloor;
 
+  // Same floor still open — serve the next item at the same checkpoint.
+  if (last.outcome === "in_progress") {
+    return last.checkpointIndex;
+  }
+
+  // Advance / retreat by exactly one — no skipping.
   let next: number;
-  if (!hasFloor && !hasCeiling) {
-    // Should not happen after item 1, but be safe.
-    next = priorIdx ?? DEFAULT_START_INDEX;
-  } else if (hasFloor && hasCeiling) {
-    // Bracket exists → midpoint between floor+1 and ceiling-1.
-    const mid = Math.floor((bracket.floorIdx + bracket.ceilingIdx) / 2);
-    next = mid <= bracket.floorIdx ? bracket.floorIdx + 1 : mid;
-  } else if (hasFloor) {
-    // Only floor → push upward by coarseJump, capped at TOP.
-    next = Math.min(TOP_CHECKPOINT_INDEX, bracket.floorIdx + config.coarseJump);
+  if (last.outcome === "cleared" || last.outcome === "tentative_cleared") {
+    next = last.checkpointIndex + 1;
+  } else if (last.outcome === "failed") {
+    next = last.checkpointIndex - 1;
   } else {
-    // Only ceiling → drop downward by coarseJump, floored at 0.
-    next = Math.max(0, bracket.ceilingIdx - config.coarseJump);
+    // Unresolved ⇒ this branch should be caught by decideStop, but if we
+    // somehow land here keep probing the same level one more time.
+    next = last.checkpointIndex;
   }
 
-  // Avoid resampling a checkpoint we just answered if a usable neighbour exists.
-  const visited = stats.get(next);
-  if (visited && visited.answered > 0) {
-    if (next < TOP_CHECKPOINT_INDEX && !stats.has(next + 1)) next += 1;
-    else if (next > 0 && !stats.has(next - 1)) next -= 1;
+  // If we're about to re-open a floor we already closed, clamp to the side
+  // that still has unexplored room.
+  const seen = new Set(args.floors.map((f) => f.checkpointIndex));
+  if (seen.has(next)) {
+    if (next < TOP_CHECKPOINT_INDEX && !seen.has(next + 1)) next += 1;
+    else if (next > 0 && !seen.has(next - 1)) next -= 1;
   }
 
   return clampIndex(next);
@@ -330,71 +509,91 @@ export function estimatePlacement(
   config: PlacementAlgorithmConfig = DEFAULT_PLACEMENT_CONFIG,
 ): AdaptivePlacementEstimate {
   const itemsAnswered = responses.length;
-  const stats = checkpointStats(responses);
-  const bracket = itemsAnswered === 0 ? NO_BRACKET : deriveBracket(stats);
+  const floors = buildFloors(responses, config);
+  const bracket = floors.length === 0 ? NO_BRACKET : deriveBracket(floors);
   const consecWrong = trailingConsecutiveWrong(responses);
   const maxConsec = maxConsecutiveWrong(responses);
 
   const totalCorrect = responses.filter((r) => r.isCorrect).length;
   const rawAccuracy = itemsAnswered > 0 ? totalCorrect / itemsAnswered : 0;
 
-  // ── Confirmed floor ────────────────────────────────────
-  // Use the floor checkpoint's center; if no floor at all, treat as below
-  // the bottom checkpoint (rank 0). Critically, this is the highest level
-  // we have *evidence of comfort for* — never higher than what was tested.
-  const confirmedFloorRank =
-    bracket.floorIdx >= 0 ? CHECKPOINTS[bracket.floorIdx].center : 0;
+  // Highest fully and tentatively cleared floor.
+  let highestCleared = -1;
+  let highestTentative = -1;
+  for (const f of floors) {
+    if (f.outcome === "cleared" && f.checkpointIndex > highestCleared) {
+      highestCleared = f.checkpointIndex;
+    }
+    if (
+      (f.outcome === "cleared" || f.outcome === "tentative_cleared") &&
+      f.checkpointIndex > highestTentative
+    ) {
+      highestTentative = f.checkpointIndex;
+    }
+  }
 
-  // ── Estimated frontier ─────────────────────────────────
-  // Geometric midpoint between confirmed floor and the first failed
-  // checkpoint, so a perfect-at-5000 case never lands at exactly 5000.
+  const confirmedFloorRank =
+    highestCleared >= 0
+      ? CHECKPOINTS[highestCleared].center
+      : highestTentative >= 0
+        ? CHECKPOINTS[highestTentative].center
+        : 0;
+
+  // Frontier estimation.
   let estimatedFrontierRank: number;
   let frontierLow: number;
   let frontierHigh: number;
   let topOfBankReached = false;
 
-  if (bracket.floorIdx === TOP_CHECKPOINT_INDEX && bracket.ceilingIdx > TOP_CHECKPOINT_INDEX) {
-    // Cleared the top with no failures.
+  const topCleared = floors.some(
+    (f) => f.checkpointIndex === TOP_CHECKPOINT_INDEX && f.outcome === "cleared",
+  );
+
+  if (topCleared) {
     topOfBankReached = true;
     estimatedFrontierRank = MAX_CHECKPOINT_RANK;
     frontierLow = MAX_CHECKPOINT_RANK;
     frontierHigh = MAX_CHECKPOINT_RANK;
-  } else if (bracket.floorIdx < 0) {
-    // No comfort anywhere yet — frontier is below the lowest checkpoint.
+  } else if (highestTentative < 0) {
+    // No comfort evidence anywhere.
     estimatedFrontierRank = Math.round(CHECKPOINTS[0].center / 2);
     frontierLow = 1;
     frontierHigh = CHECKPOINTS[0].center;
   } else if (bracket.ceilingIdx > TOP_CHECKPOINT_INDEX) {
-    // Has a floor but no failure — push frontier above the floor by half a
-    // checkpoint step (geometric), since we don't actually know how far above.
-    const floorCenter = CHECKPOINTS[bracket.floorIdx].center;
-    const nextCp = checkpointByIndex(bracket.floorIdx + 1);
+    // Has cleared/tentative but no upper failure — step half a checkpoint up.
+    const floorCenter = CHECKPOINTS[highestTentative].center;
+    const nextCp = checkpointByIndex(highestTentative + 1);
     estimatedFrontierRank = nextCp
       ? Math.round(Math.sqrt(floorCenter * nextCp.center))
       : floorCenter;
     frontierLow = floorCenter;
     frontierHigh = nextCp?.center ?? floorCenter;
   } else {
-    // Both bounds known → geometric midpoint.
-    const floorCenter = CHECKPOINTS[bracket.floorIdx].center;
+    const floorCenter = CHECKPOINTS[highestTentative].center;
     const ceilCenter = CHECKPOINTS[bracket.ceilingIdx].center;
     estimatedFrontierRank = Math.round(Math.sqrt(floorCenter * ceilCenter));
     frontierLow = floorCenter;
     frontierHigh = ceilCenter;
   }
 
-  // ── Status ─────────────────────────────────────────────
+  // Evidence quality: based on the highest cleared/tentative floor's
+  // cognate and morphology composition.
+  const { frontierEvidenceQuality, nonCognateSupportPresent, cognateHeavy, morphHeavy } =
+    computeEvidenceQuality(floors, highestTentative);
+
+  // Status.
   const estimateStatus = computeStatus({
     itemsAnswered,
+    floors,
     bracket,
     config,
     topOfBankReached,
+    frontierEvidenceQuality,
   });
 
-  // ── Estimated receptive vocab ──────────────────────────
-  // Descriptive projection only: a fraction of the confirmed floor.
-  // Accuracy on the floor weights the projection.
-  const estimatedReceptiveVocab = Math.round(confirmedFloorRank * Math.max(0.5, rawAccuracy));
+  const estimatedReceptiveVocab = Math.round(
+    confirmedFloorRank * Math.max(0.5, rawAccuracy),
+  );
 
   return {
     confirmedFloorRank,
@@ -411,39 +610,107 @@ export function estimatePlacement(
     itemsAnswered,
     rawAccuracy,
     estimatedReceptiveVocab,
+    highestClearedFloorIndex: highestCleared >= 0 ? highestCleared : null,
+    highestTentativeFloorIndex: highestTentative >= 0 ? highestTentative : null,
+    totalFloorsVisited: floors.length,
+    floorOutcomes: floors,
+    frontierEvidenceQuality,
+    nonCognateSupportPresent,
+    cognateHeavyEstimate: cognateHeavy,
+    morphologyHeavyEstimate: morphHeavy,
+  };
+}
+
+function computeEvidenceQuality(
+  floors: readonly FloorState[],
+  highestTentative: number,
+): {
+  frontierEvidenceQuality: FrontierEvidenceQuality;
+  nonCognateSupportPresent: boolean;
+  cognateHeavy: boolean;
+  morphHeavy: boolean;
+} {
+  if (highestTentative < 0) {
+    return {
+      frontierEvidenceQuality: "low",
+      nonCognateSupportPresent: false,
+      cognateHeavy: false,
+      morphHeavy: false,
+    };
+  }
+  // Look at the top two tentative-or-cleared floors.
+  const topFloors = floors
+    .filter(
+      (f) =>
+        (f.outcome === "cleared" || f.outcome === "tentative_cleared") &&
+        f.checkpointIndex >= highestTentative - 1,
+    )
+    .slice(-2);
+  let nonCognateCorrect = 0;
+  let totalCorrect = 0;
+  let markedCorrect = 0;
+  for (const f of topFloors) {
+    nonCognateCorrect += f.nonCognateCorrect;
+    totalCorrect += f.correct;
+    markedCorrect += f.markedFormsCorrect;
+  }
+  const nonCognateSupportPresent = nonCognateCorrect >= 1;
+  const cognateHeavy =
+    totalCorrect >= 2 && nonCognateCorrect / totalCorrect < 0.5;
+  const morphHeavy = totalCorrect >= 2 && markedCorrect / totalCorrect >= 0.5;
+
+  const topFloorCleared = topFloors.some((f) => f.outcome === "cleared");
+  let q: FrontierEvidenceQuality;
+  if (topFloorCleared && nonCognateSupportPresent && !cognateHeavy && !morphHeavy) {
+    q = "high";
+  } else if (topFloorCleared && nonCognateSupportPresent) {
+    q = "medium";
+  } else {
+    q = "low";
+  }
+  return {
+    frontierEvidenceQuality: q,
+    nonCognateSupportPresent,
+    cognateHeavy,
+    morphHeavy,
   };
 }
 
 function computeStatus(args: {
   itemsAnswered: number;
+  floors: readonly FloorState[];
   bracket: Bracket;
   config: PlacementAlgorithmConfig;
   topOfBankReached: boolean;
+  frontierEvidenceQuality: FrontierEvidenceQuality;
 }): PlacementEstimateStatus {
-  const { itemsAnswered, bracket, config, topOfBankReached } = args;
+  const { itemsAnswered, bracket, config, topOfBankReached, frontierEvidenceQuality } = args;
 
-  if (itemsAnswered < config.minItems) return "early";
-  if (topOfBankReached) return "medium";
-
+  if (itemsAnswered < config.minItems - 2) return "early";
+  if (topOfBankReached) {
+    return frontierEvidenceQuality === "high" ? "high" : "medium";
+  }
   const hasFloor = bracket.floorIdx >= 0;
   const hasCeiling = bracket.ceilingIdx <= TOP_CHECKPOINT_INDEX;
   if (!hasFloor || !hasCeiling) return "provisional";
 
   const gap = bracket.ceilingIdx - bracket.floorIdx - 1;
-  if (gap <= config.precisionBracketWidth && itemsAnswered >= config.minItems + 2) {
+  if (
+    gap <= config.precisionBracketWidth &&
+    itemsAnswered >= config.minItems &&
+    frontierEvidenceQuality !== "low"
+  ) {
     return "high";
   }
   if (gap <= config.precisionBracketWidth + 1) return "medium";
   return "provisional";
 }
 
-// ── Helper: planned upper bound for UI ─────────────────────
+// ── UI helpers (unchanged signatures) ──────────────────────
 
 export function totalPlanned(
   config: PlacementAlgorithmConfig = DEFAULT_PLACEMENT_CONFIG,
 ): number {
-  // Display target — the *expected* item count, not the cap. Halfway
-  // between min and max keeps the UI honest about the test being adaptive.
   return Math.round((config.minItems + config.maxItems) / 2);
 }
 

@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { CHECKPOINTS, checkpointByIndex } from "./checkpoints";
+import type { CognateClass } from "./cognate";
+import type { MorphologyClass } from "./morphology";
 import {
   selectFromPool,
   type ExposureMap,
@@ -23,10 +25,15 @@ type Row = {
   options: string[] | null;
   band_start: number;
   band_end: number;
+  cognate_class: CognateClass | null;
+  morphology_class: MorphologyClass | null;
+  is_inflected_form: boolean | null;
+  lemma_rank: number | null;
+  effective_diagnostic_rank: number | null;
 };
 
 const SELECT_COLUMNS =
-  "id, language, word_id, lemma, frequency_rank, pos, item_type, prompt_sentence, prompt_stem, correct_answer, accepted_answers, options, band_start, band_end";
+  "id, language, word_id, lemma, frequency_rank, pos, item_type, prompt_sentence, prompt_stem, correct_answer, accepted_answers, options, band_start, band_end, cognate_class, morphology_class, is_inflected_form, lemma_rank, effective_diagnostic_rank";
 
 function rowToItem(row: Row): PlacementItem {
   return {
@@ -44,6 +51,11 @@ function rowToItem(row: Row): PlacementItem {
     options: row.options,
     bandStart: row.band_start,
     bandEnd: row.band_end,
+    cognateClass: row.cognate_class ?? "non_cognate",
+    morphologyClass: row.morphology_class ?? "base",
+    isInflectedForm: row.is_inflected_form ?? false,
+    lemmaRank: row.lemma_rank ?? row.frequency_rank,
+    effectiveDiagnosticRank: row.effective_diagnostic_rank ?? row.frequency_rank,
   };
 }
 
@@ -64,6 +76,13 @@ export type PickInput = {
   excludeWordIds?: readonly string[];
   exposure: ExposureMap;
   seed: string;
+  /**
+   * When true (default), the picker tiers the pool by fairness and serves
+   * non-cognate base forms first, falling back to weak cognates / common
+   * inflections, and finally strong cognates / marked forms. Near the
+   * frontier this prevents cognate-heavy clearance.
+   */
+  preferFairness?: boolean;
 };
 
 /**
@@ -103,6 +122,8 @@ export async function pickItemForCheckpoint(
     { low: 1, high: CHECKPOINTS[CHECKPOINTS.length - 1].windowHigh },
   ];
 
+  const preferFairness = params.preferFairness !== false;
+
   for (let step = 0; step < widenings.length; step += 1) {
     const win = widenings[step];
     const pool = await fetchPool({
@@ -116,33 +137,70 @@ export async function pickItemForCheckpoint(
     });
     if (pool.length === 0) continue;
 
-    const candidates: PoolCandidate[] = pool.map((r) => ({
-      itemBankId: r.id,
-      frequencyRank: r.frequency_rank,
-    }));
+    // Tier the pool by fairness and try each tier in order.
+    const tiers = preferFairness ? tierPoolByFairness(pool) : [pool];
 
-    const selection = selectFromPool(candidates, {
-      targetRank,
-      excludeIds,
-      exposure: params.exposure,
-      seed: `${params.seed}:${params.checkpointIndex}:${params.itemType}:w${step}`,
-    });
-    if (!selection) continue;
+    for (let tierIdx = 0; tierIdx < tiers.length; tierIdx += 1) {
+      const tier = tiers[tierIdx];
+      if (tier.length === 0) continue;
+      const candidates: PoolCandidate[] = tier.map((r) => ({
+        itemBankId: r.id,
+        frequencyRank: r.effective_diagnostic_rank ?? r.frequency_rank,
+      }));
 
-    // For tight + ±50% windows, prefer to retry-with-widening when the only
-    // option is a previous-attempt reuse. We accept reuse only at the widest
-    // step, so we exhaust *all* fresh widenings before falling back to a
-    // hard repeat.
-    if (selection.reuseDueToPoolExhaustion && step < widenings.length - 1) {
-      continue;
+      const selection = selectFromPool(candidates, {
+        targetRank,
+        excludeIds,
+        exposure: params.exposure,
+        seed: `${params.seed}:${params.checkpointIndex}:${params.itemType}:w${step}:t${tierIdx}`,
+      });
+      if (!selection) continue;
+
+      // For tight + ±50% windows, prefer to retry-with-widening when the only
+      // option is a previous-attempt reuse. We accept reuse only at the widest
+      // step *and* only at the most-permissive tier.
+      if (
+        selection.reuseDueToPoolExhaustion &&
+        (step < widenings.length - 1 || tierIdx < tiers.length - 1)
+      ) {
+        continue;
+      }
+
+      const row = pool.find((r) => r.id === selection.pickedId);
+      if (!row) continue;
+      return { item: rowToItem(row), selection, widenSteps: step };
     }
-
-    const row = pool.find((r) => r.id === selection.pickedId);
-    if (!row) continue;
-    return { item: rowToItem(row), selection, widenSteps: step };
   }
 
   return null;
+}
+
+/**
+ * Partition a row pool into ordered fairness tiers. The selector tries
+ * tier 0 first, then tier 1, etc. Fairness priority is:
+ *   0. non-cognate base forms
+ *   1. non-cognate + weak-cognate, base + common-inflection
+ *   2. everything else (strong-cognate, marked inflections)
+ */
+function tierPoolByFairness(pool: Row[]): Row[][] {
+  const tier0: Row[] = [];
+  const tier1: Row[] = [];
+  const tier2: Row[] = [];
+  for (const r of pool) {
+    const c: CognateClass = r.cognate_class ?? "non_cognate";
+    const m: MorphologyClass = r.morphology_class ?? "base";
+    if (c === "non_cognate" && m === "base") {
+      tier0.push(r);
+    } else if (
+      (c === "non_cognate" || c === "weak_cognate") &&
+      (m === "base" || m === "common_inflection")
+    ) {
+      tier1.push(r);
+    } else {
+      tier2.push(r);
+    }
+  }
+  return [tier0, tier1, tier2];
 }
 
 type FetchPoolArgs = {

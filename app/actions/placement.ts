@@ -8,6 +8,12 @@ import { pickItemForCheckpoint } from "@/lib/placement/itemBank";
 import { checkpointByIndex } from "@/lib/placement/checkpoints";
 import { planNextItem, totalPlanned } from "@/lib/placement/selection";
 import { estimatePlacement } from "@/lib/placement/scoring";
+import { classifyCognate, lexicalWeightForCognate, type CognateClass } from "@/lib/placement/cognate";
+import {
+  classifyMorphology,
+  effectiveDiagnosticRank,
+  type MorphologyClass,
+} from "@/lib/placement/morphology";
 import { isRecallCorrect, normalizeAnswer } from "@/lib/placement/normalize";
 import {
   fetchActiveRun,
@@ -149,6 +155,18 @@ function buildCompletedEstimate(row: PlacementRunRow): AdaptivePlacementEstimate
       (row.recognition_items_answered + row.recall_items_answered),
     rawAccuracy: 0,
     estimatedReceptiveVocab: row.estimated_receptive_vocab ?? 0,
+    highestClearedFloorIndex: row.highest_cleared_floor_index,
+    highestTentativeFloorIndex: row.highest_tentative_floor_index,
+    totalFloorsVisited: row.total_floors_visited ?? 0,
+    floorOutcomes: Array.isArray(row.floor_outcomes)
+      ? (row.floor_outcomes as AdaptivePlacementEstimate["floorOutcomes"])
+      : [],
+    frontierEvidenceQuality:
+      (row.frontier_evidence_quality as AdaptivePlacementEstimate["frontierEvidenceQuality"] | null) ??
+      "low",
+    nonCognateSupportPresent: Boolean(row.non_cognate_support_present),
+    cognateHeavyEstimate: Boolean(row.cognate_heavy_estimate),
+    morphologyHeavyEstimate: Boolean(row.morphology_heavy_estimate),
   };
 }
 
@@ -256,6 +274,34 @@ export async function submitPlacementAnswer(
     intendedPlan.nextCheckpointIndex != null
       ? checkpointByIndex(intendedPlan.nextCheckpointIndex)
       : null;
+  const floorIndex = intendedPlan.nextCheckpointIndex ?? null;
+  const floorSequence = intendedPlan.currentFloorSequence;
+
+  // Derive fairness metadata. We prefer the row's stored values (from seed)
+  // but recompute on the fly if the column is missing, so the engine works
+  // against older banks too.
+  const rowCognateClass = ((itemRow as Record<string, unknown>).cognate_class as CognateClass | null) ?? null;
+  const rowMorphClass = ((itemRow as Record<string, unknown>).morphology_class as MorphologyClass | null) ?? null;
+  const rowLemmaRank = ((itemRow as Record<string, unknown>).lemma_rank as number | null) ?? null;
+  const rowEffectiveRank = ((itemRow as Record<string, unknown>).effective_diagnostic_rank as number | null) ?? null;
+
+  const cognate =
+    rowCognateClass !== null
+      ? { cognateClass: rowCognateClass, similarity: 0, rule: "row" as const }
+      : classifyCognate(itemRow.lemma, itemRow.correct_answer);
+  const morphology =
+    rowMorphClass !== null
+      ? classifyMorphology(itemRow.lemma, itemRow.pos)
+      : classifyMorphology(itemRow.lemma, itemRow.pos);
+  const cognateClass = rowCognateClass ?? cognate.cognateClass;
+  const morphologyClass = rowMorphClass ?? morphology.morphologyClass;
+  const isInflectedForm =
+    ((itemRow as Record<string, unknown>).is_inflected_form as boolean | null) ?? morphology.isInflectedForm;
+  const lemmaRank = rowLemmaRank ?? itemRow.frequency_rank;
+  const effRank =
+    rowEffectiveRank ?? effectiveDiagnosticRank(lemmaRank, morphology);
+  const lexicalWeight = lexicalWeightForCognate(cognateClass);
+  const morphologyWeight = morphology.morphologyWeight;
 
   // Look up this user's prior-attempt exposure so we can record whether the
   // item we're about to log was a previous-attempt reuse. This is the same
@@ -320,6 +366,15 @@ export async function submitPlacementAnswer(
     previous_attempt_seen: previousAttemptSeen,
     reuse_due_to_pool_exhaustion: reuseDueToPoolExhaustion,
     selection_seed: selectionSeed,
+    floor_index: floorIndex,
+    floor_sequence: floorSequence,
+    cognate_class: cognateClass,
+    morphology_class: morphologyClass,
+    is_inflected_form: isInflectedForm,
+    lemma_rank: lemmaRank,
+    effective_diagnostic_rank: effRank,
+    lexical_weight: lexicalWeight,
+    morphology_weight: morphologyWeight,
   });
   if (insertErr) return { ok: false, error: insertErr.message };
 
@@ -353,6 +408,14 @@ export async function submitPlacementAnswer(
       bracket_high_index: estimate.bracketHighIndex,
       max_consecutive_wrong: estimate.maxConsecutiveWrong,
       total_items_administered: estimate.itemsAnswered,
+      highest_cleared_floor_index: estimate.highestClearedFloorIndex,
+      highest_tentative_floor_index: estimate.highestTentativeFloorIndex,
+      total_floors_visited: estimate.totalFloorsVisited,
+      floor_outcomes: estimate.floorOutcomes,
+      frontier_evidence_quality: estimate.frontierEvidenceQuality,
+      non_cognate_support_present: estimate.nonCognateSupportPresent,
+      cognate_heavy_estimate: estimate.cognateHeavyEstimate,
+      morphology_heavy_estimate: estimate.morphologyHeavyEstimate,
       placement_summary: {
         stage: plan.stage,
         confirmedFloorRank: estimate.confirmedFloorRank,

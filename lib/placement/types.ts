@@ -18,6 +18,9 @@ export type PlacementStatus =
   | "calibrating"
   | "stable";
 
+import type { CognateClass } from "./cognate";
+import type { MorphologyClass } from "./morphology";
+
 export type PlacementItem = {
   id: string;
   language: string;
@@ -33,6 +36,11 @@ export type PlacementItem = {
   options: string[] | null;
   bandStart: number;
   bandEnd: number;
+  cognateClass: CognateClass;
+  morphologyClass: MorphologyClass;
+  isInflectedForm: boolean;
+  lemmaRank: number;
+  effectiveDiagnosticRank: number;
 };
 
 export type PlacementResponseRecord = {
@@ -53,6 +61,17 @@ export type PlacementResponseRecord = {
   latencyMs: number | null;
   scoreWeight: number;
   metadata: Record<string, unknown>;
+  // Adaptive v3 fairness fields. Populated by submitPlacementAnswer; absent
+  // values (legacy rows) default to non_cognate / base / 1.0.
+  floorIndex: number | null;
+  floorSequence: number | null;
+  cognateClass: CognateClass;
+  morphologyClass: MorphologyClass;
+  isInflectedForm: boolean;
+  lemmaRank: number | null;
+  effectiveDiagnosticRank: number | null;
+  lexicalWeight: number;
+  morphologyWeight: number;
 };
 
 export type BandStat = {
@@ -83,7 +102,34 @@ export type PlacementStopReason =
   | "precision_reached"
   | "consecutive_wrong_ceiling"
   | "max_items"
-  | "top_of_bank_reached";
+  | "top_of_bank_reached"
+  | "floor_failed_at_bottom"
+  | "floor_unresolved";
+
+export type FloorOutcome =
+  | "in_progress"
+  | "cleared"
+  | "tentative_cleared"
+  | "unresolved"
+  | "failed";
+
+export type FrontierEvidenceQuality = "low" | "medium" | "high";
+
+export type FloorState = {
+  checkpointIndex: number;
+  floorSequence: number;
+  itemsServed: number;
+  correct: number;
+  /** Sum of lexical_weight * morphology_weight for all served items. */
+  weightedTotal: number;
+  /** Sum of lexical_weight * morphology_weight for correct items. */
+  weightedCorrect: number;
+  nonCognateServed: number;
+  nonCognateCorrect: number;
+  markedFormsServed: number;
+  markedFormsCorrect: number;
+  outcome: FloorOutcome;
+};
 
 export type PlacementEstimateStatus = "early" | "provisional" | "medium" | "high";
 
@@ -98,6 +144,12 @@ export type PlacementPlan = {
   reason: string;
   shouldStop: boolean;
   stopReason: PlacementStopReason;
+  /** Current floor sequence number (0-indexed). */
+  currentFloorSequence: number | null;
+  /** Items served within the current floor so far. */
+  currentFloorItemsServed: number;
+  /** Snapshot of all floors visited in this run, in order. */
+  floors: readonly FloorState[];
 };
 
 export type AdaptivePlacementEstimate = {
@@ -114,6 +166,15 @@ export type AdaptivePlacementEstimate = {
   itemsAnswered: number;
   rawAccuracy: number;
   estimatedReceptiveVocab: number;
+  // Adaptive v3 fairness metadata.
+  highestClearedFloorIndex: number | null;
+  highestTentativeFloorIndex: number | null;
+  totalFloorsVisited: number;
+  floorOutcomes: readonly FloorState[];
+  frontierEvidenceQuality: FrontierEvidenceQuality;
+  nonCognateSupportPresent: boolean;
+  cognateHeavyEstimate: boolean;
+  morphologyHeavyEstimate: boolean;
 };
 
 export type PlacementAlgorithmConfig = {
@@ -127,17 +188,35 @@ export type PlacementAlgorithmConfig = {
   precisionBracketWidth: number;
   /** Recall items reserved near the frontier (subset of maxItems). */
   recallItemCount: number;
-  /** Initial coarse jump magnitude in checkpoint indices. */
-  coarseJump: number;
+  /**
+   * Items served per floor. Floor outcomes resolve after this many items
+   * unless early termination fires (≥3 wrong ⇒ failed, ≥4 correct with
+   * non-cognate support ⇒ cleared).
+   */
+  itemsPerFloor: number;
+  /** Correct-count threshold at or above which a non-top floor is cleared. */
+  clearThreshold: number;
+  /** Correct-count threshold below which a floor is tentative. */
+  tentativeThreshold: number;
+  /**
+   * Top floor requires both a full sweep (clearThresholdTop) *and* at least
+   * this many non-cognate correct answers to be strongly cleared.
+   */
+  clearThresholdTop: number;
+  topFloorMinNonCognateCorrect: number;
 };
 
 export const DEFAULT_PLACEMENT_CONFIG: PlacementAlgorithmConfig = {
-  minItems: 8,
-  maxItems: 24,
+  minItems: 10,
+  maxItems: 26,
   consecutiveWrongStop: 5,
   precisionBracketWidth: 1,
   recallItemCount: 2,
-  coarseJump: 2,
+  itemsPerFloor: 5,
+  clearThreshold: 4,
+  tentativeThreshold: 3,
+  clearThresholdTop: 5,
+  topFloorMinNonCognateCorrect: 2,
 };
 
-export const PLACEMENT_ALGORITHM_VERSION = "v2-adaptive";
+export const PLACEMENT_ALGORITHM_VERSION = "v3-floors";

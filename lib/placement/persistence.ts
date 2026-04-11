@@ -1,4 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { CognateClass } from "./cognate";
+import type { MorphologyClass } from "./morphology";
 import { buildExposureMap, type ExposureMap, type PriorResponseRow } from "./exposure";
 import type { PlacementResponseRecord, PlacementRunStatus } from "./types";
 
@@ -33,6 +35,15 @@ export type PlacementRunRow = {
   bracket_high_index: number | null;
   max_consecutive_wrong: number | null;
   total_items_administered: number | null;
+  // Adaptive v3 fairness columns.
+  highest_cleared_floor_index: number | null;
+  highest_tentative_floor_index: number | null;
+  total_floors_visited: number | null;
+  floor_outcomes: unknown;
+  frontier_evidence_quality: string | null;
+  non_cognate_support_present: boolean | null;
+  cognate_heavy_estimate: boolean | null;
+  morphology_heavy_estimate: boolean | null;
 };
 
 type ResponseRow = {
@@ -57,6 +68,15 @@ type ResponseRow = {
   score_weight: number;
   metadata: Record<string, unknown>;
   answered_at: string;
+  floor_index: number | null;
+  floor_sequence: number | null;
+  cognate_class: CognateClass | null;
+  morphology_class: MorphologyClass | null;
+  is_inflected_form: boolean | null;
+  lemma_rank: number | null;
+  effective_diagnostic_rank: number | null;
+  lexical_weight: number | null;
+  morphology_weight: number | null;
 };
 
 export function responseRowToRecord(row: ResponseRow): PlacementResponseRecord {
@@ -78,6 +98,15 @@ export function responseRowToRecord(row: ResponseRow): PlacementResponseRecord {
     latencyMs: row.latency_ms,
     scoreWeight: row.score_weight,
     metadata: row.metadata ?? {},
+    floorIndex: row.floor_index,
+    floorSequence: row.floor_sequence,
+    cognateClass: row.cognate_class ?? "non_cognate",
+    morphologyClass: row.morphology_class ?? "base",
+    isInflectedForm: row.is_inflected_form ?? false,
+    lemmaRank: row.lemma_rank,
+    effectiveDiagnosticRank: row.effective_diagnostic_rank,
+    lexicalWeight: row.lexical_weight ?? 1.0,
+    morphologyWeight: row.morphology_weight ?? 1.0,
   };
 }
 

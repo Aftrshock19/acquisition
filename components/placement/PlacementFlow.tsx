@@ -352,9 +352,32 @@ function DebugPanel({ state }: { state: PlacementState }) {
         <span>
           {est ? `${Math.round(est.rawAccuracy * 100)}%` : "—"}
         </span>
+        <span className="text-zinc-500">floor</span>
+        <span>
+          {plan?.currentFloorSequence ?? "—"} ({plan?.currentFloorItemsServed ?? 0}/5)
+        </span>
+        <span className="text-zinc-500">cleared</span>
+        <span>{est?.highestClearedFloorIndex ?? "—"}</span>
+        <span className="text-zinc-500">evidence</span>
+        <span>{est?.frontierEvidenceQuality ?? "—"}</span>
+        <span className="text-zinc-500">item cog/morph</span>
+        <span className="truncate">
+          {item ? `${item.cognateClass}/${item.morphologyClass}` : "—"}
+        </span>
       </div>
       {plan?.reason ? (
         <div className="mt-2 text-[11px] text-zinc-500">{plan.reason}</div>
+      ) : null}
+      {plan?.floors && plan.floors.length > 0 ? (
+        <div className="mt-2 text-[11px] text-zinc-500">
+          floors:{" "}
+          {plan.floors
+            .map(
+              (f) =>
+                `cp${f.checkpointIndex}[${f.correct}/${f.itemsServed}:${f.outcome.slice(0, 4)}]`,
+            )
+            .join(" → ")}
+        </div>
       ) : null}
     </details>
   );
@@ -509,11 +532,14 @@ function ResultScreen({
 }) {
   const {
     confirmedFloorRank,
-    estimatedFrontierRank,
     frontierRankLow,
     frontierRankHigh,
     estimateStatus,
     topOfBankReached,
+    frontierEvidenceQuality,
+    nonCognateSupportPresent,
+    cognateHeavyEstimate,
+    morphologyHeavyEstimate,
   } = estimate;
 
   const comfortLabel =
@@ -552,6 +578,15 @@ function ResultScreen({
           <ResultRow label="Confirmed comfort zone" value={comfortLabel} />
           <ResultRow label="Next probe range" value={probeLabel} />
           <ResultRow label="Estimate status" value={statusLabel} />
+          <ResultRow
+            label="Evidence quality"
+            value={evidenceCopy({
+              frontierEvidenceQuality,
+              nonCognateSupportPresent,
+              cognateHeavyEstimate,
+              morphologyHeavyEstimate,
+            })}
+          />
         </dl>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -576,6 +611,31 @@ function ResultScreen({
       </div>
     </main>
   );
+}
+
+function evidenceCopy(args: {
+  frontierEvidenceQuality: AdaptivePlacementEstimate["frontierEvidenceQuality"];
+  nonCognateSupportPresent: boolean;
+  cognateHeavyEstimate: boolean;
+  morphologyHeavyEstimate: boolean;
+}): string {
+  if (args.cognateHeavyEstimate) {
+    return "Cognate-heavy — we'll reconfirm the frontier during your first sessions";
+  }
+  if (args.morphologyHeavyEstimate) {
+    return "Based mostly on marked forms — we'll confirm base vocabulary as you learn";
+  }
+  if (!args.nonCognateSupportPresent) {
+    return "Limited non-cognate evidence — we'll adjust as you practise";
+  }
+  switch (args.frontierEvidenceQuality) {
+    case "high":
+      return "Strong, balanced evidence near the frontier";
+    case "medium":
+      return "Clear evidence near the frontier";
+    case "low":
+      return "Light evidence — we'll keep adjusting as you learn";
+  }
 }
 
 function statusToCopy(status: AdaptivePlacementEstimate["estimateStatus"]): string {
