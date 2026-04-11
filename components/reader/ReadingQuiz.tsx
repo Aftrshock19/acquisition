@@ -1,18 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ReadingQuestion } from "@/lib/reading/types";
+import { recordReadingQuestionAttempt } from "@/app/actions/srs";
 
 type ReadingQuizProps = {
+  textId: string;
   questions: ReadingQuestion[];
   onComplete: () => void;
 };
 
-export function ReadingQuiz({ questions, onComplete }: ReadingQuizProps) {
+export function ReadingQuiz({ textId, questions, onComplete }: ReadingQuizProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [score, setScore] = useState(0);
   const [finished, setFinished] = useState(false);
+  const questionShownAtRef = useRef<number>(Date.now());
 
   const question = questions[currentIndex];
 
@@ -47,14 +50,22 @@ export function ReadingQuiz({ questions, onComplete }: ReadingQuizProps) {
 
   function handleSelect(optionIndex: number) {
     if (isAnswered) return;
+    const responseMs = Date.now() - questionShownAtRef.current;
     setSelectedOption(optionIndex);
     if (optionIndex === question.correctOptionIndex) {
       setScore((s) => s + 1);
     }
+    void recordReadingQuestionAttempt({
+      textId,
+      questionId: question.id,
+      selectedOption: optionIndex,
+      responseMs,
+    });
   }
 
   function handleNext() {
     setSelectedOption(null);
+    questionShownAtRef.current = Date.now();
     if (currentIndex + 1 >= questions.length) {
       setFinished(true);
     } else {

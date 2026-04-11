@@ -16,7 +16,10 @@ export type ExportDataset =
   | "reading_events"
   | "listening_events"
   | "saved_words"
-  | "export_runs";
+  | "reading_question_attempts"
+  | "export_runs"
+  | "placement_runs"
+  | "placement_responses";
 
 const CSV_FIELD_ORDER: Record<Exclude<ExportDataset, "all">, string[]> = {
   daily_aggregates: [
@@ -45,6 +48,13 @@ const CSV_FIELD_ORDER: Record<Exclude<ExportDataset, "all">, string[]> = {
     "workload_assigned_units",
     "workload_completed_units",
     "workload_completion_rate",
+    "scheduler_variant",
+    "learner_state_score",
+    "learner_factor",
+    "workload_factor",
+    "adaptive_new_word_budget",
+    "reading_question_accuracy",
+    "reading_question_attempts_count",
   ],
   sessions: [
     "anonymous_user_id",
@@ -107,6 +117,13 @@ const CSV_FIELD_ORDER: Record<Exclude<ExportDataset, "all">, string[]> = {
     "delta_hours",
     "user_answer",
     "expected",
+    "scheduler_variant",
+    "learner_factor",
+    "item_factor",
+    "baseline_interval_days",
+    "effective_interval_days",
+    "difficulty_before",
+    "difficulty_after",
   ],
   reading_events: [
     "anonymous_user_id",
@@ -144,6 +161,20 @@ const CSV_FIELD_ORDER: Record<Exclude<ExportDataset, "all">, string[]> = {
     "added_via",
     "deck_id",
   ],
+  reading_question_attempts: [
+    "anonymous_user_id",
+    "id",
+    "daily_session_id",
+    "session_date",
+    "text_id",
+    "question_id",
+    "selected_option",
+    "correct_option",
+    "correct",
+    "response_ms",
+    "scheduler_variant",
+    "created_at",
+  ],
   export_runs: [
     "anonymous_user_id",
     "id",
@@ -152,6 +183,42 @@ const CSV_FIELD_ORDER: Record<Exclude<ExportDataset, "all">, string[]> = {
     "date_from",
     "date_to",
     "created_at",
+  ],
+  placement_runs: [
+    "anonymous_user_id",
+    "id",
+    "language",
+    "status",
+    "started_at",
+    "completed_at",
+    "skipped_at",
+    "algorithm_version",
+    "recognition_items_answered",
+    "recall_items_answered",
+    "estimated_frontier_rank",
+    "estimated_frontier_rank_low",
+    "estimated_frontier_rank_high",
+    "estimated_receptive_vocab",
+    "confidence_score",
+    "raw_recognition_accuracy",
+    "raw_recall_accuracy",
+    "created_at",
+  ],
+  placement_responses: [
+    "anonymous_user_id",
+    "id",
+    "run_id",
+    "sequence_index",
+    "item_type",
+    "band_start",
+    "band_end",
+    "is_correct",
+    "used_idk",
+    "latency_ms",
+    "answered_at",
+    "previous_attempt_seen",
+    "reuse_due_to_pool_exhaustion",
+    "selection_seed",
   ],
 };
 
@@ -184,7 +251,18 @@ export function buildJsonExport(bundle: AnalyticsBundle, anonymousUserId: string
       reading_events: getExportRows("reading_events", bundle, anonymousUserId),
       listening_events: getExportRows("listening_events", bundle, anonymousUserId),
       saved_words: getExportRows("saved_words", bundle, anonymousUserId),
+      reading_question_attempts: getExportRows(
+        "reading_question_attempts",
+        bundle,
+        anonymousUserId,
+      ),
       export_runs: getExportRows("export_runs", bundle, anonymousUserId),
+      placement_runs: getExportRows("placement_runs", bundle, anonymousUserId),
+      placement_responses: getExportRows(
+        "placement_responses",
+        bundle,
+        anonymousUserId,
+      ),
     },
   };
 }
@@ -232,6 +310,13 @@ export function getExportRows(
       delta_hours: row.delta_hours,
       user_answer: row.user_answer,
       expected: row.expected.join(" | "),
+      scheduler_variant: row.scheduler_variant ?? null,
+      learner_factor: row.learner_factor ?? null,
+      item_factor: row.item_factor ?? null,
+      baseline_interval_days: row.baseline_interval_days ?? null,
+      effective_interval_days: row.effective_interval_days ?? null,
+      difficulty_before: row.difficulty_before ?? null,
+      difficulty_after: row.difficulty_after ?? null,
     }));
   }
 
@@ -289,6 +374,23 @@ export function getExportRows(
       }));
   }
 
+  if (dataset === "reading_question_attempts") {
+    return bundle.readingQuestionAttempts.map((row) => ({
+      anonymous_user_id: anonymousUserId,
+      id: row.id,
+      daily_session_id: row.daily_session_id,
+      session_date: row.session_date,
+      text_id: row.text_id,
+      question_id: row.question_id,
+      selected_option: row.selected_option,
+      correct_option: row.correct_option,
+      correct: row.correct,
+      response_ms: row.response_ms,
+      scheduler_variant: row.scheduler_variant,
+      created_at: row.created_at,
+    }));
+  }
+
   if (dataset === "saved_words") {
     return bundle.savedWords.map((row) => ({
       anonymous_user_id: anonymousUserId,
@@ -299,6 +401,48 @@ export function getExportRows(
       added_at: row.added_at,
       added_via: row.added_via,
       deck_id: row.deck_id,
+    }));
+  }
+
+  if (dataset === "placement_runs") {
+    return (bundle.placementRuns ?? []).map((row) => ({
+      anonymous_user_id: anonymousUserId,
+      id: row.id,
+      language: row.language,
+      status: row.status,
+      started_at: row.started_at,
+      completed_at: row.completed_at,
+      skipped_at: row.skipped_at,
+      algorithm_version: row.algorithm_version,
+      recognition_items_answered: row.recognition_items_answered,
+      recall_items_answered: row.recall_items_answered,
+      estimated_frontier_rank: row.estimated_frontier_rank,
+      estimated_frontier_rank_low: row.estimated_frontier_rank_low,
+      estimated_frontier_rank_high: row.estimated_frontier_rank_high,
+      estimated_receptive_vocab: row.estimated_receptive_vocab,
+      confidence_score: row.confidence_score,
+      raw_recognition_accuracy: row.raw_recognition_accuracy,
+      raw_recall_accuracy: row.raw_recall_accuracy,
+      created_at: row.created_at,
+    }));
+  }
+
+  if (dataset === "placement_responses") {
+    return (bundle.placementResponses ?? []).map((row) => ({
+      anonymous_user_id: anonymousUserId,
+      id: row.id,
+      run_id: row.run_id,
+      sequence_index: row.sequence_index,
+      item_type: row.item_type,
+      band_start: row.band_start,
+      band_end: row.band_end,
+      is_correct: row.is_correct,
+      used_idk: row.used_idk,
+      latency_ms: row.latency_ms,
+      answered_at: row.answered_at,
+      previous_attempt_seen: row.previous_attempt_seen,
+      reuse_due_to_pool_exhaustion: row.reuse_due_to_pool_exhaustion,
+      selection_seed: row.selection_seed,
     }));
   }
 

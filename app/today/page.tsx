@@ -1,10 +1,14 @@
 import Link from "next/link";
 import { getTodayFlashcards } from "@/app/actions/srs";
 import { TodaySession } from "@/components/srs/TodaySession";
+import { getPlacementBannerState } from "@/lib/placement/status";
 
 export default async function TodayPage() {
   const todayShellClassName = "app-shell";
-  const result = await getTodayFlashcards("es");
+  const [result, placementBanner] = await Promise.all([
+    getTodayFlashcards("es"),
+    getPlacementBannerState(),
+  ]);
   const session = result.ok
     ? result.session
     : {
@@ -69,6 +73,26 @@ export default async function TodayPage() {
       <section className="app-hero">
         <h1 className="app-title">Vocabulary</h1>
       </section>
+      {placementBanner.show ? (
+        <div className="app-card flex flex-col gap-3 border-blue-200 bg-blue-50/70 p-6 dark:border-blue-900/50 dark:bg-blue-950/20 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">
+              {placementBanner.hasActiveRun
+                ? "Continue your placement check"
+                : "Find your starting point"}
+            </h2>
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">
+              About 3 minutes. Helps us pick the right words and texts for you.
+            </p>
+          </div>
+          <Link
+            href="/placement"
+            className="rounded-lg bg-neutral-900 px-4 py-2 text-sm text-white dark:bg-neutral-100 dark:text-neutral-900"
+          >
+            {placementBanner.hasActiveRun ? "Resume" : "Start"}
+          </Link>
+        </div>
+      ) : null}
       {session.error ? (
         <div className="app-card-strong flex flex-col gap-4 border-red-200 bg-red-50/90 p-8 dark:border-red-900/50 dark:bg-red-950/30">
           <h2 className="text-xl font-semibold tracking-tight text-red-900 dark:text-red-100">

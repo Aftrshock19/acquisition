@@ -44,6 +44,7 @@ export type UserSettingsRow = {
   show_pos_hint: boolean;
   show_definition_first: boolean;
   hide_translation_sentences: boolean;
+  scheduler_variant: "baseline" | "adaptive";
   created_at: string;
   updated_at: string;
 };

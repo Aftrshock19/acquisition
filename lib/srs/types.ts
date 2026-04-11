@@ -115,6 +115,13 @@ export type DailySessionRow = {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  scheduler_variant?: "baseline" | "adaptive" | null;
+  learner_state_score?: number | null;
+  learner_factor?: number | null;
+  workload_factor?: number | null;
+  adaptive_new_word_budget?: number | null;
+  reading_question_accuracy?: number | null;
+  reading_question_attempts_count?: number | null;
 };
 
 export type ReviewState = {

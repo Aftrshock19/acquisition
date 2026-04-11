@@ -125,6 +125,7 @@ export function ReaderSession({
 
       {!quizDone && questions.length > 0 ? (
         <ReadingQuiz
+          textId={text.id}
           questions={questions}
           onComplete={() => setQuizDone(true)}
         />

@@ -19,6 +19,7 @@ const CSV_DATASETS: Array<Exclude<ExportDataset, "all">> = [
   "reading_events",
   "listening_events",
   "saved_words",
+  "reading_question_attempts",
   "export_runs",
 ];
 

@@ -3,6 +3,9 @@ import type {
   AnalyticsBundle,
   AnalyticsDateRange,
   AnalyticsExportRunRow,
+  AnalyticsPlacementResponseRow,
+  AnalyticsPlacementRunRow,
+  AnalyticsReadingQuestionAttemptRow,
   AnalyticsReviewEventRow,
   AnalyticsSavedWordRow,
   AnalyticsSessionRow,
@@ -24,12 +27,16 @@ export async function getUserAnalyticsBundle(
   userId: string,
   range: AnalyticsDateRange,
 ): Promise<AnalyticsBundle> {
-  const [sessions, reviewEvents, savedWords, exportRuns] = await Promise.all([
-    fetchSessions(supabase, userId, range),
-    fetchReviewEvents(supabase, userId, range),
-    fetchSavedWords(supabase, userId, range),
-    fetchExportRuns(supabase, userId, range),
-  ]);
+  const [sessions, reviewEvents, savedWords, readingQuestionAttempts, exportRuns, placementRuns, placementResponses] =
+    await Promise.all([
+      fetchSessions(supabase, userId, range),
+      fetchReviewEvents(supabase, userId, range),
+      fetchSavedWords(supabase, userId, range),
+      fetchReadingQuestionAttempts(supabase, userId, range),
+      fetchExportRuns(supabase, userId, range),
+      fetchPlacementRuns(supabase, userId),
+      fetchPlacementResponses(supabase, userId),
+    ]);
 
   const dailyAggregates = buildDailyAggregates({
     range,
@@ -50,11 +57,67 @@ export async function getUserAnalyticsBundle(
     sessions,
     reviewEvents,
     savedWords,
+    readingQuestionAttempts,
     exportRuns,
     dailyAggregates,
     summary,
     today,
+    placementRuns,
+    placementResponses,
   };
+}
+
+async function fetchPlacementRuns(
+  supabase: SupabaseServerClient,
+  userId: string,
+): Promise<AnalyticsPlacementRunRow[]> {
+  const { data, error } = await supabase
+    .from("baseline_test_runs")
+    .select(
+      "id,user_id,language,status,started_at,completed_at,skipped_at,algorithm_version,recognition_items_answered,recall_items_answered,estimated_frontier_rank,estimated_frontier_rank_low,estimated_frontier_rank_high,estimated_receptive_vocab,confidence_score,raw_recognition_accuracy,raw_recall_accuracy,placement_summary,created_at",
+    )
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
+  if (error) return [];
+  return (data ?? []) as AnalyticsPlacementRunRow[];
+}
+
+async function fetchPlacementResponses(
+  supabase: SupabaseServerClient,
+  userId: string,
+): Promise<AnalyticsPlacementResponseRow[]> {
+  const { data, error } = await supabase
+    .from("baseline_test_responses")
+    .select(
+      "id,run_id,user_id,word_id,item_bank_id,sequence_index,item_type,band_start,band_end,is_correct,used_idk,latency_ms,answered_at,previous_attempt_seen,reuse_due_to_pool_exhaustion,selection_seed",
+    )
+    .eq("user_id", userId)
+    .order("answered_at", { ascending: true });
+  if (error) return [];
+  return (data ?? []) as AnalyticsPlacementResponseRow[];
+}
+
+async function fetchReadingQuestionAttempts(
+  supabase: SupabaseServerClient,
+  userId: string,
+  range: AnalyticsDateRange,
+) {
+  const { data, error } = await supabase
+    .from("reading_question_attempts")
+    .select(
+      "id,user_id,daily_session_id,session_date,text_id,question_id,selected_option,correct_option,correct,response_ms,scheduler_variant,created_at",
+    )
+    .eq("user_id", userId)
+    .gte("session_date", range.from)
+    .lte("session_date", range.to)
+    .order("session_date", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as AnalyticsReadingQuestionAttemptRow[];
 }
 
 async function fetchSessions(
@@ -85,7 +148,7 @@ async function fetchReviewEvents(
   const { data, error } = await supabase
     .from("review_events")
     .select(
-      "id,user_id,daily_session_id,session_date,word_id,queue_kind,queue_source,card_type,grade,correct,ms_spent,shown_at,submitted_at,retry_scheduled_for,client_attempt_id,created_at,happened_at,user_answer,expected,delta_hours,first_try,retry_index,scheduler_outcome",
+      "id,user_id,daily_session_id,session_date,word_id,queue_kind,queue_source,card_type,grade,correct,ms_spent,shown_at,submitted_at,retry_scheduled_for,client_attempt_id,created_at,happened_at,user_answer,expected,delta_hours,first_try,retry_index,scheduler_outcome,scheduler_variant,learner_factor,item_factor,baseline_interval_days,effective_interval_days,difficulty_before,difficulty_after",
     )
     .eq("user_id", userId)
     .gte("session_date", range.from)
@@ -253,6 +316,13 @@ export function buildDailyAggregates({
         workloadAssignedUnits > 0
           ? workloadCompletedUnits / workloadAssignedUnits
           : null,
+      scheduler_variant: session?.scheduler_variant ?? null,
+      learner_state_score: session?.learner_state_score ?? null,
+      learner_factor: session?.learner_factor ?? null,
+      workload_factor: session?.workload_factor ?? null,
+      adaptive_new_word_budget: session?.adaptive_new_word_budget ?? null,
+      reading_question_accuracy: session?.reading_question_accuracy ?? null,
+      reading_question_attempts_count: session?.reading_question_attempts_count ?? 0,
     };
   });
 }

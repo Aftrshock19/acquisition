@@ -258,6 +258,7 @@ function makeSettings(overrides: Partial<UserSettingsRow> = {}): UserSettingsRow
     show_pos_hint: true,
     show_definition_first: true,
     hide_translation_sentences: false,
+    scheduler_variant: "baseline",
     created_at: new Date(0).toISOString(),
     updated_at: new Date(0).toISOString(),
     ...overrides,

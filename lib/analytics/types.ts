@@ -38,6 +38,28 @@ export type AnalyticsReviewEventRow = {
   first_try: boolean | null;
   retry_index: number | null;
   scheduler_outcome: SchedulerOutcome | null;
+  scheduler_variant?: "baseline" | "adaptive" | null;
+  learner_factor?: number | null;
+  item_factor?: number | null;
+  baseline_interval_days?: number | null;
+  effective_interval_days?: number | null;
+  difficulty_before?: number | null;
+  difficulty_after?: number | null;
+};
+
+export type AnalyticsReadingQuestionAttemptRow = {
+  id: string;
+  user_id: string;
+  daily_session_id: string | null;
+  session_date: string;
+  text_id: string;
+  question_id: string;
+  selected_option: number;
+  correct_option: number;
+  correct: boolean;
+  response_ms: number;
+  scheduler_variant: "baseline" | "adaptive" | null;
+  created_at: string;
 };
 
 export type AnalyticsSavedWordRow = {
@@ -88,6 +110,13 @@ export type DailyAggregate = {
   workload_assigned_units: number;
   workload_completed_units: number;
   workload_completion_rate: number | null;
+  scheduler_variant: "baseline" | "adaptive" | null;
+  learner_state_score: number | null;
+  learner_factor: number | null;
+  workload_factor: number | null;
+  adaptive_new_word_budget: number | null;
+  reading_question_accuracy: number | null;
+  reading_question_attempts_count: number;
 };
 
 export type StageTotals = {
@@ -144,15 +173,59 @@ export type TodayProgressSnapshot = {
   logged_active_time_seconds: number;
 };
 
+export type AnalyticsPlacementRunRow = {
+  id: string;
+  user_id: string;
+  language: string;
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  skipped_at: string | null;
+  algorithm_version: string;
+  recognition_items_answered: number;
+  recall_items_answered: number;
+  estimated_frontier_rank: number | null;
+  estimated_frontier_rank_low: number | null;
+  estimated_frontier_rank_high: number | null;
+  estimated_receptive_vocab: number | null;
+  confidence_score: number | null;
+  raw_recognition_accuracy: number | null;
+  raw_recall_accuracy: number | null;
+  placement_summary: Record<string, unknown> | null;
+  created_at: string;
+};
+
+export type AnalyticsPlacementResponseRow = {
+  id: string;
+  run_id: string;
+  user_id: string;
+  word_id: string | null;
+  item_bank_id: string | null;
+  sequence_index: number;
+  item_type: "recognition" | "recall";
+  band_start: number;
+  band_end: number;
+  is_correct: boolean;
+  used_idk: boolean;
+  latency_ms: number | null;
+  answered_at: string;
+  previous_attempt_seen: boolean | null;
+  reuse_due_to_pool_exhaustion: boolean | null;
+  selection_seed: string | null;
+};
+
 export type AnalyticsBundle = {
   range: AnalyticsDateRange;
   sessions: AnalyticsSessionRow[];
   reviewEvents: AnalyticsReviewEventRow[];
   savedWords: AnalyticsSavedWordRow[];
+  readingQuestionAttempts: AnalyticsReadingQuestionAttemptRow[];
   exportRuns: AnalyticsExportRunRow[];
   dailyAggregates: DailyAggregate[];
   summary: AnalyticsSummary;
   today: TodayProgressSnapshot | null;
+  placementRuns?: AnalyticsPlacementRunRow[];
+  placementResponses?: AnalyticsPlacementResponseRow[];
 };
 
 export type ConsistencyIssue = {

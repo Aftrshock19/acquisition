@@ -27,6 +27,13 @@ import type {
   Grade,
 } from "@/lib/srs/types";
 import { getUserSettings } from "@/lib/settings/getUserSettings";
+import { recalibratePlacementForUser } from "@/lib/placement/recalibrate";
+import { pickNewWordsNearFrontier } from "@/lib/placement/newWordPicker";
+import {
+  computeAdaptiveContext,
+  computeItemFactor,
+  type SchedulerVariant,
+} from "@/lib/srs/adaptive";
 import { getMcqQuestionFormatsPreference } from "@/lib/settings/mcqQuestionFormats";
 import { recommendSettings } from "@/lib/settings/recommendSettings";
 import { resolveEffectiveSettings } from "@/lib/settings/resolveEffectiveSettings";
@@ -221,7 +228,7 @@ export async function getDailyQueue(
     }
   }
 
-  const newWords: Word[] = items
+  let newWords: Word[] = items
     .filter((r) => r.kind === "new")
     .map((r) => ({
       id: r.word_id,
@@ -236,6 +243,71 @@ export async function getDailyQueue(
       exampleSentenceEn: r.example_sentence_en ?? null,
       pos: r.pos ?? null,
     }));
+
+  // Placement-aware override: if user has a frontier estimate, prefer new
+  // words near the frontier rather than always picking from rank 1.
+  try {
+    const { data: placementRow } = await supabase
+      .from("user_settings")
+      .select("current_frontier_rank, current_frontier_rank_low, current_frontier_rank_high, placement_status")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    const frontierRank = placementRow?.current_frontier_rank as number | null;
+    if (frontierRank && frontierRank > 200 && limitNew > 0) {
+      const lowBound = placementRow?.current_frontier_rank_low as number | null;
+      const highBound = placementRow?.current_frontier_rank_high as number | null;
+      const picked = await pickNewWordsNearFrontier(supabase, {
+        userId: user.id,
+        language: lang,
+        frontier: {
+          rank: frontierRank,
+          low: lowBound ?? Math.max(1, frontierRank - 300),
+          high: highBound ?? frontierRank + 300,
+        },
+        limit: limitNew,
+        excludeWordIds: excludeWordIds ?? [],
+      });
+      if (picked.length > 0) {
+        const pickedIds = picked.map((p) => p.id);
+        const { data: enriched } = await supabase
+          .from("words")
+          .select("id, lemma, rank, pos, translation, example_sentence, example_sentence_en")
+          .in("id", pickedIds);
+        const byId = new Map<string, Word>();
+        for (const row of (enriched ?? []) as Array<{
+          id: string;
+          lemma: string;
+          rank: number;
+          pos: string | null;
+          translation: string | null;
+          example_sentence: string | null;
+          example_sentence_en: string | null;
+        }>) {
+          byId.set(row.id, {
+            id: row.id,
+            language: lang,
+            lemma: row.lemma,
+            rank: row.rank,
+            translation: row.translation ?? null,
+            definition: null,
+            definitionEs: null,
+            definitionEn: null,
+            exampleSentence: row.example_sentence ?? null,
+            exampleSentenceEn: row.example_sentence_en ?? null,
+            pos: row.pos ?? null,
+          });
+        }
+        const placementOrdered: Word[] = picked
+          .map((p) => byId.get(p.id))
+          .filter((w): w is Word => Boolean(w));
+        if (placementOrdered.length > 0) {
+          newWords = placementOrdered;
+        }
+      }
+    }
+  } catch {
+    // Placement override is best-effort; never block the daily queue.
+  }
 
   return {
     ok: true,
@@ -272,11 +344,27 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
   );
   const remainingDailyLimit = Math.max(0, effective.effectiveDailyLimit - completedToday);
 
+  const variant: SchedulerVariant =
+    settings.scheduler_variant === "adaptive" ? "adaptive" : "baseline";
+  const adaptiveContext =
+    variant === "adaptive"
+      ? await (async () => {
+          const { supabase, user } = await getSupabaseServerContext();
+          if (!supabase || !user) return null;
+          return computeAdaptiveContext(supabase, user.id, variant);
+        })()
+      : null;
+
+  const baseNewWordBudget = MAX_NEW_WORDS;
+  const adaptiveNewWordBudget = adaptiveContext
+    ? adaptiveContext.workload.adaptiveNewWordCap(baseNewWordBudget)
+    : baseNewWordBudget;
+
   const workloadPolicy = computeWorkloadPolicy({
     p50ReviewMs,
     daysSinceLastSession,
     overdueCount,
-    scheduledNewCount: MAX_NEW_WORDS,
+    scheduledNewCount: adaptiveNewWordBudget,
   });
 
   const newLimit    = workloadPolicy.recommendedNewWords;
@@ -308,7 +396,13 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
   }
 
   const session = limitTodaySession(queueResult.session, remainingDailyLimit);
-  const dailySession = await upsertDailySession(session, existingDailySession);
+  const dailySession = await upsertDailySession(session, existingDailySession, {
+    variant,
+    learnerStateScore: adaptiveContext?.learnerState.learnerStateScore ?? null,
+    learnerFactor: adaptiveContext?.learnerState.learnerFactor ?? null,
+    workloadFactor: adaptiveContext?.workload.workloadFactor ?? null,
+    adaptiveNewWordBudget: adaptiveContext ? adaptiveNewWordBudget : null,
+  });
 
   return {
     ok: true,
@@ -450,6 +544,42 @@ export async function recordReview(
     const queueSource = payload.queueSource ?? "main";
     const retryScheduledFor = payload.retryScheduledFor ?? null;
 
+    const { settings } = await getUserSettings();
+    const variant: SchedulerVariant =
+      settings.scheduler_variant === "adaptive" ? "adaptive" : "baseline";
+
+    let learnerFactor = 1.0;
+    let itemFactor = 1.0;
+
+    if (variant === "adaptive") {
+      const [adaptive, wordState] = await Promise.all([
+        computeAdaptiveContext(supabase, user.id, variant),
+        (async () => {
+          const { data } = await supabase
+            .from("user_words")
+            .select("difficulty,adaptive_evidence_count,words(rank)")
+            .eq("user_id", user.id)
+            .eq("word_id", payload.wordId)
+            .maybeSingle();
+          return data as
+            | {
+                difficulty: number | null;
+                adaptive_evidence_count: number | null;
+                words: { rank: number | null } | null;
+              }
+            | null;
+        })(),
+      ]);
+
+      learnerFactor = adaptive.learnerState.learnerFactor;
+      const item = computeItemFactor({
+        rank: wordState?.words?.rank ?? null,
+        observedDifficulty: wordState?.difficulty ?? null,
+        evidenceCount: wordState?.adaptive_evidence_count ?? 0,
+      });
+      itemFactor = item.itemFactor;
+    }
+
     const { error } = await supabase.rpc("record_review", {
       p_word_id: payload.wordId,
       p_grade: grade,
@@ -466,6 +596,9 @@ export async function recordReview(
       p_client_attempt_id: payload.clientAttemptId ?? null,
       p_first_try: payload.firstTry ?? true,
       p_retry_index: payload.retryIndex ?? 0,
+      p_scheduler_variant: variant,
+      p_learner_factor: learnerFactor,
+      p_item_factor: itemFactor,
     });
 
     if (error) {
@@ -490,6 +623,42 @@ function resolveGrade(payload: RecordReviewPayload): Grade {
 
 function isValidGrade(value: string): value is Grade {
   return value === "again" || value === "hard" || value === "good" || value === "easy";
+}
+
+export type RecordReadingQuestionAttemptResult =
+  | { ok: true; correct: boolean }
+  | { ok: false; error: string };
+
+export async function recordReadingQuestionAttempt(payload: {
+  textId: string;
+  questionId: string;
+  selectedOption: number;
+  responseMs: number;
+}): Promise<RecordReadingQuestionAttemptResult> {
+  try {
+    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    if (!supabase) {
+      return { ok: false, error: "Supabase client could not be created on the server" };
+    }
+    if (authError) return { ok: false, error: authError };
+    if (!user) return { ok: false, error: "Not authenticated" };
+
+    const { data, error } = await supabase.rpc("record_reading_question_attempt", {
+      p_text_id: payload.textId,
+      p_question_id: payload.questionId,
+      p_selected_option: payload.selectedOption,
+      p_response_ms: Math.max(0, Math.round(payload.responseMs)),
+    });
+
+    if (error) return { ok: false, error: error.message };
+    const row = data as { correct: boolean } | null;
+    return { ok: true, correct: Boolean(row?.correct) };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to record reading question",
+    };
+  }
 }
 
 export type RecordExposureResult = { ok: true } | { ok: false; error: string };
@@ -652,9 +821,18 @@ function limitTodaySession(session: TodaySession, dailyLimit: number): TodaySess
   };
 }
 
+type AdaptiveDailySessionPatch = {
+  variant: SchedulerVariant;
+  learnerStateScore: number | null;
+  learnerFactor: number | null;
+  workloadFactor: number | null;
+  adaptiveNewWordBudget: number | null;
+};
+
 async function upsertDailySession(
   session: TodaySession,
   existingDailySession: DailySessionRow | null,
+  adaptive?: AdaptiveDailySessionPatch,
 ): Promise<DailySessionRow | null> {
   const { supabase, user } = await getSupabaseServerContext();
   if (!supabase || !user) return null;
@@ -740,6 +918,15 @@ async function upsertDailySession(
         completed_at: completed
           ? existingDailySession?.completed_at ?? now
           : existingDailySession?.completed_at ?? null,
+        ...(adaptive
+          ? {
+              scheduler_variant: adaptive.variant,
+              learner_state_score: adaptive.learnerStateScore,
+              learner_factor: adaptive.learnerFactor,
+              workload_factor: adaptive.workloadFactor,
+              adaptive_new_word_budget: adaptive.adaptiveNewWordBudget,
+            }
+          : {}),
       },
       { onConflict: "user_id,session_date" },
     )
@@ -1052,6 +1239,15 @@ export async function completeListeningStep({
     revalidatePath(`/reader/${listeningAsset.textId}`);
 
     const dailySession = data as DailySessionRow;
+
+    // Fire-and-forget placement recalibration at end of session.
+    if (getDailySessionCompleted(nextProgress)) {
+      try {
+        await recalibratePlacementForUser(supabase, user.id);
+      } catch {
+        // Recalibration is best-effort; never block the session completion.
+      }
+    }
 
     return {
       ok: true,
