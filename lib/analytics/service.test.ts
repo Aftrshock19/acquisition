@@ -9,7 +9,7 @@ const sampleSession: AnalyticsSessionRow = {
   id: "session-1",
   user_id: "user-1",
   session_date: TODAY,
-  stage: "complete",
+  stage: "completed",
   new_words_count: 3,
   reviews_done: 3,
   assigned_flashcard_count: 3,
