@@ -27,6 +27,9 @@ type ReadingIndexRow = {
   word_count: number | null;
   estimated_minutes: number | null;
   difficulty_cefr: string | null;
+  display_label: string | null;
+  passage_mode: string | null;
+  stage_index: number | null;
   created_at: string;
   text_collections:
     | ReadingIndexCollectionRow
@@ -44,6 +47,9 @@ export type ReadingIndexText = {
   wordCount: number | null;
   estimatedMinutes: number | null;
   difficultyCefr: string | null;
+  displayLabel: string | null;
+  passageMode: string | null;
+  stageIndex: number | null;
 };
 
 export type ReadingIndexCollection = {
@@ -148,6 +154,9 @@ export async function getReadingIndexData(
         word_count,
         estimated_minutes,
         difficulty_cefr,
+        display_label,
+        passage_mode,
+        stage_index,
         created_at,
         text_collections (
           id,
@@ -216,6 +225,9 @@ function toReadingIndexText(row: ReadingIndexRow): ReadingIndexText {
     wordCount: row.word_count ?? null,
     estimatedMinutes: row.estimated_minutes ?? null,
     difficultyCefr: row.difficulty_cefr ?? null,
+    displayLabel: row.display_label ?? null,
+    passageMode: row.passage_mode ?? null,
+    stageIndex: row.stage_index ?? null,
   };
 }
 

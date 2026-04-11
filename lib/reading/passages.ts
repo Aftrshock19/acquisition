@@ -66,6 +66,12 @@ function toQuestion(row: QuestionRow): ReadingQuestion {
   };
 }
 
+// ── In-memory cache for passage index (same for all users) ──
+
+let _cachedIndex: ReadingStageGroup[] | null = null;
+let _cachedAt = 0;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 // ── Queries ────────────────────────────────────────────────
 
 const PASSAGE_SUMMARY_COLUMNS =
@@ -74,10 +80,15 @@ const PASSAGE_SUMMARY_COLUMNS =
 /**
  * List all imported passages grouped by stage, then by mode.
  * Queries from texts WHERE stage IS NOT NULL.
+ * Result is cached in memory for 5 minutes (same for all users).
  */
 export async function getPassageIndex(
   supabase: SupabaseServerClient,
 ): Promise<ReadingStageGroup[]> {
+  if (_cachedIndex && Date.now() - _cachedAt < CACHE_TTL_MS) {
+    return _cachedIndex;
+  }
+
   const { data, error } = await supabase
     .from("texts")
     .select(PASSAGE_SUMMARY_COLUMNS)
@@ -119,9 +130,14 @@ export async function getPassageIndex(
     );
   }
 
-  return Array.from(stageMap.values()).sort(
+  const result = Array.from(stageMap.values()).sort(
     (a, b) => a.stageIndex - b.stageIndex,
   );
+
+  _cachedIndex = result;
+  _cachedAt = Date.now();
+
+  return result;
 }
 
 /**
@@ -179,6 +195,29 @@ export async function getPassageById(
     content: row.content,
     questions: ((questionData ?? []) as QuestionRow[]).map(toQuestion),
   };
+}
+
+/**
+ * Get comprehension questions for a text, if any exist.
+ * Works for any text ID — returns empty array if none are linked.
+ */
+export async function getQuestionsForText(
+  supabase: SupabaseServerClient,
+  textId: string,
+): Promise<ReadingQuestion[]> {
+  if (!UUID_RE.test(textId)) return [];
+
+  const { data, error } = await supabase
+    .from("reading_questions")
+    .select(
+      "id, question_index, question_type, question_en, options_en, correct_option_index",
+    )
+    .eq("text_id", textId)
+    .order("question_index", { ascending: true });
+
+  if (error) throw new Error(error.message);
+
+  return ((data ?? []) as QuestionRow[]).map(toQuestion);
 }
 
 /**

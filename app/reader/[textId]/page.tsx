@@ -4,6 +4,7 @@ import { getTodayDailySessionRow } from "@/lib/loop/dailySessions";
 import { getListeningAssetForTextId } from "@/lib/loop/listening";
 import { getTextById } from "@/lib/loop/texts";
 import { getSavedWordsState } from "@/lib/reader/savedWords";
+import { getQuestionsForText } from "@/lib/reading/passages";
 import { getSupabaseUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -111,10 +112,11 @@ export default async function ReaderPage({
     );
   }
 
-  const [savedState, listeningAsset, dailySession] = await Promise.all([
+  const [savedState, listeningAsset, dailySession, questions] = await Promise.all([
     getSavedWordState(supabase, user.id, text.lang),
     getListeningAssetForTextId(supabase, text.id),
     getTodayDailySessionRow(supabase, user.id),
+    getQuestionsForText(supabase, text.id),
   ]);
   const readingDoneForText = Boolean(
     dailySession?.reading_done &&
@@ -143,6 +145,7 @@ export default async function ReaderPage({
         listeningAssetId={listeningAsset?.id ?? null}
         readingDone={readingDoneForText}
         listeningDone={listeningDoneForText}
+        questions={questions}
       />
     </main>
   );

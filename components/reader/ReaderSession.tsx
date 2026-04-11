@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { markReadingOpened } from "@/app/actions/srs";
+import { ReadingQuiz } from "@/components/reader/ReadingQuiz";
 import { ReaderNextStepCard } from "@/components/reader/ReaderNextStepCard";
 import { InteractiveText } from "@/components/interactive-text/InteractiveText";
 import { InteractiveTextProvider } from "@/components/interactive-text/InteractiveTextProvider";
 import { toReadingBlocks } from "@/lib/loop/reader";
 import { tokenize } from "@/lib/reader/tokenize";
 import type { ReaderText } from "@/lib/reader/types";
+import type { ReadingQuestion } from "@/lib/reading/types";
 
 type ReaderSessionProps = {
   text: ReaderText;
@@ -16,6 +18,7 @@ type ReaderSessionProps = {
   listeningAssetId: string | null;
   readingDone: boolean;
   listeningDone: boolean;
+  questions?: ReadingQuestion[];
 };
 
 export function ReaderSession({
@@ -25,6 +28,7 @@ export function ReaderSession({
   listeningAssetId,
   readingDone,
   listeningDone,
+  questions = [],
 }: ReaderSessionProps) {
   const blocks = useMemo(
     () => toReadingBlocks(text.content).map((block) => tokenize(block)),
@@ -32,6 +36,7 @@ export function ReaderSession({
   );
   const activeStartedAtRef = useRef<number | null>(null);
   const accumulatedMsRef = useRef(0);
+  const [quizDone, setQuizDone] = useState(questions.length === 0);
 
   useEffect(() => {
     void markReadingOpened({ textId: text.id });
@@ -118,13 +123,20 @@ export function ReaderSession({
         </section>
       </InteractiveTextProvider>
 
-      <ReaderNextStepCard
-        textId={text.id}
-        listeningAssetId={listeningAssetId}
-        readingDone={readingDone}
-        listeningDone={listeningDone}
-        getReadingTimeSeconds={getReadingTimeSeconds}
-      />
+      {!quizDone && questions.length > 0 ? (
+        <ReadingQuiz
+          questions={questions}
+          onComplete={() => setQuizDone(true)}
+        />
+      ) : (
+        <ReaderNextStepCard
+          textId={text.id}
+          listeningAssetId={listeningAssetId}
+          readingDone={readingDone}
+          listeningDone={listeningDone}
+          getReadingTimeSeconds={getReadingTimeSeconds}
+        />
+      )}
     </>
   );
 }
