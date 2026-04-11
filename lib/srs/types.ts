@@ -80,7 +80,7 @@ export type DailySessionRow = {
   id: string;
   user_id: string;
   session_date: string;
-  stage: "flashcards" | "reading" | "listening" | "complete";
+  stage: "flashcards" | "reading" | "listening" | "completed";
   new_words_count: number;
   reviews_done: number;
   assigned_flashcard_count: number;

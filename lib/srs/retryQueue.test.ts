@@ -177,4 +177,184 @@ describe("RetryQueue", () => {
       expect(rq.hasPending).toBe(true);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Duplicate enqueue resets scheduling (BUG DOCUMENTATION)
+  // -------------------------------------------------------------------------
+  describe("duplicate enqueue resets dueAfterCount", () => {
+    it("re-enqueuing a pending card pushes its due date forward", () => {
+      const rq = new RetryQueue<TestCard>();
+      const card = makeCard("x");
+
+      rq.enqueue(card);
+      // Card is due after 5 answers
+      rq.recordAnswer(); // count=1
+      rq.recordAnswer(); // count=2
+      rq.recordAnswer(); // count=3
+
+      // Card should become due at count=5. But re-enqueue now:
+      rq.enqueue(card); // resets dueAfterCount to 3+5=8
+
+      rq.recordAnswer(); // count=4
+      rq.recordAnswer(); // count=5 — would have been due, but was reset
+
+      // Card should NOT be ready yet because re-enqueue pushed it back
+      expect(rq.peek()).toBeNull();
+
+      // Need 3 more answers
+      rq.recordAnswer(); // 6
+      rq.recordAnswer(); // 7
+      rq.recordAnswer(); // 8 — now due
+
+      expect(rq.peek()).not.toBeNull();
+      expect(rq.peek()!.card.id).toBe("x");
+    });
+
+    it("re-enqueue increments retry count even though card is replaced", () => {
+      const rq = new RetryQueue<TestCard>();
+      const card = makeCard("y");
+
+      rq.enqueue(card);
+      expect(rq.getRetryCount("y")).toBe(1);
+
+      // Re-enqueue before dequeue
+      rq.enqueue(card);
+      expect(rq.getRetryCount("y")).toBe(2);
+
+      // Only one entry exists
+      expect(rq.pendingCount).toBe(1);
+
+      // Third enqueue should fail (MAX_RETRIES=2 exhausted)
+      expect(rq.enqueue(card)).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Force-dequeue when not yet due (TodaySession exhaustion path)
+  // -------------------------------------------------------------------------
+  describe("force-dequeue when main queue exhausted", () => {
+    it("dequeue returns null when card is not yet due", () => {
+      const rq = new RetryQueue<TestCard>();
+      rq.enqueue(makeCard("z"));
+      // Only 2 answers, need RETRY_GAP(5)
+      rq.recordAnswer();
+      rq.recordAnswer();
+
+      expect(rq.dequeue()).toBeNull();
+      expect(rq.hasPending).toBe(true);
+    });
+
+    it("hasPending is true even when no card is due yet", () => {
+      const rq = new RetryQueue<TestCard>();
+      rq.enqueue(makeCard("a"));
+      rq.enqueue(makeCard("b"));
+
+      expect(rq.pendingCount).toBe(2);
+      expect(rq.peek()).toBeNull(); // not yet due
+      expect(rq.hasPending).toBe(true); // but pending
+    });
+
+    it("forceDequeue returns card even before gap is met", () => {
+      const rq = new RetryQueue<TestCard>();
+      rq.enqueue(makeCard("stranded"));
+      rq.recordAnswer(); // only 1 answer, need RETRY_GAP(5)
+
+      // Normal dequeue fails
+      expect(rq.dequeue()).toBeNull();
+      // Force-dequeue succeeds
+      const entry = rq.forceDequeue();
+      expect(entry).not.toBeNull();
+      expect(entry!.card.id).toBe("stranded");
+      expect(rq.pendingCount).toBe(0);
+    });
+
+    it("forceDequeue returns null when queue is empty", () => {
+      const rq = new RetryQueue<TestCard>();
+      expect(rq.forceDequeue()).toBeNull();
+    });
+
+    it("forceDequeue serves earliest-scheduled card first", () => {
+      const rq = new RetryQueue<TestCard>();
+      rq.enqueue(makeCard("first"));
+      rq.recordAnswer();
+      rq.recordAnswer();
+      rq.enqueue(makeCard("second"));
+
+      // first was enqueued at count=0, second at count=2
+      const entry = rq.forceDequeue();
+      expect(entry!.card.id).toBe("first");
+      const entry2 = rq.forceDequeue();
+      expect(entry2!.card.id).toBe("second");
+    });
+
+    it("forceDequeue works for single-card session (retry starvation fix)", () => {
+      const rq = new RetryQueue<TestCard>();
+      const card = makeCard("lonely");
+
+      // Simulate: 1 card answered, marked incorrect, enqueued
+      rq.recordAnswer();
+      rq.enqueue(card);
+
+      // Normal dequeue can't satisfy RETRY_GAP
+      expect(rq.dequeue()).toBeNull();
+
+      // forceDequeue rescues the stranded retry
+      const entry = rq.forceDequeue();
+      expect(entry).not.toBeNull();
+      expect(entry!.card.id).toBe("lonely");
+
+      // Enqueue again (retry 2)
+      rq.recordAnswer();
+      rq.enqueue(card);
+      const entry2 = rq.forceDequeue();
+      expect(entry2).not.toBeNull();
+
+      // Third enqueue should be rejected (MAX_RETRIES=2)
+      expect(rq.enqueue(card)).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Stress: many cards and rapid events
+  // -------------------------------------------------------------------------
+  describe("stress scenarios", () => {
+    it("10 cards enqueued at different times all become available in order", () => {
+      const rq = new RetryQueue<TestCard>();
+      const ids: string[] = [];
+
+      for (let i = 0; i < 10; i++) {
+        const card = makeCard(`card-${i}`);
+        ids.push(card.id);
+        rq.enqueue(card);
+        rq.recordAnswer(); // stagger enqueue times
+      }
+
+      expect(rq.pendingCount).toBe(10);
+
+      // Fast-forward enough answers to make all due
+      for (let i = 0; i < RETRY_GAP + 10; i++) {
+        rq.recordAnswer();
+      }
+
+      // Dequeue all — should come in enqueue order (FIFO by dueAfterCount)
+      const dequeued: string[] = [];
+      for (let i = 0; i < 10; i++) {
+        const entry = rq.dequeue();
+        expect(entry).not.toBeNull();
+        dequeued.push(entry!.card.id);
+      }
+      // All cards were enqueued 1 answer apart, so they become due 1 answer
+      // apart. With enough answers, they come out in order.
+      expect(dequeued).toEqual(ids);
+    });
+
+    it("rapid 20 answers with 0 cards enqueued does not crash", () => {
+      const rq = new RetryQueue<TestCard>();
+      for (let i = 0; i < 20; i++) {
+        rq.recordAnswer();
+      }
+      expect(rq.pendingCount).toBe(0);
+      expect(rq.dequeue()).toBeNull();
+    });
+  });
 });

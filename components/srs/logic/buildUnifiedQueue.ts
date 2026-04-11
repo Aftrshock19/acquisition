@@ -136,7 +136,8 @@ export function buildUnifiedQueue(
     };
   }
 
-  const baseCards = [
+  // Reviews come first so they win on duplicate word_id collision
+  const rawCards = [
     ...session.dueReviews.map((card) => ({
       id: card.word_id,
       kind: "review" as const,
@@ -166,6 +167,14 @@ export function buildUnifiedQueue(
       hint: formatPartOfSpeech(card.pos),
     })),
   ];
+
+  // Deduplicate by word ID — first occurrence wins (reviews before new words)
+  const seenIds = new Set<string>();
+  const baseCards = rawCards.filter((card) => {
+    if (seenIds.has(card.id)) return false;
+    seenIds.add(card.id);
+    return true;
+  });
 
   let mcqIndex = 0;
   const queue: UnifiedQueueCard[] = baseCards.map((card, index) => {

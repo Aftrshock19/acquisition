@@ -41,9 +41,9 @@ export const STREAK_BONUS = 0.15;
 /**
  * Hard upper cap for stability_days.
  * No card will be scheduled more than this many days out.
- * Keep in sync with LEAST(365, ...) in the SQL record_review function.
+ * Keep in sync with LEAST(730, ...) in the SQL record_review function.
  */
-export const MAX_STABILITY_DAYS = 365;
+export const MAX_STABILITY_DAYS = 730;
 
 /** Rescued-correct stability multiplier (much less than clean) */
 export const RESCUED_STABILITY_MULTIPLIER = 1.2;

@@ -53,8 +53,8 @@ export function getConsistencyIssues(
     if (session.stage === "reading" && session.listening_done && !session.reading_done) {
       reasons.push("listening is done before reading is done");
     }
-    if (session.stage === "complete" && !session.completed) {
-      reasons.push("stage is complete but completed=false");
+    if (session.stage === "completed" && !session.completed) {
+      reasons.push("stage is completed but completed=false");
     }
     if (session.completed && !session.completed_at) {
       reasons.push("completed=true but completed_at is missing");

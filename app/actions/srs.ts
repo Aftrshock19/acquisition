@@ -604,11 +604,11 @@ function resolveDailySessionStage(
     return "listening";
   }
 
-  return "complete";
+  return "completed";
 }
 
 function getDailySessionCompleted(state: DailySessionProgressState) {
-  return resolveDailySessionStage(state) === "complete";
+  return resolveDailySessionStage(state) === "completed";
 }
 
 function getNextPathForDailySession(

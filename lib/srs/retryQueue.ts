@@ -92,6 +92,23 @@ export class RetryQueue<T extends { id: string }> {
     return this.entries.splice(idx, 1)[0];
   }
 
+  /**
+   * Force-dequeue the next pending retry, ignoring the gap requirement.
+   * Used when the main queue is exhausted and retries would otherwise be stranded.
+   * Returns entries in FIFO order by dueAfterCount (earliest-scheduled first).
+   */
+  forceDequeue(): RetryQueueEntry<T> | null {
+    if (this.entries.length === 0) return null;
+    // Serve the entry closest to being due first
+    let minIdx = 0;
+    for (let i = 1; i < this.entries.length; i++) {
+      if (this.entries[i].dueAfterCount < this.entries[minIdx].dueAfterCount) {
+        minIdx = i;
+      }
+    }
+    return this.entries.splice(minIdx, 1)[0];
+  }
+
   /** How many retries are still pending (not yet served). */
   get pendingCount(): number {
     return this.entries.length;

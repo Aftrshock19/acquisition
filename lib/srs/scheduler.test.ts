@@ -260,6 +260,102 @@ describe("degraded path recovers slower than clean path", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Stress: repeated failures then rescue
+// ---------------------------------------------------------------------------
+describe("repeated failure then rescue stress test", () => {
+  it("10 failures + 1 rescued success: word is deeply degraded", () => {
+    let state = makeState();
+    for (let i = 0; i < 10; i++) {
+      state = processReview(state, incorrect(), NOW).state;
+    }
+    // After 10 failures: difficulty should be high, stability floored
+    expect(state.difficulty).toBeGreaterThan(0.9);
+    expect(state.stability_days).toBeLessThanOrEqual(0.5);
+    expect(state.lapses).toBe(10);
+    expect(state.learned_level).toBe(0);
+    expect(state.srs_state).toBe("learning");
+
+    // One rescued success
+    const rescued = processReview(state, rescuedSuccess(), NOW);
+    // Stability grows modestly from floor
+    expect(rescued.state.stability_days).toBeGreaterThanOrEqual(0.5);
+    // Still learning, not review (rescued doesn't promote from learning if level is 0)
+    expect(rescued.state.learned_level).toBe(0);
+    // difficulty should decrease slightly
+    expect(rescued.state.difficulty).toBeLessThan(state.difficulty);
+  });
+
+  it("difficulty never exceeds 0.95 even after 20 failures", () => {
+    let state = makeState();
+    for (let i = 0; i < 20; i++) {
+      state = processReview(state, incorrect(), NOW).state;
+    }
+    expect(state.difficulty).toBeLessThanOrEqual(0.95);
+  });
+
+  it("stability never goes below 0.5 days no matter how many failures", () => {
+    let state = makeState({ stability_days: 100 });
+    for (let i = 0; i < 50; i++) {
+      state = processReview(state, incorrect(), NOW).state;
+    }
+    expect(state.stability_days).toBeGreaterThanOrEqual(0.5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// learned_level asymmetry between rescued and clean paths
+// ---------------------------------------------------------------------------
+describe("learned_level asymmetry", () => {
+  it("rescued success does NOT increment learned_level from 0", () => {
+    const state = makeState({ srs_state: "learning", reps: 1, stability_days: 1, learned_level: 0 });
+    const result = processReview(state, rescuedSuccess(), NOW);
+    expect(result.state.learned_level).toBe(0);
+  });
+
+  it("first clean success jumps learned_level by 2 from 0", () => {
+    const result = processReview(makeState(), cleanSuccess(), NOW);
+    expect(result.state.learned_level).toBe(2);
+  });
+
+  it("word stuck at learned_level=0 via rescued-only path never progresses", () => {
+    // A word that only gets rescued successes (never a clean first-try) stays at level 0
+    let state = makeState({ srs_state: "learning", reps: 0, stability_days: 1, learned_level: 0 });
+    for (let i = 0; i < 10; i++) {
+      state = processReview(state, rescuedSuccess(), NOW).state;
+    }
+    // After 10 rescued successes, learned_level is still 0
+    expect(state.learned_level).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stability floor interaction with scheduling
+// ---------------------------------------------------------------------------
+describe("stability floor vs next_due", () => {
+  it("at minimum stability, next_due is still at least 1 day forward for correct", () => {
+    const state = makeState({
+      srs_state: "learning",
+      stability_days: 0.5,
+      reps: 3,
+      learned_level: 1,
+    });
+    const result = processReview(state, rescuedSuccess(), NOW);
+    const diffDays = (new Date(result.next_due).getTime() - NOW.getTime()) / 86400000;
+    expect(diffDays).toBeGreaterThanOrEqual(1);
+  });
+
+  it("at minimum stability after incorrect, next_due is 1 day forward", () => {
+    const state = makeState({
+      srs_state: "learning",
+      stability_days: 0.5,
+    });
+    const result = processReview(state, incorrect(), NOW);
+    const diffDays = (new Date(result.next_due).getTime() - NOW.getTime()) / 86400000;
+    expect(diffDays).toBeCloseTo(1, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Outcome label semantics (mirrors SQL scheduler_outcome values)
 // ---------------------------------------------------------------------------
 describe("outcome path semantics", () => {

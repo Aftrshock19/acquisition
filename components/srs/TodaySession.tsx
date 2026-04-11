@@ -486,11 +486,11 @@ export function TodaySession({
       return;
     }
 
-    // All main cards done — if retries remain, keep going through them
+    // All main cards done — flush stranded retries before session completion.
+    // Normal dequeue respects RETRY_GAP, but with no more main cards the gap
+    // can never be satisfied, so force-dequeue to prevent retry starvation.
     if (rq.hasPending) {
-      // Force-dequeue the next pending retry even if not yet "due"
-      // (all main cards are exhausted, so we serve retries immediately)
-      const forced = rq.dequeue();
+      const forced = rq.dequeue() ?? rq.forceDequeue();
       if (forced) {
         setRetryPending(rq.pendingCount);
         beginCard(forced.card, "retry");
