@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { ListeningPlayer } from "@/components/listening/ListeningPlayer";
 import { getTodayDailySessionRow } from "@/lib/loop/dailySessions";
 import { getListeningAssetById, getListeningNavNeighbors } from "@/lib/loop/listening";
+import { getSavedWordsState } from "@/lib/reader/savedWords";
 import { getSupabaseUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -110,9 +111,11 @@ export default async function ListeningAssetPage({
     );
   }
 
-  const [dailySession, navNeighbors] = await Promise.all([
+  const lang = asset.text?.lang ?? "es";
+  const [dailySession, navNeighbors, savedState] = await Promise.all([
     getTodayDailySessionRow(supabase, user.id),
     getListeningNavNeighbors(supabase, asset.id),
+    getSavedWordsState(supabase, user.id, lang),
   ]);
   const completedForToday = Boolean(
     dailySession?.listening_done &&
@@ -126,6 +129,8 @@ export default async function ListeningAssetPage({
         completedForToday={completedForToday}
         prevAssetId={navNeighbors.prevId}
         nextAssetId={navNeighbors.nextId}
+        initialSavedWordIds={savedState.wordIds}
+        initialSavedLemmas={savedState.lemmas}
         initialCompletion={{
           completed: completedForToday,
           maxPositionSeconds:

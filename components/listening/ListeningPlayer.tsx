@@ -1,14 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   completeListeningStep,
   markListeningOpened,
   markListeningPlaybackStarted,
 } from "@/app/actions/srs";
+import { BackButton } from "@/components/BackButton";
+import { InteractiveText } from "@/components/interactive-text/InteractiveText";
+import { InteractiveTextProvider } from "@/components/interactive-text/InteractiveTextProvider";
 import { toReadingBlocks } from "@/lib/loop/reader";
+import { tokenize } from "@/lib/reader/tokenize";
 
 type ListeningPlayerProps = {
   asset: {
@@ -22,6 +26,8 @@ type ListeningPlayerProps = {
   completedForToday: boolean;
   prevAssetId?: string | null;
   nextAssetId?: string | null;
+  initialSavedWordIds?: string[];
+  initialSavedLemmas?: string[];
   initialCompletion: {
     completed: boolean;
     maxPositionSeconds: number | null;
@@ -50,6 +56,8 @@ export function ListeningPlayer({
   completedForToday,
   prevAssetId,
   nextAssetId,
+  initialSavedWordIds = [],
+  initialSavedLemmas = [],
   initialCompletion,
 }: ListeningPlayerProps) {
   const router = useRouter();
@@ -179,7 +187,14 @@ export function ListeningPlayer({
   const requiredListenSeconds =
     effectiveDuration > 0 ? effectiveDuration * 0.9 : 30;
   const thresholdMet = maxPositionSeconds >= requiredListenSeconds;
-  const transcriptBlocks = asset.transcript ? toReadingBlocks(asset.transcript) : [];
+  const transcriptBlocks = useMemo(
+    () =>
+      asset.transcript
+        ? toReadingBlocks(asset.transcript).map((block) => tokenize(block))
+        : [],
+    [asset.transcript],
+  );
+  const transcriptLang = asset.text?.lang ?? "es";
 
   function getListeningTimeSeconds() {
     const liveMs =
@@ -244,6 +259,17 @@ export function ListeningPlayer({
     }
   }
 
+  function handlePlayAgain() {
+    const audioElement = audioRef.current;
+    if (!audioElement) return;
+    audioElement.currentTime = 0;
+    setCurrentTime(0);
+    if (!audioElement.paused) return;
+    void audioElement.play().catch(() => {
+      setAudioError("Playback did not start. Try again once the file finishes loading.");
+    });
+  }
+
   function handleComplete() {
     if (!thresholdMet || pending) return;
 
@@ -273,14 +299,25 @@ export function ListeningPlayer({
   const alreadyDone = initialCompletion.completed;
 
   return (
+    <InteractiveTextProvider
+      lang={transcriptLang}
+      initialSavedWordIds={initialSavedWordIds}
+      initialSavedLemmas={initialSavedLemmas}
+      interactionContext="listening-transcript"
+      textId={asset.text?.id ?? null}
+      saveSource="reader"
+    >
     <section className="app-card-strong flex flex-col p-5 sm:p-7">
       <audio ref={audioRef} src={asset.audioUrl} preload="metadata" />
 
       {/* ── Header ─────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
-        <p className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-400 dark:text-zinc-500">
-          Listening
-        </p>
+        <div className="flex items-center gap-2">
+          <BackButton href="/listening" label="Back to listening" className="shrink-0" />
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-400 dark:text-zinc-500">
+            Listening
+          </p>
+        </div>
         {completedForToday ? (
           <span className="rounded-full border border-emerald-200 bg-emerald-50/80 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300">
             Done for today
@@ -493,58 +530,60 @@ export function ListeningPlayer({
           </button>
 
           {transcriptOpen && transcriptBlocks.length > 0 ? (
-            <div
-              className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50/60 px-5 py-4 dark:border-zinc-800 dark:bg-zinc-900/40"
-              data-testid="transcript-content"
-            >
-              <div className="flex flex-col gap-4 text-base leading-8 text-zinc-800 dark:text-zinc-200 sm:text-lg sm:leading-9">
-                {transcriptBlocks.map((block, blockIndex) => (
-                  <p
-                    key={`${asset.id}-transcript-${blockIndex}`}
-                    className="whitespace-pre-wrap"
-                  >
-                    {block}
-                  </p>
-                ))}
+              <div
+                className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50/60 px-5 py-4 dark:border-zinc-800 dark:bg-zinc-900/40"
+                data-testid="transcript-content"
+              >
+                <div className="flex flex-col gap-4 text-base leading-8 text-zinc-800 dark:text-zinc-200 sm:text-lg sm:leading-9">
+                  {transcriptBlocks.map((block, blockIndex) => (
+                    <p
+                      key={`${asset.id}-transcript-${blockIndex}`}
+                      className="whitespace-pre-wrap"
+                    >
+                      <InteractiveText
+                        tokens={block}
+                        tokenKeyPrefix={`transcript-block-${blockIndex}`}
+                      />
+                    </p>
+                  ))}
+                </div>
               </div>
-            </div>
           ) : null}
         </div>
       ) : null}
 
       {/* ── CTA ────────────────────────────────────────────── */}
-      <div className="mt-6 flex items-center gap-3">
-        {alreadyDone ? (
-          <>
-            <Link href="/today" className="app-button">
-              Continue
-            </Link>
-            {asset.text ? (
-              <Link href={`/reader/${asset.text.id}`} className="app-button-secondary">
-                Open reader
-              </Link>
-            ) : null}
-          </>
-        ) : (
-          <>
-            <button
-              type="button"
-              disabled={!thresholdMet || pending}
-              onClick={handleComplete}
-              className="app-button"
-              data-testid="continue-button"
-            >
-              {pending ? "Saving..." : "Continue"}
-            </button>
-            {asset.text ? (
-              <Link href={`/reader/${asset.text.id}`} className="app-button-secondary">
-                Open reader
-              </Link>
-            ) : null}
-          </>
-        )}
+      <div className="mt-6 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          disabled={alreadyDone ? false : !thresholdMet || pending}
+          onClick={alreadyDone ? () => router.push("/today") : handleComplete}
+          className="app-button"
+          data-testid="done-for-today-button"
+        >
+          {pending ? "Saving..." : "Done for today"}
+        </button>
+        <button
+          type="button"
+          onClick={handlePlayAgain}
+          className="app-button-secondary"
+          data-testid="play-again-button"
+        >
+          Play again
+        </button>
+        {nextAssetId ? (
+          <button
+            type="button"
+            onClick={() => router.push(`/listening/${nextAssetId}`)}
+            className="text-sm font-medium text-zinc-500 transition hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+            data-testid="another-passage-button"
+          >
+            Another passage
+          </button>
+        ) : null}
       </div>
     </section>
+    </InteractiveTextProvider>
   );
 }
 

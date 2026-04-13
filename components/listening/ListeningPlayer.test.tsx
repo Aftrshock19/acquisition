@@ -18,6 +18,30 @@ vi.mock("@/app/actions/srs", () => ({
   markListeningPlaybackStarted: vi.fn(),
 }));
 
+vi.mock("@/components/interactive-text/InteractiveTextProvider", () => ({
+  InteractiveTextProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+vi.mock("@/components/interactive-text/InteractiveText", () => ({
+  InteractiveText: ({ tokens }: { tokens: Array<{ surface: string; isWord: boolean }> }) => {
+    const React = require("react");
+    return React.createElement(
+      React.Fragment,
+      null,
+      tokens.map((t: { surface: string; isWord: boolean }, i: number) =>
+        t.isWord
+          ? React.createElement("button", {
+              key: i,
+              "data-interactive-word": "true",
+              type: "button",
+            }, t.surface)
+          : React.createElement("span", { key: i }, t.surface),
+      ),
+    );
+  },
+}));
+
+import React from "react";
 import { ListeningPlayer } from "./ListeningPlayer";
 
 const baseAsset = {
@@ -257,32 +281,77 @@ describe("ListeningPlayer", () => {
 
   // ── CTA ─────────────────────────────────────────────────────
 
-  it("shows Continue as the primary CTA", () => {
+  it("does not render Continue button", () => {
     const html = render();
-    expect(html).toContain("Continue");
-    expect(html).not.toContain("Mark listening complete");
+    const continueBtn = html.match(/<button[^>]*data-testid="continue-button"[^>]*>/);
+    expect(continueBtn).toBeNull();
   });
 
-  it("Continue button is disabled before threshold", () => {
+  it("does not render Open reader in the bottom action row", () => {
     const html = render();
-    expect(html).toContain("disabled");
+    // Open reader should no longer appear as a CTA action
+    expect(html).not.toContain("Open reader");
   });
 
-  it("Continue button is enabled after threshold", () => {
+  it("shows Done for today as the primary CTA", () => {
+    const html = render();
+    expect(html).toContain("Done for today");
+    expect(html).toContain('data-testid="done-for-today-button"');
+  });
+
+  it("Done for today is disabled before threshold", () => {
+    const html = render();
+    const match = html.match(/<button[^>]*data-testid="done-for-today-button"[^>]*>/);
+    expect(match).not.toBeNull();
+    expect(match![0]).toMatch(/disabled=""/);
+  });
+
+  it("Done for today is enabled after threshold", () => {
     const html = render({
       initialCompletion: { ...defaultCompletion, maxPositionSeconds: 115 },
     });
-    // Should NOT have the disabled attribute on the continue button
-    // The button HTML should not contain disabled when threshold is met
-    const continueMatch = html.match(/<button[^>]*data-testid="continue-button"[^>]*>/);
-    expect(continueMatch).not.toBeNull();
-    expect(continueMatch![0]).not.toContain("disabled");
+    const match = html.match(/<button[^>]*data-testid="done-for-today-button"[^>]*>/);
+    expect(match).not.toBeNull();
+    expect(match![0]).not.toMatch(/disabled=""/);
   });
 
-  it("shows Open reader link", () => {
+  it("Done for today uses app-button primary style", () => {
     const html = render();
-    expect(html).toContain("Open reader");
-    expect(html).toContain("/reader/text-1");
+    const match = html.match(/<button[^>]*data-testid="done-for-today-button"[^>]*>/);
+    expect(match).not.toBeNull();
+    expect(match![0]).toContain("app-button");
+  });
+
+  it("shows Play again as secondary action", () => {
+    const html = render();
+    expect(html).toContain("Play again");
+    expect(html).toContain('data-testid="play-again-button"');
+    const match = html.match(/<button[^>]*data-testid="play-again-button"[^>]*>/);
+    expect(match).not.toBeNull();
+    expect(match![0]).toContain("app-button-secondary");
+  });
+
+  it("shows Another passage when next asset exists", () => {
+    const html = render({ nextAssetId: "next-1" });
+    expect(html).toContain("Another passage");
+    expect(html).toContain('data-testid="another-passage-button"');
+  });
+
+  it("hides Another passage when no next asset exists", () => {
+    const html = render({ nextAssetId: null });
+    expect(html).not.toContain("Another passage");
+    const match = html.match(/data-testid="another-passage-button"/);
+    expect(match).toBeNull();
+  });
+
+  it("Done for today is enabled when already completed", () => {
+    const html = render({
+      completedForToday: true,
+      initialCompletion: { ...defaultCompletion, completed: true },
+    });
+    const match = html.match(/<button[^>]*data-testid="done-for-today-button"[^>]*>/);
+    expect(match).not.toBeNull();
+    expect(match![0]).not.toMatch(/disabled=""/);
   });
 
   // ── Completed state ─────────────────────────────────────────
@@ -310,8 +379,8 @@ describe("ListeningPlayer", () => {
   it("transcript is hidden by default", () => {
     const html = render();
     expect(html).toContain("Show transcript");
-    expect(html).not.toContain("Hola mundo.");
     expect(html).not.toContain("transcript-content");
+    expect(html).not.toContain("data-interactive-word");
   });
 
   it("transcript is visible when initialCompletion.transcriptOpened is true", () => {
@@ -319,8 +388,36 @@ describe("ListeningPlayer", () => {
       initialCompletion: { ...defaultCompletion, transcriptOpened: true },
     });
     expect(html).toContain("Hide transcript");
-    expect(html).toContain("Hola mundo.");
     expect(html).toContain("transcript-content");
+    // Words are present as tokenized content
+    expect(html).toContain("Hola");
+    expect(html).toContain("mundo");
+  });
+
+  it("open transcript renders tappable word tokens", () => {
+    const html = render({
+      initialCompletion: { ...defaultCompletion, transcriptOpened: true },
+    });
+    // Words render as interactive buttons via InteractiveText
+    expect(html).toContain('data-interactive-word="true"');
+    // Check specific words are tappable buttons
+    const wordButtons = html.match(/<button[^>]*data-interactive-word="true"[^>]*>[^<]+<\/button>/g) || [];
+    expect(wordButtons.length).toBeGreaterThan(0);
+    // "Hola" should be a tappable word
+    const holaButton = wordButtons.find((b) => b.includes("Hola"));
+    expect(holaButton).toBeDefined();
+  });
+
+  it("transcript uses InteractiveText not plain paragraphs", () => {
+    const html = render({
+      initialCompletion: { ...defaultCompletion, transcriptOpened: true },
+    });
+    // Transcript content should contain interactive word buttons, not just plain text nodes
+    const contentStart = html.indexOf("transcript-content");
+    const contentSlice = html.slice(contentStart, contentStart + 2000);
+    expect(contentSlice).toContain('data-interactive-word="true"');
+    // Punctuation rendered as spans, not buttons
+    expect(contentSlice).toContain("<span>.</span>");
   });
 
   it("transcript toggle has accordion chevron", () => {
