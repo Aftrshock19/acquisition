@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { CefrBandAccordion, CefrBandAccordionItem } from "@/components/CefrBandAccordion";
 import { RecommendedReadingCard } from "@/components/reading/RecommendedReadingCard";
+import { getUserStageIndex, stageIndexToCefrLabel } from "@/lib/listening/recommendation";
 import { getPassageIndex } from "@/lib/reading/passages";
 import { getReadingRecommendation } from "@/lib/reading/recommendation";
 import type { ReadingPassageSummary, ReadingStageGroup } from "@/lib/reading/types";
@@ -17,7 +19,7 @@ export default async function ReadingPage() {
         <section className="app-hero">
           <h1 className="app-title">Reading</h1>
           <p className="app-subtitle">
-            Graded passages from A1 to B2, organised by stage and length.
+            Graded passages from A1 to C2, organised by stage and length.
           </p>
         </section>
 
@@ -44,7 +46,7 @@ export default async function ReadingPage() {
         <section className="app-hero">
           <h1 className="app-title">Reading</h1>
           <p className="app-subtitle">
-            Graded passages from A1 to B2, organised by stage and length.
+            Graded passages from A1 to C2, organised by stage and length.
           </p>
         </section>
 
@@ -156,11 +158,14 @@ export default async function ReadingPage() {
     excludedTextIds,
   );
 
-  // Group stages by broad CEFR band (A1, A2, B1, B2)
+  // Group stages by broad CEFR band (A1, A2, B1, B2, C1, C2)
   const cefrBands = groupByCefr(stages);
   const totalPassages = stages.reduce(
     (sum, s) => sum + s.modes.reduce((ms, m) => ms + m.passages.length, 0),
     0,
+  );
+  const userBand = stageIndexToCefrLabel(
+    getUserStageIndex(settingsRow ?? DEFAULT_SETTINGS),
   );
 
   return (
@@ -168,7 +173,7 @@ export default async function ReadingPage() {
       <section className="app-hero">
         <h1 className="app-title">Reading</h1>
         <p className="app-subtitle">
-          {stages.length} stages &middot; {totalPassages} passages &middot; A1 to B2
+          {stages.length} stages &middot; {totalPassages} passages &middot; A1 to C2
         </p>
       </section>
 
@@ -184,9 +189,30 @@ export default async function ReadingPage() {
           {recommendation ? (
             <RecommendedReadingCard recommendation={recommendation} />
           ) : null}
-          {cefrBands.map((band) => (
-            <CefrBandSection key={band.label} band={band} />
-          ))}
+          <CefrBandAccordion
+            bandLabels={cefrBands.map((b) => b.label)}
+            defaultOpenBand={userBand}
+            storageKey="reading-band-expanded-state"
+          >
+            {cefrBands.map((band) => {
+              const passageCount = band.stages.reduce(
+                (sum, s) => sum + s.modes.reduce((ms, m) => ms + m.passages.length, 0),
+                0,
+              );
+              return (
+                <CefrBandAccordionItem
+                  key={band.label}
+                  bandLabel={band.label}
+                  colorClass={CEFR_COLORS[band.label] ?? ""}
+                  statsText={`${band.stages.length} ${band.stages.length === 1 ? "stage" : "stages"} · ${passageCount} passages`}
+                >
+                  {band.stages.map((stage) => (
+                    <StageRow key={stage.stage} stage={stage} />
+                  ))}
+                </CefrBandAccordionItem>
+              );
+            })}
+          </CefrBandAccordion>
         </div>
       )}
     </main>
@@ -234,40 +260,11 @@ const CEFR_COLORS: Record<string, string> = {
   A2: "border-sky-200 bg-sky-50/80 text-sky-800 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-200",
   B1: "border-amber-200 bg-amber-50/80 text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200",
   B2: "border-rose-200 bg-rose-50/80 text-rose-800 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-200",
+  C1: "border-violet-200 bg-violet-50/80 text-violet-800 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-200",
+  C2: "border-fuchsia-200 bg-fuchsia-50/80 text-fuchsia-800 dark:border-fuchsia-800 dark:bg-fuchsia-950/30 dark:text-fuchsia-200",
 };
 
 // ── Components ───────────────────────────────────────────────
-
-function CefrBandSection({ band }: { band: CefrBand }) {
-  const passageCount = band.stages.reduce(
-    (sum, s) => sum + s.modes.reduce((ms, m) => ms + m.passages.length, 0),
-    0,
-  );
-  const colorClass = CEFR_COLORS[band.label] ?? "";
-
-  return (
-    <section className="app-card-strong flex flex-col gap-4 p-5 sm:p-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span
-            className={`rounded-md border px-3 py-1 text-sm font-semibold ${colorClass}`}
-          >
-            {band.label}
-          </span>
-          <span className="text-xs text-zinc-500 dark:text-zinc-400">
-            {band.stages.length} {band.stages.length === 1 ? "stage" : "stages"} &middot; {passageCount} passages
-          </span>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-2">
-        {band.stages.map((stage) => (
-          <StageRow key={stage.stage} stage={stage} />
-        ))}
-      </div>
-    </section>
-  );
-}
 
 function StageRow({ stage }: { stage: ReadingStageGroup }) {
   const passageCount = stage.modes.reduce(

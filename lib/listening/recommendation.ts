@@ -79,7 +79,7 @@ export function getUserStageIndex(settings: UserSettingsRow): number {
 /**
  * Get a descriptive CEFR label for a stage_index.
  */
-function stageIndexToCefrLabel(stageIndex: number): string {
+export function stageIndexToCefrLabel(stageIndex: number): string {
   if (stageIndex <= 5) return "A1";
   if (stageIndex <= 10) return "A2";
   if (stageIndex <= 15) return "B1";

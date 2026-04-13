@@ -93,6 +93,7 @@ export async function getPassageIndex(
     .from("texts")
     .select(PASSAGE_SUMMARY_COLUMNS)
     .not("stage", "is", null)
+    .not("stage", "ilike", "listening_%")
     .order("stage_index", { ascending: true })
     .order("order_index", { ascending: true });
 
@@ -152,6 +153,7 @@ export async function getPassagesByStage(
     .select(PASSAGE_SUMMARY_COLUMNS)
     .eq("stage_index", stageIdx)
     .not("stage", "is", null)
+    .not("stage", "ilike", "listening_%")
     .order("order_index", { ascending: true });
 
   if (error) throw new Error(error.message);
@@ -229,7 +231,8 @@ export async function getPassageCounts(
   const { count: passages, error: pErr } = await supabase
     .from("texts")
     .select("id", { count: "exact", head: true })
-    .not("stage", "is", null);
+    .not("stage", "is", null)
+    .not("stage", "ilike", "listening_%");
 
   if (pErr) throw new Error(pErr.message);
 
@@ -242,7 +245,8 @@ export async function getPassageCounts(
   const { data: stageData, error: sErr } = await supabase
     .from("texts")
     .select("stage_index")
-    .not("stage", "is", null);
+    .not("stage", "is", null)
+    .not("stage", "ilike", "listening_%");
 
   if (sErr) throw new Error(sErr.message);
 

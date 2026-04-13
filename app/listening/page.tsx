@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { CefrBandAccordion, CefrBandAccordionItem } from "@/components/CefrBandAccordion";
 import { RecommendedListeningCard } from "@/components/listening/RecommendedListeningCard";
-import { getListeningRecommendation } from "@/lib/listening/recommendation";
+import { getListeningRecommendation, getUserStageIndex, stageIndexToCefrLabel } from "@/lib/listening/recommendation";
 import { getListeningIndexData, type ListeningAsset } from "@/lib/loop/listening";
 import { getSupabaseUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -161,6 +162,9 @@ export default async function ListeningPage() {
 
   const cefrBands = groupByCefr(assets);
   const stageCount = new Set(assets.map((a) => a.text?.stage).filter(Boolean)).size;
+  const userBand = stageIndexToCefrLabel(
+    getUserStageIndex(settingsRow ?? DEFAULT_SETTINGS),
+  );
 
   return (
     <main className="app-shell">
@@ -184,9 +188,30 @@ export default async function ListeningPage() {
         </section>
       ) : (
         <div className="flex flex-col gap-6">
-          {cefrBands.map((band) => (
-            <CefrBandSection key={band.label} band={band} assetProgressMap={assetProgressMap} />
-          ))}
+          <CefrBandAccordion
+            bandLabels={cefrBands.map((b) => b.label)}
+            defaultOpenBand={userBand}
+            storageKey="listening-band-expanded-state"
+          >
+            {cefrBands.map((band) => {
+              const trackCount = band.stages.reduce(
+                (sum, s) => sum + s.modes.reduce((ms, m) => ms + m.assets.length, 0),
+                0,
+              );
+              return (
+                <CefrBandAccordionItem
+                  key={band.label}
+                  bandLabel={band.label}
+                  colorClass={CEFR_COLORS[band.label] ?? ""}
+                  statsText={`${band.stages.length} ${band.stages.length === 1 ? "stage" : "stages"} · ${trackCount} tracks`}
+                >
+                  {band.stages.map((stage) => (
+                    <StageRow key={stage.stage} stage={stage} assetProgressMap={assetProgressMap} />
+                  ))}
+                </CefrBandAccordionItem>
+              );
+            })}
+          </CefrBandAccordion>
         </div>
       )}
     </main>
@@ -330,37 +355,6 @@ function getAssetStatusLabel(assetId: string, progressMap: AssetProgressMap): { 
 }
 
 // ── Components ───────────────────────────────────────────────
-
-function CefrBandSection({ band, assetProgressMap }: { band: CefrBand; assetProgressMap: AssetProgressMap }) {
-  const trackCount = band.stages.reduce(
-    (sum, s) => sum + s.modes.reduce((ms, m) => ms + m.assets.length, 0),
-    0,
-  );
-  const colorClass = CEFR_COLORS[band.label] ?? "";
-
-  return (
-    <section className="app-card-strong flex flex-col gap-4 p-5 sm:p-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span
-            className={`rounded-md border px-3 py-1 text-sm font-semibold ${colorClass}`}
-          >
-            {band.label}
-          </span>
-          <span className="text-xs text-zinc-500 dark:text-zinc-400">
-            {band.stages.length} {band.stages.length === 1 ? "stage" : "stages"} &middot; {trackCount} tracks
-          </span>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-2">
-        {band.stages.map((stage) => (
-          <StageRow key={stage.stage} stage={stage} assetProgressMap={assetProgressMap} />
-        ))}
-      </div>
-    </section>
-  );
-}
 
 function StageRow({ stage, assetProgressMap }: { stage: ListeningStageGroup; assetProgressMap: AssetProgressMap }) {
   const trackCount = stage.modes.reduce(

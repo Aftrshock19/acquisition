@@ -9,7 +9,6 @@ import {
   uncompleteReadingStep,
 } from "@/app/actions/srs";
 import { ReadingQuiz } from "@/components/reader/ReadingQuiz";
-import { ReaderNextStepCard } from "@/components/reader/ReaderNextStepCard";
 import { InteractiveText } from "@/components/interactive-text/InteractiveText";
 import { InteractiveTextProvider } from "@/components/interactive-text/InteractiveTextProvider";
 import { toReadingBlocks } from "@/lib/loop/reader";
@@ -45,7 +44,7 @@ export function ReaderSession({
   );
   const activeStartedAtRef = useRef<number | null>(null);
   const accumulatedMsRef = useRef(0);
-  const [quizDone, setQuizDone] = useState(questions.length === 0);
+  const [quizOpen, setQuizOpen] = useState(false);
   const [localCompleted, setLocalCompleted] = useState(initialCompleted);
   const [completionPending, startCompletionTransition] = useTransition();
   const [completionError, setCompletionError] = useState<string | null>(null);
@@ -207,21 +206,42 @@ export function ReaderSession({
         </section>
       </InteractiveTextProvider>
 
-      {!quizDone && questions.length > 0 ? (
+      {/* ── Action row ──────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-3">
+        <Link
+          href="/listening"
+          className="app-button"
+          data-testid="go-to-listening-button"
+        >
+          Go to listening
+        </Link>
+        {questions.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setQuizOpen((o) => !o)}
+            className="app-button-secondary"
+            data-testid="check-understanding-button"
+          >
+            {quizOpen ? "Hide questions" : "Check understanding"}
+          </button>
+        ) : null}
+        <Link
+          href="/reading"
+          className="text-sm font-medium text-zinc-500 transition hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+          data-testid="another-passage-button"
+        >
+          Another passage
+        </Link>
+      </div>
+
+      {/* ── Reading comprehension (hidden by default) ─────── */}
+      {quizOpen && questions.length > 0 ? (
         <ReadingQuiz
           textId={text.id}
           questions={questions}
-          onComplete={() => setQuizDone(true)}
+          onComplete={() => setQuizOpen(false)}
         />
-      ) : (
-        <ReaderNextStepCard
-          textId={text.id}
-          listeningAssetId={listeningAssetId}
-          readingDone={readingDone}
-          listeningDone={listeningDone}
-          getReadingTimeSeconds={getReadingTimeSeconds}
-        />
-      )}
+      ) : null}
     </>
   );
 }
