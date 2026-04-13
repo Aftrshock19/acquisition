@@ -20,6 +20,9 @@ type ListeningAssetRow = {
   url: string;
   transcript: string | null;
   duration_seconds: number | null;
+  variant_type: string;
+  storage_path: string | null;
+  status: string;
   created_at: string;
   texts: ListeningTextRow | ListeningTextRow[] | null;
 };
@@ -31,6 +34,8 @@ export type ListeningAsset = {
   audioUrl: string;
   transcript: string | null;
   durationSeconds: number | null;
+  variantType: string;
+  storagePath: string | null;
   createdAt: string;
   text: {
     id: string;
@@ -38,6 +43,24 @@ export type ListeningAsset = {
     lang: string;
   } | null;
 };
+
+const ASSET_SELECT = `
+  id,
+  text_id,
+  title,
+  url,
+  transcript,
+  duration_seconds,
+  variant_type,
+  storage_path,
+  status,
+  created_at,
+  texts (
+    id,
+    title,
+    lang
+  )
+`;
 
 export async function getListeningAssetById(
   supabase: SupabaseServerClient,
@@ -49,23 +72,9 @@ export async function getListeningAssetById(
 
   const { data, error } = await supabase
     .from("audio")
-    .select(
-      `
-        id,
-        text_id,
-        title,
-        url,
-        transcript,
-        duration_seconds,
-        created_at,
-        texts (
-          id,
-          title,
-          lang
-        )
-      `,
-    )
+    .select(ASSET_SELECT)
     .eq("id", id)
+    .eq("status", "ready")
     .maybeSingle();
 
   if (error) {
@@ -75,6 +84,10 @@ export async function getListeningAssetById(
   return data ? toListeningAsset(data as ListeningAssetRow) : null;
 }
 
+/**
+ * Fetch the support audio asset for a text.
+ * Prefers variant_type = 'support' with status = 'ready'.
+ */
 export async function getListeningAssetForTextId(
   supabase: SupabaseServerClient,
   textId: string,
@@ -85,23 +98,10 @@ export async function getListeningAssetForTextId(
 
   const { data, error } = await supabase
     .from("audio")
-    .select(
-      `
-        id,
-        text_id,
-        title,
-        url,
-        transcript,
-        duration_seconds,
-        created_at,
-        texts (
-          id,
-          title,
-          lang
-        )
-      `,
-    )
+    .select(ASSET_SELECT)
     .eq("text_id", textId)
+    .eq("variant_type", "support")
+    .eq("status", "ready")
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
@@ -118,22 +118,8 @@ export async function getListeningIndexData(
 ): Promise<ListeningAsset[]> {
   const { data, error } = await supabase
     .from("audio")
-    .select(
-      `
-        id,
-        text_id,
-        title,
-        url,
-        transcript,
-        duration_seconds,
-        created_at,
-        texts (
-          id,
-          title,
-          lang
-        )
-      `,
-    )
+    .select(ASSET_SELECT)
+    .eq("status", "ready")
     .order("created_at", { ascending: true });
 
   if (error) {
@@ -155,6 +141,8 @@ function toListeningAsset(row: ListeningAssetRow): ListeningAsset {
     audioUrl: row.url,
     transcript: row.transcript ?? null,
     durationSeconds: row.duration_seconds ?? null,
+    variantType: row.variant_type ?? "support",
+    storagePath: row.storage_path ?? null,
     createdAt: row.created_at,
     text: text
       ? {

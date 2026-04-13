@@ -53,7 +53,7 @@ export function PlacementFlow({ initialState }: { initialState: PlacementState }
         onSkip={() =>
           startTransition(async () => {
             await skipPlacementRun();
-            router.push("/today");
+            router.push("/");
           })
         }
       />
@@ -65,7 +65,7 @@ export function PlacementFlow({ initialState }: { initialState: PlacementState }
     return (
       <ResultScreen
         estimate={state.completedEstimate}
-        onContinue={() => router.push("/today")}
+        onContinue={() => router.push("/")}
         onRetake={() =>
           startTransition(async () => {
             const r = await retakePlacementTest();
@@ -85,7 +85,7 @@ export function PlacementFlow({ initialState }: { initialState: PlacementState }
     return (
       <ResultScreen
         estimate={state.estimate}
-        onContinue={() => router.push("/today")}
+        onContinue={() => router.push("/")}
         onRetake={() =>
           startTransition(async () => {
             const r = await retakePlacementTest();

@@ -30,11 +30,21 @@ export { INTRO_PAGE_COUNT };
 
 export type IntroFlowProps = {
   initialPage?: number;
+  /**
+   * Replay mode: walks the linear explanatory screens only and skips the
+   * final branching "How do you want to start?" page. Used by the profile
+   * page so users can revisit the intro without going through the
+   * beginner / baseline / self-certify fork again.
+   */
+  replay?: boolean;
 };
 
-export function IntroFlow({ initialPage = 0 }: IntroFlowProps) {
+export function IntroFlow({ initialPage = 0, replay = false }: IntroFlowProps) {
   const router = useRouter();
-  const [page, setPage] = useState(initialPage);
+  const linearLastPage = INTRO_PAGE_COUNT - 2; // index of last linear screen
+  const [page, setPage] = useState(
+    Math.min(initialPage, replay ? linearLastPage : INTRO_PAGE_COUNT - 1),
+  );
   const [branch, setBranch] = useState<StartBranchStep>({
     kind: "ask_experience",
   });
@@ -42,9 +52,17 @@ export function IntroFlow({ initialPage = 0 }: IntroFlowProps) {
   const [error, setError] = useState<string | null>(null);
 
   const nav = introNavState(page);
-  const onFinalPage = nav.isLast;
+  const onFinalPage = !replay && nav.isLast;
+  const onReplayLast = replay && page === linearLastPage;
+  const effectiveTotal = replay ? INTRO_PAGE_COUNT - 1 : INTRO_PAGE_COUNT;
 
-  const goNext = () => setPage((p) => introNavReduce(p, "next"));
+  const goNext = () => {
+    if (onReplayLast) {
+      router.push("/profile");
+      return;
+    }
+    setPage((p) => introNavReduce(p, "next"));
+  };
   const goBack = () => {
     if (onFinalPage && startBranchCanGoBack(branch)) {
       setBranch((b) => startBranchReduce(b, { kind: "back" }));
@@ -107,7 +125,7 @@ export function IntroFlow({ initialPage = 0 }: IntroFlowProps) {
         <p className="text-xs font-medium uppercase tracking-[0.22em] text-zinc-500 dark:text-zinc-400">
           Welcome
         </p>
-        <ProgressLabel page={page} total={INTRO_PAGE_COUNT} />
+        <ProgressLabel page={page} total={effectiveTotal} />
       </section>
 
       <div className="app-card flex flex-col gap-8 p-6 md:p-8">
@@ -118,7 +136,7 @@ export function IntroFlow({ initialPage = 0 }: IntroFlowProps) {
         {page === 4 ? <FrequencyGraphPage /> : null}
         {page === 5 ? <DailyLoopWhyPage /> : null}
         {page === 6 ? <AdaptiveDifferencePage /> : null}
-        {page === 7 ? (
+        {page === 7 && !replay ? (
           <StartBranch
             step={branch}
             isPending={isPending}
@@ -159,7 +177,7 @@ export function IntroFlow({ initialPage = 0 }: IntroFlowProps) {
               className="app-button"
               data-testid="intro-next"
             >
-              Next
+              {onReplayLast ? "Done" : "Next"}
             </button>
           ) : null}
         </div>

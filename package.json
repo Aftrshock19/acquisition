@@ -9,9 +9,11 @@
     "lint": "eslint",
     "test": "vitest",
     "seed": "python3 scripts/generate_words_import_sql.py supabase/seed/new_spa.csv supabase/.temp/import_words.sql && /usr/local/bin/supabase db query --linked -f supabase/.temp/import_words.sql",
-    "import:passages": "tsx scripts/import_reading_passages.ts"
+    "import:passages": "tsx scripts/import_reading_passages.ts",
+    "generate:audio": "tsx scripts/generate-chirp-audio.ts"
   },
   "dependencies": {
+    "@google-cloud/text-to-speech": "^6.4.0",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.49.1",
     "lucide-react": "^1.6.0",

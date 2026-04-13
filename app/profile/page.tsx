@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signOutAction } from "@/app/actions/auth";
 import { BackButton } from "@/components/BackButton";
@@ -91,11 +92,20 @@ export default async function ProfilePage() {
           </div>
         </dl>
 
-        <form action={signOutAction}>
-          <button type="submit" className="app-button-secondary">
-            Sign out
-          </button>
-        </form>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <Link
+            href="/onboarding?replay=1"
+            className="app-button-secondary"
+            data-testid="profile-replay-intro"
+          >
+            Revisit introduction
+          </Link>
+          <form action={signOutAction}>
+            <button type="submit" className="app-button-secondary">
+              Sign out
+            </button>
+          </form>
+        </div>
       </section>
     </main>
   );

@@ -17,7 +17,9 @@ type ListeningPlayerProps = {
     audioUrl: string;
     transcript: string | null;
     durationSeconds: number | null;
+    text?: { id: string; lang: string; title: string } | null;
   };
+  completedForToday: boolean;
   initialCompletion: {
     completed: boolean;
     maxPositionSeconds: number | null;
@@ -30,6 +32,7 @@ const PLAYBACK_RATES = [0.75, 1, 1.25] as const;
 
 export function ListeningPlayer({
   asset,
+  completedForToday,
   initialCompletion,
 }: ListeningPlayerProps) {
   const router = useRouter();
@@ -162,9 +165,7 @@ export function ListeningPlayer({
   const effectiveDuration =
     duration > 0 ? duration : Math.max(0, asset.durationSeconds ?? 0);
   const requiredListenSeconds =
-    effectiveDuration > 0
-      ? Math.min(Math.max(effectiveDuration * 0.6, 15), 90)
-      : 30;
+    effectiveDuration > 0 ? effectiveDuration * 0.9 : 30;
   const thresholdMet = maxPositionSeconds >= requiredListenSeconds;
   const completionProgress = Math.min(
     1,
@@ -207,6 +208,17 @@ export function ListeningPlayer({
     setMaxPositionSeconds((currentMax) => Math.max(currentMax, nextTime));
   }
 
+  function handleReplay() {
+    const audioElement = audioRef.current;
+    if (!audioElement) {
+      return;
+    }
+
+    const target = Math.max(0, audioElement.currentTime - 10);
+    audioElement.currentTime = target;
+    setCurrentTime(target);
+  }
+
   function handleComplete() {
     if (!thresholdMet || pending) {
       return;
@@ -234,18 +246,37 @@ export function ListeningPlayer({
   }
 
   return (
-    <div className="flex flex-col gap-5">
+    <>
       <audio
         ref={audioRef}
         src={asset.audioUrl}
         preload="metadata"
       />
 
-      <section className="app-card-strong flex flex-col gap-5 p-5 sm:p-6">
-        <div className="flex flex-col gap-2">
-          <p className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
-            Player
-          </p>
+      <section className="app-card-strong flex flex-col gap-6 p-5 sm:p-7">
+        <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+          {asset.text ? (
+            <span className="rounded-full border border-zinc-200 px-3 py-1 dark:border-zinc-800">
+              {asset.text.lang.toUpperCase()}
+            </span>
+          ) : null}
+          {asset.durationSeconds ? (
+            <span className="rounded-full border border-zinc-200 px-3 py-1 dark:border-zinc-800">
+              {formatDurationLabel(asset.durationSeconds)}
+            </span>
+          ) : null}
+          <span className="rounded-full border border-zinc-200 px-3 py-1 dark:border-zinc-800">
+            {asset.transcript ? "Transcript available" : "Audio only"}
+          </span>
+          {completedForToday ? (
+            <span className="rounded-full border border-zinc-200 px-3 py-1 dark:border-zinc-800">
+              Completed today
+            </span>
+          ) : null}
+        </div>
+
+        {/* Player controls */}
+        <div className="flex flex-col gap-4">
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -256,13 +287,19 @@ export function ListeningPlayer({
             >
               {isPlaying ? "Pause" : "Play"}
             </button>
+            <button
+              type="button"
+              onClick={handleReplay}
+              className="app-button-secondary min-w-20"
+              title="Replay last 10 seconds"
+            >
+              −10s
+            </button>
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
               {formatTime(currentTime)} / {formatTime(effectiveDuration)}
             </p>
           </div>
-        </div>
 
-        <div className="flex flex-col gap-3">
           <input
             type="range"
             min={0}
@@ -276,6 +313,7 @@ export function ListeningPlayer({
             className="app-range"
             aria-label="Audio progress"
           />
+
           <div className="flex h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
             <div
               className={`h-full rounded-full ${
@@ -284,6 +322,7 @@ export function ListeningPlayer({
               style={{ width: `${completionProgress * 100}%` }}
             />
           </div>
+
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
             {thresholdMet
               ? "Threshold met. You can mark this listening block complete."
@@ -291,10 +330,11 @@ export function ListeningPlayer({
           </p>
         </div>
 
-        <div className="flex flex-col gap-3">
-          <p className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
+        {/* Speed controls */}
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
             Speed
-          </p>
+          </span>
           <div className="flex flex-wrap gap-2">
             {PLAYBACK_RATES.map((rate) => {
               const active = playbackRate === rate;
@@ -316,19 +356,20 @@ export function ListeningPlayer({
           </div>
         </div>
 
-        <div className="flex flex-col gap-3">
+        {/* Transcript toggle */}
+        <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={() => setTranscriptOpen((open) => !open)}
-            className="app-button-secondary self-start"
+            className="app-button-secondary"
           >
             {transcriptOpen ? "Hide transcript" : "Show transcript"}
           </button>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          <span className="text-sm text-zinc-600 dark:text-zinc-400">
             {asset.transcript
               ? "Open the transcript only if you need the support."
               : "No transcript is stored for this listening asset yet."}
-          </p>
+          </span>
         </div>
 
         {audioError ? (
@@ -344,51 +385,59 @@ export function ListeningPlayer({
         ) : null}
       </section>
 
-      {transcriptOpen ? (
-        <section className="app-card flex flex-col gap-4 p-5 sm:p-6">
-          <div className="flex flex-col gap-2">
-            <p className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
-              Transcript
-            </p>
-            <h2 className="text-lg font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
-              Follow along if you want the support
-            </h2>
+      {transcriptOpen && transcriptBlocks.length > 0 ? (
+        <section className="app-card-strong flex flex-col gap-6 p-5 sm:p-7">
+          <div className="flex flex-col gap-5 text-lg leading-9 text-zinc-900 dark:text-zinc-100 sm:text-xl sm:leading-10">
+            {transcriptBlocks.map((block, blockIndex) => (
+              <p
+                key={`${asset.id}-transcript-${blockIndex}`}
+                className="whitespace-pre-wrap"
+              >
+                {block}
+              </p>
+            ))}
           </div>
-
-          {transcriptBlocks.length > 0 ? (
-            <div className="flex flex-col gap-4 text-base leading-8 text-zinc-900 dark:text-zinc-100">
-              {transcriptBlocks.map((block, blockIndex) => (
-                <p
-                  key={`${asset.id}-transcript-${blockIndex}`}
-                  className="whitespace-pre-wrap"
-                >
-                  {block}
-                </p>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              No transcript is available for this asset.
-            </p>
-          )}
         </section>
       ) : null}
 
-      {initialCompletion.completed ? (
-        <Link href="/today" className="app-button self-start">
-          Back to today
-        </Link>
-      ) : (
-        <button
-          type="button"
-          disabled={!thresholdMet || pending}
-          onClick={handleComplete}
-          className="app-button self-start"
-        >
-          {pending ? "Saving..." : "Mark listening complete"}
-        </button>
-      )}
-    </div>
+      <section className="app-card-strong flex flex-col gap-4 p-5 sm:p-7">
+        {initialCompletion.completed ? (
+          <>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              This listening step is already logged for today.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Link href="/today" className="app-button">
+                Back to today
+              </Link>
+              {asset.text ? (
+                <Link href={`/reader/${asset.text.id}`} className="app-button-secondary">
+                  Open reader
+                </Link>
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                disabled={!thresholdMet || pending}
+                onClick={handleComplete}
+                className="app-button"
+              >
+                {pending ? "Saving..." : "Mark listening complete"}
+              </button>
+              {asset.text ? (
+                <Link href={`/reader/${asset.text.id}`} className="app-button-secondary">
+                  Open reader
+                </Link>
+              ) : null}
+            </div>
+          </>
+        )}
+      </section>
+    </>
   );
 }
 
@@ -402,4 +451,16 @@ function formatTime(seconds: number) {
 
 function getRoundedSeconds(value: number) {
   return Math.max(0, Math.round(value / 1000));
+}
+
+function formatDurationLabel(durationSeconds: number) {
+  const rounded = Math.max(1, Math.round(durationSeconds));
+  const minutes = Math.floor(rounded / 60);
+  const seconds = rounded % 60;
+
+  if (minutes === 0) {
+    return `${seconds}s audio`;
+  }
+
+  return `${minutes}:${seconds.toString().padStart(2, "0")} audio`;
 }

@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ListeningPlayer } from "@/components/listening/ListeningPlayer";
 import { getTodayDailySessionRow } from "@/lib/loop/dailySessions";
@@ -119,56 +118,16 @@ export default async function ListeningAssetPage({
 
   return (
     <main className="app-shell">
-      <section className="flex items-start justify-between gap-4">
-        <div className="app-hero">
-          <h1 className="app-title">{asset.title}</h1>
-          <p className="app-subtitle">
-            Listen once or twice. Open the transcript if you need it.
-          </p>
-        </div>
-
-        {asset.text ? (
-          <Link
-            href={`/reader/${asset.text.id}`}
-            className="app-button-secondary shrink-0"
-          >
-            Reader
-          </Link>
-        ) : null}
-      </section>
-
-      <section className="app-card-muted flex flex-col gap-3 p-5 sm:p-6">
-        <div className="flex flex-wrap gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-          {asset.text ? (
-            <span className="rounded-full border border-zinc-200 px-2.5 py-1 dark:border-zinc-800">
-              {asset.text.lang.toUpperCase()}
-            </span>
-          ) : null}
-          {asset.durationSeconds ? (
-            <span className="rounded-full bg-zinc-100 px-2.5 py-1 dark:bg-zinc-800/80">
-              {formatDurationLabel(asset.durationSeconds)}
-            </span>
-          ) : null}
-          <span className="rounded-full bg-zinc-100 px-2.5 py-1 dark:bg-zinc-800/80">
-            {asset.transcript ? "Transcript available" : "Audio only"}
-          </span>
-        </div>
-
-        {asset.text ? (
-          <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Matched to <span className="font-medium text-zinc-900 dark:text-zinc-100">{asset.text.title}</span>.
-          </p>
-        ) : null}
-
-        {completedForToday ? (
-          <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            This listening step is already logged for today.
-          </p>
-        ) : null}
+      <section className="app-hero">
+        <h1 className="app-title">{asset.title}</h1>
+        <p className="app-subtitle">
+          Listen once or twice. Open the transcript if you need it.
+        </p>
       </section>
 
       <ListeningPlayer
         asset={asset}
+        completedForToday={completedForToday}
         initialCompletion={{
           completed: completedForToday,
           maxPositionSeconds:
@@ -187,16 +146,4 @@ export default async function ListeningAssetPage({
       />
     </main>
   );
-}
-
-function formatDurationLabel(durationSeconds: number) {
-  const rounded = Math.max(1, Math.round(durationSeconds));
-  const minutes = Math.floor(rounded / 60);
-  const seconds = rounded % 60;
-
-  if (minutes === 0) {
-    return `${seconds}s audio`;
-  }
-
-  return `${minutes}:${seconds.toString().padStart(2, "0")} audio`;
 }

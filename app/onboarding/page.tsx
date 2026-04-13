@@ -5,16 +5,27 @@ import { decideOnboardingGate } from "@/lib/onboarding/gate";
 
 export const dynamic = "force-dynamic";
 
-export default async function OnboardingPage() {
+type OnboardingPageProps = {
+  searchParams?: Promise<{ replay?: string }>;
+};
+
+export default async function OnboardingPage({
+  searchParams,
+}: OnboardingPageProps) {
+  const params = (await searchParams) ?? {};
+  const replay = params.replay === "1";
+
   const state = await getOnboardingState();
 
   if (!state.signedIn) {
     redirect("/login?next=/onboarding");
   }
 
-  if (decideOnboardingGate(state).action === "allow") {
-    redirect("/today");
+  // Replay mode lets already-onboarded users revisit the intro from their
+  // profile, so we deliberately skip the usual "you're done — go home" gate.
+  if (!replay && decideOnboardingGate(state).action === "allow") {
+    redirect("/");
   }
 
-  return <IntroFlow />;
+  return <IntroFlow replay={replay} />;
 }
