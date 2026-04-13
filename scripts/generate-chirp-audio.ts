@@ -41,6 +41,11 @@ import {
   audioStoragePath,
   storagePublicUrl,
 } from "../lib/chirp/storage";
+import {
+  extractTitleFromPassageFile,
+  txtFilenameToJsonFilename,
+  extractMetaFromJson,
+} from "../lib/listening/passageMeta";
 
 // ── Env ───────────────────────────────────────────────────────
 config({ path: path.resolve(__dirname, "..", ".env.local") });
@@ -151,18 +156,29 @@ async function importListeningPassages(
 
   console.log(`  Found ${filtered.length} passage files to consider.`);
 
+  const jsonDir = path.resolve(passagesDir, "..", "all_passages_renamed");
+
   // Batch insert/check in groups of 50
   const BATCH = 50;
   for (let i = 0; i < filtered.length; i += BATCH) {
     const batch = filtered.slice(i, i + BATCH);
     const rows = batch.map((filename) => {
       const meta = parsePassageFilename(filename)!;
-      const content = fs
-        .readFileSync(path.join(passagesDir, filename), "utf-8")
-        .trim();
+      const filePath = path.join(passagesDir, filename);
+      const content = fs.readFileSync(filePath, "utf-8").trim();
+
+      // Extract real human title from the ---Title--- header
+      const humanTitle = extractTitleFromPassageFile(filePath);
+
+      // Extract topic from paired JSON metadata
+      const jsonFilename = txtFilenameToJsonFilename(filename);
+      const jsonPath = jsonFilename ? path.join(jsonDir, jsonFilename) : null;
+      const jsonMeta = jsonPath ? extractMetaFromJson(jsonPath) : { title: null, topic: null };
+
       return {
         lang: "es",
-        title: `Listening: ${meta.title}`,
+        title: humanTitle ?? `Listening: ${meta.title}`,
+        topic: jsonMeta.topic ?? null,
         content,
         difficulty_cefr: meta.cefr,
         stage: `listening_stage_${meta.stageNum}`,
@@ -344,7 +360,7 @@ async function processText(
         {
           text_id: text.id,
           variant_type: variant,
-          title: text.title.replace(/^Listening:\s*/, ""),
+          title: text.title.replace(/^Listening:\s*/i, ""),
           url: publicUrl,
           storage_path: storagePath,
           transcript: text.content,
@@ -382,7 +398,7 @@ async function processText(
         {
           text_id: text.id,
           variant_type: variant,
-          title: text.title.replace(/^Listening:\s*/, ""),
+          title: text.title.replace(/^Listening:\s*/i, ""),
           url: "",
           storage_path: storagePath,
           transcript: text.content,

@@ -20,6 +20,8 @@ type ListeningPlayerProps = {
     text?: { id: string; lang: string; title: string } | null;
   };
   completedForToday: boolean;
+  prevAssetId?: string | null;
+  nextAssetId?: string | null;
   initialCompletion: {
     completed: boolean;
     maxPositionSeconds: number | null;
@@ -28,11 +30,26 @@ type ListeningPlayerProps = {
   };
 };
 
-const PLAYBACK_RATES = [0.75, 1, 1.25] as const;
+const SPEED_MIN = 0.25;
+const SPEED_MAX = 2.5;
+const SPEED_STEP = 0.05;
+const SPEED_PRESETS = [0.5, 0.75, 1, 1.25, 1.5] as const;
+const PREV_RESTART_THRESHOLD = 1; // seconds
+
+function clampSpeed(value: number): number {
+  const stepped = Math.round(value / SPEED_STEP) * SPEED_STEP;
+  return Math.round(Math.max(SPEED_MIN, Math.min(SPEED_MAX, stepped)) * 100) / 100;
+}
+
+function formatSpeed(value: number): string {
+  return value.toFixed(2) + "x";
+}
 
 export function ListeningPlayer({
   asset,
   completedForToday,
+  prevAssetId,
+  nextAssetId,
   initialCompletion,
 }: ListeningPlayerProps) {
   const router = useRouter();
@@ -47,12 +64,8 @@ export function ListeningPlayer({
   const [transcriptOpen, setTranscriptOpen] = useState(
     initialCompletion.transcriptOpened,
   );
-  const [playbackRate, setPlaybackRate] = useState(
-    PLAYBACK_RATES.includes(
-      (initialCompletion.playbackRate ?? 1) as (typeof PLAYBACK_RATES)[number],
-    )
-      ? ((initialCompletion.playbackRate ?? 1) as (typeof PLAYBACK_RATES)[number])
-      : 1,
+  const [playbackRate, setPlaybackRate] = useState(() =>
+    clampSpeed(initialCompletion.playbackRate ?? 1),
   );
   const [audioError, setAudioError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -60,15 +73,15 @@ export function ListeningPlayer({
   const playStartedAtRef = useRef<number | null>(null);
   const accumulatedPlayMsRef = useRef(0);
 
+  // ── Side effects ────────────────────────────────────────────
+
   useEffect(() => {
     void markListeningOpened({ assetId: asset.id });
   }, [asset.id]);
 
   useEffect(() => {
     const audioElement = audioRef.current;
-    if (!audioElement) {
-      return;
-    }
+    if (!audioElement) return;
 
     const handleLoadedMetadata = () => {
       if (Number.isFinite(audioElement.duration) && audioElement.duration > 0) {
@@ -155,22 +168,17 @@ export function ListeningPlayer({
 
   useEffect(() => {
     const audioElement = audioRef.current;
-    if (!audioElement) {
-      return;
-    }
-
+    if (!audioElement) return;
     audioElement.playbackRate = playbackRate;
   }, [playbackRate]);
+
+  // ── Derived state ───────────────────────────────────────────
 
   const effectiveDuration =
     duration > 0 ? duration : Math.max(0, asset.durationSeconds ?? 0);
   const requiredListenSeconds =
     effectiveDuration > 0 ? effectiveDuration * 0.9 : 30;
   const thresholdMet = maxPositionSeconds >= requiredListenSeconds;
-  const completionProgress = Math.min(
-    1,
-    maxPositionSeconds / Math.max(requiredListenSeconds, 1),
-  );
   const transcriptBlocks = asset.transcript ? toReadingBlocks(asset.transcript) : [];
 
   function getListeningTimeSeconds() {
@@ -179,12 +187,11 @@ export function ListeningPlayer({
     return getRoundedSeconds(accumulatedPlayMsRef.current + liveMs);
   }
 
+  // ── Handlers ────────────────────────────────────────────────
+
   async function handleTogglePlayback() {
     const audioElement = audioRef.current;
-    if (!audioElement) {
-      return;
-    }
-
+    if (!audioElement) return;
     setAudioError(null);
 
     if (audioElement.paused) {
@@ -199,10 +206,7 @@ export function ListeningPlayer({
 
   function handleSeek(nextTime: number) {
     const audioElement = audioRef.current;
-    if (!audioElement) {
-      return;
-    }
-
+    if (!audioElement) return;
     audioElement.currentTime = nextTime;
     setCurrentTime(nextTime);
     setMaxPositionSeconds((currentMax) => Math.max(currentMax, nextTime));
@@ -210,19 +214,38 @@ export function ListeningPlayer({
 
   function handleReplay() {
     const audioElement = audioRef.current;
-    if (!audioElement) {
-      return;
-    }
-
+    if (!audioElement) return;
     const target = Math.max(0, audioElement.currentTime - 10);
     audioElement.currentTime = target;
     setCurrentTime(target);
   }
 
-  function handleComplete() {
-    if (!thresholdMet || pending) {
+  function handleForward() {
+    const audioElement = audioRef.current;
+    if (!audioElement) return;
+    const cap = effectiveDuration > 0 ? effectiveDuration : audioElement.duration || 0;
+    const target = Math.min(cap, audioElement.currentTime + 10);
+    audioElement.currentTime = target;
+    setCurrentTime(target);
+    setMaxPositionSeconds((currentMax) => Math.max(currentMax, target));
+  }
+
+  function handlePrevious() {
+    if (currentTime > PREV_RESTART_THRESHOLD) {
+      const audioElement = audioRef.current;
+      if (audioElement) {
+        audioElement.currentTime = 0;
+      }
+      setCurrentTime(0);
       return;
     }
+    if (prevAssetId) {
+      router.push(`/listening/${prevAssetId}`);
+    }
+  }
+
+  function handleComplete() {
+    if (!thresholdMet || pending) return;
 
     startTransition(async () => {
       setSubmitError(null);
@@ -245,222 +268,295 @@ export function ListeningPlayer({
     });
   }
 
+  // ── Render ──────────────────────────────────────────────────
+
+  const alreadyDone = initialCompletion.completed;
+
   return (
-    <>
-      <audio
-        ref={audioRef}
-        src={asset.audioUrl}
-        preload="metadata"
-      />
+    <section className="app-card-strong flex flex-col p-5 sm:p-7">
+      <audio ref={audioRef} src={asset.audioUrl} preload="metadata" />
 
-      <section className="app-card-strong flex flex-col gap-6 p-5 sm:p-7">
-        <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
-          {asset.text ? (
-            <span className="rounded-full border border-zinc-200 px-3 py-1 dark:border-zinc-800">
-              {asset.text.lang.toUpperCase()}
-            </span>
-          ) : null}
-          {asset.durationSeconds ? (
-            <span className="rounded-full border border-zinc-200 px-3 py-1 dark:border-zinc-800">
-              {formatDurationLabel(asset.durationSeconds)}
-            </span>
-          ) : null}
-          <span className="rounded-full border border-zinc-200 px-3 py-1 dark:border-zinc-800">
-            {asset.transcript ? "Transcript available" : "Audio only"}
+      {/* ── Header ─────────────────────────────────────────── */}
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-400 dark:text-zinc-500">
+          Listening
+        </p>
+        {completedForToday ? (
+          <span className="rounded-full border border-emerald-200 bg-emerald-50/80 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300">
+            Done for today
           </span>
-          {completedForToday ? (
-            <span className="rounded-full border border-zinc-200 px-3 py-1 dark:border-zinc-800">
-              Completed today
-            </span>
-          ) : null}
+        ) : null}
+      </div>
+
+      {/* ── Title ──────────────────────────────────────────── */}
+      <h2 className="mt-1 text-lg font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 sm:text-xl">
+        {asset.title}
+      </h2>
+
+      {/* ── Transport controls ─────────────────────────────── */}
+      <div className="mt-8 flex items-center justify-center">
+        {/* Left group: previous + rewind */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            type="button"
+            disabled={!prevAssetId && currentTime <= PREV_RESTART_THRESHOLD}
+            onClick={handlePrevious}
+            className="flex h-10 w-10 items-center justify-center rounded-full text-zinc-300 transition hover:bg-zinc-100 hover:text-zinc-500 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-zinc-300 sm:h-12 sm:w-12 dark:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-400 dark:disabled:hover:bg-transparent dark:disabled:hover:text-zinc-600"
+            aria-label="Previous listening item"
+            data-testid="prev-item-button"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="sm:h-5 sm:w-5" aria-hidden="true">
+              <rect x="4" y="6" width="2.5" height="12" rx="0.5" />
+              <path d="M19 6v12l-9.5-6L19 6z" />
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleReplay}
+            className="flex h-12 w-12 items-center justify-center rounded-full text-sm font-semibold text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 sm:h-16 sm:w-16 sm:text-lg dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            aria-label="Rewind 10 seconds"
+            data-testid="rewind-button"
+          >
+            −10
+          </button>
         </div>
 
-        {/* Player controls */}
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                void handleTogglePlayback();
-              }}
-              className="app-button min-w-24"
-            >
-              {isPlaying ? "Pause" : "Play"}
-            </button>
-            <button
-              type="button"
-              onClick={handleReplay}
-              className="app-button-secondary min-w-20"
-              title="Replay last 10 seconds"
-            >
-              −10s
-            </button>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              {formatTime(currentTime)} / {formatTime(effectiveDuration)}
-            </p>
-          </div>
+        {/* Center: play / pause */}
+        <button
+          type="button"
+          onClick={() => { void handleTogglePlayback(); }}
+          className="mx-3 flex h-16 w-16 items-center justify-center rounded-full bg-zinc-900 text-white shadow-lg transition hover:scale-105 hover:bg-zinc-800 active:scale-95 sm:mx-5 sm:h-20 sm:w-20 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          aria-label={isPlaying ? "Pause audio" : "Play audio"}
+          data-testid="play-pause-button"
+        >
+          {isPlaying ? (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" className="sm:h-7 sm:w-7" aria-hidden="true">
+              <rect x="6" y="4" width="4" height="16" rx="1" />
+              <rect x="14" y="4" width="4" height="16" rx="1" />
+            </svg>
+          ) : (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" className="sm:h-7 sm:w-7" aria-hidden="true">
+              <path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86A1 1 0 0 0 8 5.14Z" />
+            </svg>
+          )}
+        </button>
 
-          <input
-            type="range"
-            min={0}
-            max={effectiveDuration > 0 ? effectiveDuration : 0}
-            step={0.1}
-            value={Math.min(currentTime, effectiveDuration || currentTime)}
-            disabled={effectiveDuration <= 0}
-            onChange={(event) => {
-              handleSeek(Number(event.target.value));
-            }}
-            className="app-range"
-            aria-label="Audio progress"
-          />
+        {/* Right group: forward + next */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            type="button"
+            onClick={handleForward}
+            className="flex h-12 w-12 items-center justify-center rounded-full text-sm font-semibold text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 sm:h-16 sm:w-16 sm:text-lg dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            aria-label="Forward 10 seconds"
+            data-testid="forward-button"
+          >
+            +10
+          </button>
 
-          <div className="flex h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-            <div
-              className={`h-full rounded-full ${
-                thresholdMet ? "bg-zinc-900 dark:bg-zinc-100" : "bg-zinc-500"
-              }`}
-              style={{ width: `${completionProgress * 100}%` }}
-            />
-          </div>
-
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            {thresholdMet
-              ? "Threshold met. You can mark this listening block complete."
-              : `Listen until about ${formatTime(requiredListenSeconds)} to finish this block.`}
-          </p>
+          <button
+            type="button"
+            disabled={!nextAssetId}
+            onClick={() => { if (nextAssetId) router.push(`/listening/${nextAssetId}`); }}
+            className="flex h-10 w-10 items-center justify-center rounded-full text-zinc-300 transition hover:bg-zinc-100 hover:text-zinc-500 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-zinc-300 sm:h-12 sm:w-12 dark:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-400 dark:disabled:hover:bg-transparent dark:disabled:hover:text-zinc-600"
+            aria-label="Next listening item"
+            data-testid="next-item-button"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="sm:h-5 sm:w-5" aria-hidden="true">
+              <path d="M5 6v12l9.5-6L5 6z" />
+              <rect x="17.5" y="6" width="2.5" height="12" rx="0.5" />
+            </svg>
+          </button>
         </div>
+      </div>
 
-        {/* Speed controls */}
-        <div className="flex items-center gap-3">
-          <span className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
-            Speed
-          </span>
-          <div className="flex flex-wrap gap-2">
-            {PLAYBACK_RATES.map((rate) => {
-              const active = playbackRate === rate;
-
-              return (
-                <button
-                  key={rate}
-                  type="button"
-                  onClick={() => setPlaybackRate(rate)}
-                  className={[
-                    "app-toggle",
-                    active ? "app-toggle-active" : "",
-                  ].join(" ").trim()}
-                >
-                  {rate}x
-                </button>
-              );
-            })}
-          </div>
+      {/* ── Scrubber + time ────────────────────────────────── */}
+      <div className="mt-6 flex flex-col gap-1.5">
+        <input
+          type="range"
+          min={0}
+          max={effectiveDuration > 0 ? effectiveDuration : 0}
+          step={0.1}
+          value={Math.min(currentTime, effectiveDuration || currentTime)}
+          disabled={effectiveDuration <= 0}
+          onChange={(event) => handleSeek(Number(event.target.value))}
+          className="app-range"
+          aria-label="Audio progress"
+        />
+        <div className="flex justify-between text-[11px] tabular-nums text-zinc-400 dark:text-zinc-500">
+          <span>{formatTime(currentTime)}</span>
+          <span>{formatTime(effectiveDuration)}</span>
         </div>
+      </div>
 
-        {/* Transcript toggle */}
+      {/* ── Speed controls ────────────────────────────────── */}
+      <div className="mt-3 flex flex-col items-center gap-2" role="group" aria-label="Playback speed">
+        {/* Stepper */}
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => setTranscriptOpen((open) => !open)}
-            className="app-button-secondary"
+            disabled={playbackRate <= SPEED_MIN}
+            onClick={() => setPlaybackRate(clampSpeed(playbackRate - SPEED_STEP))}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-30 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 dark:disabled:hover:bg-transparent"
+            aria-label="Decrease playback speed"
+            data-testid="speed-decrease"
           >
-            {transcriptOpen ? "Hide transcript" : "Show transcript"}
+            −
           </button>
-          <span className="text-sm text-zinc-600 dark:text-zinc-400">
-            {asset.transcript
-              ? "Open the transcript only if you need the support."
-              : "No transcript is stored for this listening asset yet."}
+          <span
+            className="min-w-[4rem] text-center text-sm font-semibold tabular-nums text-zinc-700 dark:text-zinc-300"
+            data-testid="speed-display"
+          >
+            {formatSpeed(playbackRate)}
           </span>
+          <button
+            type="button"
+            disabled={playbackRate >= SPEED_MAX}
+            onClick={() => setPlaybackRate(clampSpeed(playbackRate + SPEED_STEP))}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-30 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 dark:disabled:hover:bg-transparent"
+            aria-label="Increase playback speed"
+            data-testid="speed-increase"
+          >
+            +
+          </button>
         </div>
+        {/* Presets */}
+        <div className="flex flex-wrap items-center justify-center gap-1">
+          {SPEED_PRESETS.map((rate) => (
+            <button
+              key={rate}
+              type="button"
+              onClick={() => setPlaybackRate(clampSpeed(rate))}
+              className={[
+                "rounded-md px-2 py-0.5 text-[11px] font-medium transition",
+                playbackRate === rate
+                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                  : "text-zinc-400 hover:text-zinc-700 dark:text-zinc-500 dark:hover:text-zinc-200",
+              ].join(" ")}
+              aria-pressed={playbackRate === rate}
+              data-testid={`speed-preset-${rate}`}
+            >
+              {formatSpeed(rate)}
+            </button>
+          ))}
+        </div>
+      </div>
 
-        {audioError ? (
-          <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-            {audioError}
-          </p>
-        ) : null}
-
-        {submitError ? (
-          <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
-            {submitError}
-          </p>
-        ) : null}
-      </section>
-
-      {transcriptOpen && transcriptBlocks.length > 0 ? (
-        <section className="app-card-strong flex flex-col gap-6 p-5 sm:p-7">
-          <div className="flex flex-col gap-5 text-lg leading-9 text-zinc-900 dark:text-zinc-100 sm:text-xl sm:leading-10">
-            {transcriptBlocks.map((block, blockIndex) => (
-              <p
-                key={`${asset.id}-transcript-${blockIndex}`}
-                className="whitespace-pre-wrap"
-              >
-                {block}
-              </p>
-            ))}
-          </div>
-        </section>
+      {/* ── Status ─────────────────────────────────────────── */}
+      {!alreadyDone ? (
+        <p className="mt-5 text-center text-[13px] text-zinc-400 dark:text-zinc-500" data-testid="listening-status">
+          {thresholdMet
+            ? "Ready to continue"
+            : "Listen through once to continue"}
+        </p>
       ) : null}
 
-      <section className="app-card-strong flex flex-col gap-4 p-5 sm:p-7">
-        {initialCompletion.completed ? (
-          <>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              This listening step is already logged for today.
-            </p>
-            <div className="flex flex-wrap gap-3">
-              <Link href="/today" className="app-button">
-                Back to today
-              </Link>
-              {asset.text ? (
-                <Link href={`/reader/${asset.text.id}`} className="app-button-secondary">
-                  Open reader
-                </Link>
-              ) : null}
+      {/* ── Errors ─────────────────────────────────────────── */}
+      {audioError ? (
+        <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+          {audioError}
+        </p>
+      ) : null}
+
+      {submitError ? (
+        <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+          {submitError}
+        </p>
+      ) : null}
+
+      {/* ── Transcript accordion ───────────────────────────── */}
+      {asset.transcript ? (
+        <div className="mt-5 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+          <button
+            type="button"
+            onClick={() => setTranscriptOpen((open) => !open)}
+            className="flex w-full items-center justify-between py-1 text-[13px] font-medium text-zinc-500 transition hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+            data-testid="transcript-toggle"
+          >
+            <span>{transcriptOpen ? "Hide transcript" : "Show transcript"}</span>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 20 20"
+              fill="none"
+              className={`shrink-0 text-zinc-400 transition-transform dark:text-zinc-500 ${transcriptOpen ? "rotate-180" : ""}`}
+              aria-hidden="true"
+            >
+              <path
+                d="M5.5 7.5L10 12l4.5-4.5"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+
+          {transcriptOpen && transcriptBlocks.length > 0 ? (
+            <div
+              className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50/60 px-5 py-4 dark:border-zinc-800 dark:bg-zinc-900/40"
+              data-testid="transcript-content"
+            >
+              <div className="flex flex-col gap-4 text-base leading-8 text-zinc-800 dark:text-zinc-200 sm:text-lg sm:leading-9">
+                {transcriptBlocks.map((block, blockIndex) => (
+                  <p
+                    key={`${asset.id}-transcript-${blockIndex}`}
+                    className="whitespace-pre-wrap"
+                  >
+                    {block}
+                  </p>
+                ))}
+              </div>
             </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* ── CTA ────────────────────────────────────────────── */}
+      <div className="mt-6 flex items-center gap-3">
+        {alreadyDone ? (
+          <>
+            <Link href="/today" className="app-button">
+              Continue
+            </Link>
+            {asset.text ? (
+              <Link href={`/reader/${asset.text.id}`} className="app-button-secondary">
+                Open reader
+              </Link>
+            ) : null}
           </>
         ) : (
           <>
-            <div className="flex flex-wrap gap-3">
-              <button
-                type="button"
-                disabled={!thresholdMet || pending}
-                onClick={handleComplete}
-                className="app-button"
-              >
-                {pending ? "Saving..." : "Mark listening complete"}
-              </button>
-              {asset.text ? (
-                <Link href={`/reader/${asset.text.id}`} className="app-button-secondary">
-                  Open reader
-                </Link>
-              ) : null}
-            </div>
+            <button
+              type="button"
+              disabled={!thresholdMet || pending}
+              onClick={handleComplete}
+              className="app-button"
+              data-testid="continue-button"
+            >
+              {pending ? "Saving..." : "Continue"}
+            </button>
+            {asset.text ? (
+              <Link href={`/reader/${asset.text.id}`} className="app-button-secondary">
+                Open reader
+              </Link>
+            ) : null}
           </>
         )}
-      </section>
-    </>
+      </div>
+    </section>
   );
 }
+
+// ── Helpers ──────────────────────────────────────────────────
 
 function formatTime(seconds: number) {
   const rounded = Math.max(0, Math.floor(seconds));
   const minutes = Math.floor(rounded / 60);
   const remainingSeconds = rounded % 60;
-
   return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
 }
 
 function getRoundedSeconds(value: number) {
   return Math.max(0, Math.round(value / 1000));
-}
-
-function formatDurationLabel(durationSeconds: number) {
-  const rounded = Math.max(1, Math.round(durationSeconds));
-  const minutes = Math.floor(rounded / 60);
-  const seconds = rounded % 60;
-
-  if (minutes === 0) {
-    return `${seconds}s audio`;
-  }
-
-  return `${minutes}:${seconds.toString().padStart(2, "0")} audio`;
 }

@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { RecommendedReadingCard } from "@/components/reading/RecommendedReadingCard";
 import { getPassageIndex } from "@/lib/reading/passages";
-import type { ReadingStageGroup } from "@/lib/reading/types";
+import { getReadingRecommendation } from "@/lib/reading/recommendation";
+import type { ReadingPassageSummary, ReadingStageGroup } from "@/lib/reading/types";
+import type { UserSettingsRow } from "@/lib/settings/types";
 import { getSupabaseUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -85,6 +88,74 @@ export default async function ReadingPage() {
     );
   }
 
+  // ── Recommendation data ──────────────────────────────────
+  const allPassages: ReadingPassageSummary[] = stages.flatMap((s) =>
+    s.modes.flatMap((m) => m.passages),
+  );
+
+  // Fetch user settings + reading_progress in parallel
+  const [settingsRow, progressRows] = await Promise.all([
+    supabase
+      .from("user_settings")
+      .select("*")
+      .eq("user_id", user.id)
+      .maybeSingle()
+      .then((r) => r.data as UserSettingsRow | null),
+    supabase
+      .from("reading_progress")
+      .select("text_id, status, updated_at")
+      .eq("user_id", user.id)
+      .then((r) => r.data as { text_id: string; status: string; updated_at: string }[] | null),
+  ]);
+
+  const progressList = progressRows ?? [];
+  const excludedTextIds = new Set(progressList.map((r) => r.text_id));
+
+  // Find the most recently updated in-progress passage
+  const inProgressRows = progressList
+    .filter((r) => r.status === "in_progress")
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+
+  const inProgressPassage = inProgressRows.length > 0
+    ? allPassages.find((p) => p.id === inProgressRows[0]!.text_id) ?? null
+    : null;
+
+  const DEFAULT_SETTINGS: UserSettingsRow = {
+    user_id: user.id,
+    learning_lang: "es",
+    daily_plan_mode: "recommended",
+    manual_daily_card_limit: 200,
+    flashcard_selection_mode: "recommended",
+    include_cloze: true,
+    include_normal: true,
+    include_audio: false,
+    include_mcq: false,
+    include_sentences: false,
+    include_cloze_en_to_es: true,
+    include_cloze_es_to_en: false,
+    include_normal_en_to_es: true,
+    include_normal_es_to_en: false,
+    retry_delay_seconds: 90,
+    auto_advance_correct: true,
+    show_pos_hint: true,
+    show_definition_first: true,
+    hide_translation_sentences: false,
+    scheduler_variant: "baseline",
+    has_seen_intro: false,
+    onboarding_completed_at: null,
+    placement_status: "unknown",
+    current_frontier_rank: null,
+    created_at: new Date(0).toISOString(),
+    updated_at: new Date(0).toISOString(),
+  };
+
+  const recommendation = getReadingRecommendation(
+    inProgressPassage,
+    allPassages,
+    settingsRow ?? DEFAULT_SETTINGS,
+    excludedTextIds,
+  );
+
   // Group stages by broad CEFR band (A1, A2, B1, B2)
   const cefrBands = groupByCefr(stages);
   const totalPassages = stages.reduce(
@@ -110,6 +181,9 @@ export default async function ReadingPage() {
         </section>
       ) : (
         <div className="flex flex-col gap-6">
+          {recommendation ? (
+            <RecommendedReadingCard recommendation={recommendation} />
+          ) : null}
           {cefrBands.map((band) => (
             <CefrBandSection key={band.label} band={band} />
           ))}
@@ -129,7 +203,7 @@ type CefrBand = {
 // ── Helpers ──────────────────────────────────────────────────
 
 function broadCefr(displayLabel: string): string {
-  return displayLabel.replace(/[-+]$/, "");
+  return displayLabel.replace(/[-+]+$/, "");
 }
 
 function groupByCefr(stages: ReadingStageGroup[]): CefrBand[] {

@@ -11,6 +11,14 @@ type ListeningTextRow = {
   id: string;
   title: string;
   lang: string;
+  stage: string;
+  stage_index: number | null;
+  display_label: string | null;
+  passage_mode: string;
+  passage_number: number;
+  difficulty_cefr: string;
+  word_count: number | null;
+  estimated_minutes: number | null;
 };
 
 type ListeningAssetRow = {
@@ -41,6 +49,14 @@ export type ListeningAsset = {
     id: string;
     title: string;
     lang: string;
+    stage: string;
+    stageIndex: number | null;
+    displayLabel: string | null;
+    passageMode: string;
+    passageNumber: number;
+    difficultyCefr: string;
+    wordCount: number | null;
+    estimatedMinutes: number | null;
   } | null;
 };
 
@@ -58,7 +74,15 @@ const ASSET_SELECT = `
   texts (
     id,
     title,
-    lang
+    lang,
+    stage,
+    stage_index,
+    display_label,
+    passage_mode,
+    passage_number,
+    difficulty_cefr,
+    word_count,
+    estimated_minutes
   )
 `;
 
@@ -149,6 +173,14 @@ function toListeningAsset(row: ListeningAssetRow): ListeningAsset {
           id: text.id,
           title: text.title,
           lang: text.lang,
+          stage: text.stage,
+          stageIndex: text.stage_index ?? null,
+          displayLabel: text.display_label ?? null,
+          passageMode: text.passage_mode,
+          passageNumber: text.passage_number,
+          difficultyCefr: text.difficulty_cefr,
+          wordCount: text.word_count ?? null,
+          estimatedMinutes: text.estimated_minutes ?? null,
         }
       : null,
   };
@@ -178,4 +210,43 @@ function compareListeningAssets(a: ListeningAsset, b: ListeningAsset) {
   }
 
   return a.id.localeCompare(b.id);
+}
+
+// Navigation order matches the visual grouping on the listening index page:
+// stageIndex → mode → passageNumber → title → id
+const NAV_MODE_ORDER = ["short", "medium", "long", "very_long"];
+
+function compareForNav(a: ListeningAsset, b: ListeningAsset): number {
+  const aStage = a.text?.stageIndex ?? 0;
+  const bStage = b.text?.stageIndex ?? 0;
+  if (aStage !== bStage) return aStage - bStage;
+
+  const aModeIdx = NAV_MODE_ORDER.indexOf(a.text?.passageMode ?? "");
+  const bModeIdx = NAV_MODE_ORDER.indexOf(b.text?.passageMode ?? "");
+  const aModeOrder = aModeIdx >= 0 ? aModeIdx : NAV_MODE_ORDER.length;
+  const bModeOrder = bModeIdx >= 0 ? bModeIdx : NAV_MODE_ORDER.length;
+  if (aModeOrder !== bModeOrder) return aModeOrder - bModeOrder;
+
+  const aPassage = a.text?.passageNumber ?? 0;
+  const bPassage = b.text?.passageNumber ?? 0;
+  if (aPassage !== bPassage) return aPassage - bPassage;
+
+  return (
+    a.title.localeCompare(b.title, "es", { sensitivity: "base" }) ||
+    a.id.localeCompare(b.id)
+  );
+}
+
+export async function getListeningNavNeighbors(
+  supabase: SupabaseServerClient,
+  currentAssetId: string,
+): Promise<{ prevId: string | null; nextId: string | null }> {
+  const all = await getListeningIndexData(supabase);
+  const sorted = [...all].sort(compareForNav);
+  const idx = sorted.findIndex((a) => a.id === currentAssetId);
+  if (idx < 0) return { prevId: null, nextId: null };
+  return {
+    prevId: idx > 0 ? sorted[idx - 1]!.id : null,
+    nextId: idx < sorted.length - 1 ? sorted[idx + 1]!.id : null,
+  };
 }

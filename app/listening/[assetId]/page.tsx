@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { ListeningPlayer } from "@/components/listening/ListeningPlayer";
 import { getTodayDailySessionRow } from "@/lib/loop/dailySessions";
-import { getListeningAssetById } from "@/lib/loop/listening";
+import { getListeningAssetById, getListeningNavNeighbors } from "@/lib/loop/listening";
 import { getSupabaseUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -110,7 +110,10 @@ export default async function ListeningAssetPage({
     );
   }
 
-  const dailySession = await getTodayDailySessionRow(supabase, user.id);
+  const [dailySession, navNeighbors] = await Promise.all([
+    getTodayDailySessionRow(supabase, user.id),
+    getListeningNavNeighbors(supabase, asset.id),
+  ]);
   const completedForToday = Boolean(
     dailySession?.listening_done &&
       dailySession.listening_asset_id === asset.id,
@@ -118,16 +121,11 @@ export default async function ListeningAssetPage({
 
   return (
     <main className="app-shell">
-      <section className="app-hero">
-        <h1 className="app-title">{asset.title}</h1>
-        <p className="app-subtitle">
-          Listen once or twice. Open the transcript if you need it.
-        </p>
-      </section>
-
       <ListeningPlayer
         asset={asset}
         completedForToday={completedForToday}
+        prevAssetId={navNeighbors.prevId}
+        nextAssetId={navNeighbors.nextId}
         initialCompletion={{
           completed: completedForToday,
           maxPositionSeconds:
@@ -146,4 +144,12 @@ export default async function ListeningAssetPage({
       />
     </main>
   );
+}
+
+function formatDuration(durationSeconds: number) {
+  const rounded = Math.max(1, Math.round(durationSeconds));
+  const minutes = Math.floor(rounded / 60);
+  const seconds = rounded % 60;
+  if (minutes === 0) return `${seconds}s`;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }

@@ -1076,6 +1076,19 @@ export async function completeReadingStep({
       };
     }
 
+    // Upsert persistent reading_progress (completed)
+    await supabase.from("reading_progress").upsert(
+      {
+        user_id: user.id,
+        text_id: textId,
+        status: "completed",
+        started_at: now,
+        completed_at: now,
+        updated_at: now,
+      },
+      { onConflict: "user_id,text_id" },
+    );
+
     revalidatePath("/today");
     revalidatePath("/reading");
     revalidatePath(`/reader/${textId}`);
@@ -1232,6 +1245,19 @@ export async function completeListeningStep({
       };
     }
 
+    // Upsert persistent listening_progress (completed)
+    await supabase.from("listening_progress").upsert(
+      {
+        user_id: user.id,
+        asset_id: listeningAsset.id,
+        status: "completed",
+        started_at: now,
+        completed_at: now,
+        updated_at: now,
+      },
+      { onConflict: "user_id,asset_id" },
+    );
+
     revalidatePath("/today");
     revalidatePath("/listening");
     revalidatePath(`/listening/${listeningAsset.id}`);
@@ -1340,6 +1366,18 @@ export async function markReadingOpened({
       return { ok: false, error: error.message };
     }
 
+    // Upsert persistent reading_progress (in_progress)
+    await supabase.from("reading_progress").upsert(
+      {
+        user_id: user.id,
+        text_id: textId,
+        status: "in_progress",
+        started_at: now,
+        updated_at: now,
+      },
+      { onConflict: "user_id,text_id", ignoreDuplicates: true },
+    );
+
     return { ok: true };
   } catch (error) {
     return {
@@ -1432,6 +1470,18 @@ export async function markListeningOpened({
     if (error) {
       return { ok: false, error: error.message };
     }
+
+    // Upsert persistent listening_progress (in_progress)
+    await supabase.from("listening_progress").upsert(
+      {
+        user_id: user.id,
+        asset_id: listeningAsset.id,
+        status: "in_progress",
+        started_at: now,
+        updated_at: now,
+      },
+      { onConflict: "user_id,asset_id", ignoreDuplicates: true },
+    );
 
     return { ok: true };
   } catch (error) {
