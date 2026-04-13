@@ -7,8 +7,8 @@ import {
   completeListeningStep,
   markListeningOpened,
   markListeningPlaybackStarted,
+  uncompleteListeningStep,
 } from "@/app/actions/srs";
-import { BackButton } from "@/components/BackButton";
 import { InteractiveText } from "@/components/interactive-text/InteractiveText";
 import { InteractiveTextProvider } from "@/components/interactive-text/InteractiveTextProvider";
 import { toReadingBlocks } from "@/lib/loop/reader";
@@ -80,6 +80,8 @@ export function ListeningPlayer({
   const playbackStartedLoggedRef = useRef(false);
   const playStartedAtRef = useRef<number | null>(null);
   const accumulatedPlayMsRef = useRef(0);
+  const localCompletedRef = useRef(initialCompletion.completed);
+  const pendingRef = useRef(false);
 
   // ── Side effects ────────────────────────────────────────────
 
@@ -136,10 +138,15 @@ export function ListeningPlayer({
         accumulatedPlayMsRef.current += Date.now() - playStartedAtRef.current;
         playStartedAtRef.current = null;
       }
-      setCurrentTime(audioElement.duration || asset.durationSeconds || 0);
+      const finalTime = audioElement.duration || asset.durationSeconds || 0;
+      setCurrentTime(finalTime);
       setMaxPositionSeconds((currentMax) =>
         Math.max(currentMax, audioElement.duration || 0),
       );
+      // Auto-complete when the passage finishes playing
+      if (!localCompletedRef.current && !pendingRef.current) {
+        autoCompleteOnEnd(finalTime);
+      }
     };
 
     const handleError = () => {
@@ -270,7 +277,77 @@ export function ListeningPlayer({
     });
   }
 
-  function handleComplete() {
+  function autoCompleteOnEnd(finalTime: number) {
+    startTransition(async () => {
+      setSubmitError(null);
+      const liveMs =
+        playStartedAtRef.current === null ? 0 : Date.now() - playStartedAtRef.current;
+      const listeningTimeSeconds = getRoundedSeconds(accumulatedPlayMsRef.current + liveMs);
+
+      const result = await completeListeningStep({
+        assetId: asset.id,
+        maxPositionSeconds: Math.max(maxPositionSeconds, finalTime),
+        requiredListenSeconds,
+        transcriptOpened: transcriptOpen,
+        playbackRate,
+        listeningTimeSeconds,
+      });
+
+      if (!result.ok) {
+        setSubmitError(result.error);
+        return;
+      }
+
+      setLocalCompleted(true);
+      router.refresh();
+    });
+  }
+
+  function handleUncomplete() {
+    if (!localCompleted || pending) return;
+
+    startTransition(async () => {
+      setSubmitError(null);
+      const result = await uncompleteListeningStep({ assetId: asset.id });
+
+      if (!result.ok) {
+        setSubmitError(result.error);
+        return;
+      }
+
+      setLocalCompleted(false);
+      router.refresh();
+    });
+  }
+
+  function handleMarkComplete() {
+    if (pending || localCompleted) return;
+
+    startTransition(async () => {
+      setSubmitError(null);
+      const result = await completeListeningStep({
+        assetId: asset.id,
+        maxPositionSeconds,
+        requiredListenSeconds,
+        transcriptOpened: transcriptOpen,
+        playbackRate,
+        listeningTimeSeconds: getListeningTimeSeconds(),
+      });
+
+      if (!result.ok) {
+        setSubmitError(result.error);
+        return;
+      }
+
+      setLocalCompleted(true);
+    });
+  }
+
+  function handleDoneForToday() {
+    if (localCompleted) {
+      router.push("/today");
+      return;
+    }
     if (!thresholdMet || pending) return;
 
     startTransition(async () => {
@@ -289,14 +366,17 @@ export function ListeningPlayer({
         return;
       }
 
+      setLocalCompleted(true);
       router.push(result.nextPath);
       router.refresh();
     });
   }
 
-  // ── Render ──────────────────────────────────────────────────
+  // ── Derived state ───────────────────────────────────────────
 
-  const alreadyDone = initialCompletion.completed;
+  const [localCompleted, setLocalCompleted] = useState(initialCompletion.completed);
+  localCompletedRef.current = localCompleted;
+  pendingRef.current = pending;
 
   return (
     <InteractiveTextProvider
@@ -313,16 +393,36 @@ export function ListeningPlayer({
       {/* ── Header ─────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <BackButton href="/listening" label="Back to listening" className="shrink-0" />
+          <Link
+            href="/listening"
+            aria-label="Back to listening"
+            className="app-icon-button shrink-0"
+          >
+            <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+              <path
+                d="M11.5 4.5L6 10l5.5 5.5"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </Link>
           <p className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-400 dark:text-zinc-500">
             Listening
           </p>
         </div>
-        {completedForToday ? (
-          <span className="rounded-full border border-emerald-200 bg-emerald-50/80 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300">
-            Done for today
-          </span>
-        ) : null}
+        <button
+          type="button"
+          disabled={pending}
+          onClick={localCompleted ? handleUncomplete : handleMarkComplete}
+          className={localCompleted
+            ? "rounded-full border border-emerald-200 bg-emerald-500 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-700"
+            : "rounded-full border border-zinc-200 px-4 py-1.5 text-sm font-medium text-zinc-500 transition hover:border-zinc-400 hover:text-zinc-800 disabled:opacity-30 disabled:hover:border-zinc-200 disabled:hover:text-zinc-500 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-500 dark:hover:text-zinc-200 dark:disabled:hover:border-zinc-700 dark:disabled:hover:text-zinc-400"}
+          data-testid={localCompleted ? "complete-pill" : "mark-complete-button"}
+        >
+          {localCompleted ? "Complete" : "Mark complete"}
+        </button>
       </div>
 
       {/* ── Title ──────────────────────────────────────────── */}
@@ -480,7 +580,7 @@ export function ListeningPlayer({
       </div>
 
       {/* ── Status ─────────────────────────────────────────── */}
-      {!alreadyDone ? (
+      {!localCompleted ? (
         <p className="mt-5 text-center text-[13px] text-zinc-400 dark:text-zinc-500" data-testid="listening-status">
           {thresholdMet
             ? "Ready to continue"
@@ -556,8 +656,8 @@ export function ListeningPlayer({
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <button
           type="button"
-          disabled={alreadyDone ? false : !thresholdMet || pending}
-          onClick={alreadyDone ? () => router.push("/today") : handleComplete}
+          disabled={localCompleted ? false : !thresholdMet || pending}
+          onClick={handleDoneForToday}
           className="app-button"
           data-testid="done-for-today-button"
         >

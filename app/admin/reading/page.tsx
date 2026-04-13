@@ -85,7 +85,7 @@ export default async function AdminReadingPage() {
             <code className="rounded bg-zinc-200 px-1 dark:bg-zinc-800">
               npx tsx scripts/import_reading_passages.ts
             </code>{" "}
-            to import reading_passages/ into the database.
+            to import all_passages_renamed/ into the database.
           </p>
         </section>
       ) : (

@@ -112,15 +112,23 @@ export default async function ListeningAssetPage({
   }
 
   const lang = asset.text?.lang ?? "es";
-  const [dailySession, navNeighbors, savedState] = await Promise.all([
+  const [dailySession, navNeighbors, savedState, progressRow] = await Promise.all([
     getTodayDailySessionRow(supabase, user.id),
     getListeningNavNeighbors(supabase, asset.id),
     getSavedWordsState(supabase, user.id, lang),
+    supabase
+      .from("listening_progress")
+      .select("status")
+      .eq("user_id", user.id)
+      .eq("asset_id", asset.id)
+      .maybeSingle()
+      .then((r) => r.data as { status: string } | null),
   ]);
   const completedForToday = Boolean(
     dailySession?.listening_done &&
       dailySession.listening_asset_id === asset.id,
   );
+  const passageCompleted = completedForToday || progressRow?.status === "completed";
 
   return (
     <main className="app-shell">
@@ -132,7 +140,7 @@ export default async function ListeningAssetPage({
         initialSavedWordIds={savedState.wordIds}
         initialSavedLemmas={savedState.lemmas}
         initialCompletion={{
-          completed: completedForToday,
+          completed: passageCompleted,
           maxPositionSeconds:
             dailySession?.listening_asset_id === asset.id
               ? dailySession?.listening_max_position_seconds ?? null

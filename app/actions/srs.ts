@@ -1115,6 +1115,80 @@ export async function completeReadingStep({
   }
 }
 
+export async function markReadingComplete({
+  textId,
+  readingTimeSeconds = 0,
+}: {
+  textId: string;
+  readingTimeSeconds?: number;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    if (!supabase) {
+      return { ok: false, error: "Supabase client could not be created on the server" };
+    }
+    if (authError) return { ok: false, error: authError };
+    if (!user) return { ok: false, error: "Not authenticated" };
+
+    const now = new Date().toISOString();
+
+    // Upsert reading_progress as completed
+    await supabase.from("reading_progress").upsert(
+      {
+        user_id: user.id,
+        text_id: textId,
+        status: "completed",
+        started_at: now,
+        completed_at: now,
+        updated_at: now,
+      },
+      { onConflict: "user_id,text_id" },
+    );
+
+    revalidatePath("/reading");
+    revalidatePath(`/reader/${textId}`);
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to mark reading complete",
+    };
+  }
+}
+
+export async function uncompleteReadingStep({
+  textId,
+}: {
+  textId: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    if (!supabase) {
+      return { ok: false, error: "Supabase client could not be created on the server" };
+    }
+    if (authError) return { ok: false, error: authError };
+    if (!user) return { ok: false, error: "Not authenticated" };
+
+    // Remove persistent reading_progress so the passage appears untouched
+    await supabase
+      .from("reading_progress")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("text_id", textId);
+
+    revalidatePath("/reading");
+    revalidatePath(`/reader/${textId}`);
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to undo reading completion",
+    };
+  }
+}
+
 export async function completeListeningStep({
   assetId,
   maxPositionSeconds,
@@ -1287,6 +1361,74 @@ export async function completeListeningStep({
         error instanceof Error
           ? error.message
           : "Failed to complete the listening step",
+    };
+  }
+}
+
+export async function uncompleteListeningStep({
+  assetId,
+}: {
+  assetId: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    if (!supabase) {
+      return { ok: false, error: "Supabase client could not be created on the server" };
+    }
+    if (authError) {
+      return { ok: false, error: authError };
+    }
+    if (!user) {
+      return { ok: false, error: "Not authenticated" };
+    }
+
+    const currentDailySession = await getTodayDailySessionRow(supabase, user.id);
+    if (
+      !currentDailySession ||
+      currentDailySession.listening_asset_id !== assetId ||
+      !currentDailySession.listening_done
+    ) {
+      return { ok: false, error: "Nothing to undo" };
+    }
+
+    const nextProgress = getDailySessionProgressState(currentDailySession);
+    nextProgress.listeningDone = false;
+    const stage = resolveDailySessionStage(nextProgress);
+
+    const { error } = await supabase
+      .from("daily_sessions")
+      .update({
+        listening_done: false,
+        listening_completed_at: null,
+        stage,
+        completed: getDailySessionCompleted(nextProgress),
+        completed_at: getDailySessionCompleted(nextProgress)
+          ? currentDailySession.completed_at
+          : null,
+      })
+      .eq("user_id", user.id)
+      .eq("session_date", getTodaySessionDate());
+
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+
+    // Remove persistent listening_progress so the passage appears untouched
+    await supabase
+      .from("listening_progress")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("asset_id", assetId);
+
+    revalidatePath("/today");
+    revalidatePath("/listening");
+    revalidatePath(`/listening/${assetId}`);
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to undo listening completion",
     };
   }
 }

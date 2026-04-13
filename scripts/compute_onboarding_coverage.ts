@@ -1,6 +1,6 @@
 /**
- * Build-time helper: walks the static reading_passages/ corpus, tokenises all
- * passage_text, derives within-corpus word frequency ranks, and computes
+ * Build-time helper: walks the static all_passages_renamed/ corpus, tokenises
+ * all passage_text, derives within-corpus word frequency ranks, and computes
  * estimated text coverage for each onboarding bucket (top-N most frequent
  * words). Writes the result as a committed JSON constant the onboarding
  * graph reads at runtime.
@@ -15,7 +15,7 @@ import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const ROOT = join(__dirname, "..");
-const PASSAGES_DIR = join(ROOT, "reading_passages");
+const PASSAGES_DIR = join(ROOT, "all_passages_renamed");
 const OUT = join(ROOT, "lib/onboarding/coverageData.ts");
 
 const BUCKETS = [100, 500, 1000, 2000, 5000] as const;

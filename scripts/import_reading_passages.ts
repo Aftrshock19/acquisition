@@ -1,5 +1,5 @@
 /**
- * Import reading passages from reading_passages/ JSON files into Supabase.
+ * Import reading passages from all_passages_renamed/ JSON files into Supabase.
  *
  * Passages are stored in the canonical `texts` table, grouped by
  * `text_collections` (one per stage). Comprehension questions are
@@ -9,7 +9,7 @@
  *   npx tsx scripts/import_reading_passages.ts [passages_dir]
  *
  * Requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local.
- * Idempotent: uses upsert on (stage, passage_mode, passage_number).
+ * Idempotent: deletes existing reading passages then inserts fresh from source.
  */
 
 import { config } from "dotenv";
@@ -87,6 +87,15 @@ function broadCefr(displayLabel: string): string {
 
 function passageNumber(filePath: string): number {
   const base = path.basename(filePath, ".json");
+
+  // Flat filename: a1_short_stage1_3.json → passage number is last segment
+  const lastUnderscore = base.lastIndexOf("_");
+  if (lastUnderscore !== -1) {
+    const num = parseInt(base.slice(lastUnderscore + 1), 10);
+    if (!isNaN(num)) return num;
+  }
+
+  // Legacy: bare numeric filename like 03.json
   const num = parseInt(base, 10);
   if (isNaN(num))
     throw new Error(`Cannot parse passage number from ${filePath}`);
@@ -101,43 +110,22 @@ function collectionTitle(si: number, displayLabel: string): string {
 
 const PASSAGES_ROOT = process.argv[2]
   ? path.resolve(process.argv[2])
-  : path.resolve(__dirname, "..", "reading_passages");
+  : path.resolve(__dirname, "..", "all_passages_renamed");
 
 function discoverPassageFiles(): string[] {
-  const files: string[] = [];
-
   if (!fs.existsSync(PASSAGES_ROOT)) {
-    console.error(`reading_passages/ directory not found at ${PASSAGES_ROOT}`);
+    console.error(
+      `Passages directory not found at ${PASSAGES_ROOT}`,
+    );
     process.exit(1);
   }
 
-  // Walk: reading_passages/<CEFR>/<stage>/<mode>/<NN>.json
-  for (const cefrDir of fs.readdirSync(PASSAGES_ROOT)) {
-    const cefrPath = path.join(PASSAGES_ROOT, cefrDir);
-    if (!fs.statSync(cefrPath).isDirectory()) continue;
-
-    for (const stageDir of fs.readdirSync(cefrPath)) {
-      const stagePath = path.join(cefrPath, stageDir);
-      if (!fs.statSync(stagePath).isDirectory()) continue;
-
-      for (const modeDir of fs.readdirSync(stagePath)) {
-        const modePath = path.join(stagePath, modeDir);
-        if (!fs.statSync(modePath).isDirectory()) continue;
-
-        for (const file of fs.readdirSync(modePath)) {
-          if (
-            file === "index.json" ||
-            file === "stage_manifest.json" ||
-            !file.endsWith(".json")
-          )
-            continue;
-          files.push(path.join(modePath, file));
-        }
-      }
-    }
-  }
-
-  return files.sort();
+  // Flat folder: all_passages_renamed/{cefr}_{mode}_stage{N}_{num}.json
+  return fs
+    .readdirSync(PASSAGES_ROOT)
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => path.join(PASSAGES_ROOT, f))
+    .sort();
 }
 
 // ── Main import ────────────────────────────────────────────
@@ -188,7 +176,31 @@ async function main() {
     `Parsed ${parsed.length} passages across ${stagesNeeded.size} stages.`,
   );
 
-  // ── Phase 2: Ensure text_collections per stage ───────────
+  // ── Phase 2: Delete old reading passages ────────────────
+  // reading_questions cascade-deletes via FK; reading_progress,
+  // comprehension_responses also cascade; daily_sessions.reading_text_id
+  // gets SET NULL. text_collections are left intact and reused.
+
+  const { data: oldPassages, error: countErr } = await supabase
+    .from("texts")
+    .select("id", { count: "exact", head: true })
+    .not("stage", "is", null);
+
+  const oldCount = (countErr ? 0 : (oldPassages as any)?.length) || 0;
+
+  const { error: delErr } = await supabase
+    .from("texts")
+    .delete()
+    .not("stage", "is", null);
+
+  if (delErr) {
+    console.error("Error deleting old reading passages:", delErr);
+    process.exit(1);
+  }
+
+  console.log(`Deleted old reading passages from texts table.`);
+
+  // ── Phase 3: Ensure text_collections per stage ───────────
 
   const collectionMap = new Map<string, string>(); // stage -> collection_id
 
@@ -231,7 +243,7 @@ async function main() {
 
   console.log(`Collections ready: ${collectionMap.size} stages.`);
 
-  // ── Phase 3: Upsert passages into texts ──────────────────
+  // ── Phase 4: Insert passages into texts ──────────────────
 
   let importedTexts = 0;
   let importedQuestions = 0;
@@ -277,7 +289,7 @@ async function main() {
 
     importedTexts += (upserted ?? []).length;
 
-    // ── Phase 4: Upsert questions for each text ────────────
+    // ── Phase 5: Insert questions for each text ─────────────
 
     const questionsByKey = new Map<string, PassageQuestion[]>();
     for (const { json, pNum, key } of batch) {

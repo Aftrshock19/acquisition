@@ -16,6 +16,7 @@ vi.mock("@/app/actions/srs", () => ({
   completeListeningStep: vi.fn(),
   markListeningOpened: vi.fn(),
   markListeningPlaybackStarted: vi.fn(),
+  uncompleteListeningStep: vi.fn(),
 }));
 
 vi.mock("@/components/interactive-text/InteractiveTextProvider", () => ({
@@ -356,13 +357,25 @@ describe("ListeningPlayer", () => {
 
   // ── Completed state ─────────────────────────────────────────
 
-  it("shows Done for today pill with emerald colour when completed", () => {
+  it("shows Complete button with green background when completed", () => {
     const html = render({
       completedForToday: true,
       initialCompletion: { ...defaultCompletion, completed: true },
     });
-    expect(html).toContain("Done for today");
-    expect(html).toContain("emerald");
+    const match = html.match(/<button[^>]*data-testid="complete-pill"[^>]*>/);
+    expect(match).not.toBeNull();
+    expect(match![0]).toContain("bg-emerald-500");
+    expect(html).toContain(">Complete<");
+  });
+
+  it("Complete button is clickable to undo completion", () => {
+    const html = render({
+      completedForToday: true,
+      initialCompletion: { ...defaultCompletion, completed: true },
+    });
+    const match = html.match(/<button[^>]*data-testid="complete-pill"[^>]*>/);
+    expect(match).not.toBeNull();
+    expect(match![0]).not.toMatch(/disabled=""/);
   });
 
   it("hides status message when already done", () => {
@@ -372,6 +385,31 @@ describe("ListeningPlayer", () => {
     });
     expect(html).not.toContain("Listen through once");
     expect(html).not.toContain("Ready to continue");
+  });
+
+  // ── Mark complete (header) ──────────────────────────────────
+
+  it("shows Mark complete button when not yet completed", () => {
+    const html = render();
+    expect(html).toContain("Mark complete");
+    expect(html).toContain('data-testid="mark-complete-button"');
+  });
+
+  it("Mark complete is always enabled", () => {
+    const html = render();
+    const match = html.match(/<button[^>]*data-testid="mark-complete-button"[^>]*>/);
+    expect(match).not.toBeNull();
+    expect(match![0]).not.toMatch(/disabled=""/);
+  });
+
+  it("Mark complete becomes Complete when already completed", () => {
+    const html = render({
+      completedForToday: true,
+      initialCompletion: { ...defaultCompletion, completed: true },
+    });
+    expect(html).not.toContain('data-testid="mark-complete-button"');
+    expect(html).toContain('data-testid="complete-pill"');
+    expect(html).toContain(">Complete<");
   });
 
   // ── Transcript ──────────────────────────────────────────────

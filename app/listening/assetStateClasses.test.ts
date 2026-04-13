@@ -11,13 +11,13 @@ describe("getAssetStateClasses", () => {
     expect(classes).toContain("bg-emerald");
   });
 
-  it("returns rose (red) classes for in_progress asset", () => {
+  it("returns sky (blue) classes for in_progress asset", () => {
     const map = new Map<string, "in_progress" | "completed">([
       ["asset-2", "in_progress"],
     ]);
     const classes = getAssetStateClasses("asset-2", map);
-    expect(classes).toContain("border-rose");
-    expect(classes).toContain("bg-rose");
+    expect(classes).toContain("border-sky");
+    expect(classes).toContain("bg-sky");
   });
 
   it("returns neutral zinc classes for untouched asset", () => {
@@ -25,7 +25,7 @@ describe("getAssetStateClasses", () => {
     const classes = getAssetStateClasses("asset-3", map);
     expect(classes).toContain("border-zinc");
     expect(classes).not.toContain("emerald");
-    expect(classes).not.toContain("rose");
+    expect(classes).not.toContain("sky");
   });
 
   it("completed uses correct semantic colour (green family)", () => {
@@ -33,20 +33,16 @@ describe("getAssetStateClasses", () => {
       ["a", "completed"],
     ]);
     const classes = getAssetStateClasses("a", map);
-    // Must use emerald (the app's global correct/success colour family)
     expect(classes).toMatch(/emerald/);
-    // Must NOT use rose or red
-    expect(classes).not.toMatch(/rose|red/);
+    expect(classes).not.toMatch(/rose|red|sky/);
   });
 
-  it("in_progress uses correct semantic colour (red family)", () => {
+  it("in_progress uses correct semantic colour (blue family)", () => {
     const map = new Map<string, "in_progress" | "completed">([
       ["a", "in_progress"],
     ]);
     const classes = getAssetStateClasses("a", map);
-    // Must use rose (the app's global incorrect/warning colour family)
-    expect(classes).toMatch(/rose/);
-    // Must NOT use emerald or green
-    expect(classes).not.toMatch(/emerald|green/);
+    expect(classes).toMatch(/sky/);
+    expect(classes).not.toMatch(/emerald|green|rose/);
   });
 });

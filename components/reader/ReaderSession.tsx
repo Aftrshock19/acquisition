@@ -1,7 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { markReadingOpened } from "@/app/actions/srs";
+import Link from "next/link";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import {
+  markReadingOpened,
+  markReadingComplete,
+  uncompleteReadingStep,
+} from "@/app/actions/srs";
 import { ReadingQuiz } from "@/components/reader/ReadingQuiz";
 import { ReaderNextStepCard } from "@/components/reader/ReaderNextStepCard";
 import { InteractiveText } from "@/components/interactive-text/InteractiveText";
@@ -19,6 +25,7 @@ type ReaderSessionProps = {
   readingDone: boolean;
   listeningDone: boolean;
   questions?: ReadingQuestion[];
+  initialCompleted?: boolean;
 };
 
 export function ReaderSession({
@@ -29,7 +36,9 @@ export function ReaderSession({
   readingDone,
   listeningDone,
   questions = [],
+  initialCompleted = false,
 }: ReaderSessionProps) {
+  const router = useRouter();
   const blocks = useMemo(
     () => toReadingBlocks(text.content).map((block) => tokenize(block)),
     [text.content],
@@ -37,6 +46,9 @@ export function ReaderSession({
   const activeStartedAtRef = useRef<number | null>(null);
   const accumulatedMsRef = useRef(0);
   const [quizDone, setQuizDone] = useState(questions.length === 0);
+  const [localCompleted, setLocalCompleted] = useState(initialCompleted);
+  const [completionPending, startCompletionTransition] = useTransition();
+  const [completionError, setCompletionError] = useState<string | null>(null);
 
   useEffect(() => {
     void markReadingOpened({ textId: text.id });
@@ -88,6 +100,37 @@ export function ReaderSession({
     return Math.max(0, Math.round((accumulatedMsRef.current + liveMs) / 1000));
   }
 
+  function handleMarkComplete() {
+    if (completionPending || localCompleted) return;
+    startCompletionTransition(async () => {
+      setCompletionError(null);
+      const result = await markReadingComplete({
+        textId: text.id,
+        readingTimeSeconds: getReadingTimeSeconds(),
+      });
+      if (!result.ok) {
+        setCompletionError(result.error);
+        return;
+      }
+      setLocalCompleted(true);
+      router.refresh();
+    });
+  }
+
+  function handleUncomplete() {
+    if (completionPending || !localCompleted) return;
+    startCompletionTransition(async () => {
+      setCompletionError(null);
+      const result = await uncompleteReadingStep({ textId: text.id });
+      if (!result.ok) {
+        setCompletionError(result.error);
+        return;
+      }
+      setLocalCompleted(false);
+      router.refresh();
+    });
+  }
+
   return (
     <>
       <InteractiveTextProvider
@@ -100,6 +143,47 @@ export function ReaderSession({
         trackReaderTapExposure
       >
         <section className="app-card-strong flex flex-col gap-6 p-5 sm:p-7">
+          {/* ── Header ─────────────────────────────────────────── */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Link
+                href="/reading"
+                aria-label="Back to reading"
+                className="app-icon-button shrink-0"
+              >
+                <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+                  <path
+                    d="M11.5 4.5L6 10l5.5 5.5"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </Link>
+              <p className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-400 dark:text-zinc-500">
+                Reading
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={completionPending}
+              onClick={localCompleted ? handleUncomplete : handleMarkComplete}
+              className={localCompleted
+                ? "rounded-full border border-emerald-200 bg-emerald-500 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-700"
+                : "rounded-full border border-zinc-200 px-4 py-1.5 text-sm font-medium text-zinc-500 transition hover:border-zinc-400 hover:text-zinc-800 disabled:opacity-30 disabled:hover:border-zinc-200 disabled:hover:text-zinc-500 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-500 dark:hover:text-zinc-200 dark:disabled:hover:border-zinc-700 dark:disabled:hover:text-zinc-400"}
+              data-testid={localCompleted ? "complete-pill" : "mark-complete-button"}
+            >
+              {localCompleted ? "Complete" : "Mark complete"}
+            </button>
+          </div>
+
+          {completionError ? (
+            <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+              {completionError}
+            </p>
+          ) : null}
+
           <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
             <span className="rounded-full border border-zinc-200 px-3 py-1 dark:border-zinc-800">
               {text.lang.toUpperCase()}

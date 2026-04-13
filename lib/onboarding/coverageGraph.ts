@@ -6,7 +6,7 @@
  *
  * Numbers are derived from the app's own static reading corpus at build
  * time (see scripts/compute_onboarding_coverage.ts). For each bucket N,
- * we tokenise every passage_text in reading_passages/, rank words by
+ * we tokenise every passage_text in all_passages_renamed/, rank words by
  * descending within-corpus frequency, and compute
  *
  *     coverage(N) = tokens covered by the top-N words / total tokens

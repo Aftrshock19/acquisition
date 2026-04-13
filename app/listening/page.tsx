@@ -301,10 +301,9 @@ type AssetProgressMap = Map<string, "in_progress" | "completed">;
 
 /**
  * Returns Tailwind classes for a listening passage item based on user progress.
- * Uses the app's existing semantic colours:
- *   completed  → emerald (global "correct" colour family)
- *   in_progress → rose (global "incorrect" colour family)
- *   untouched  → neutral zinc (default)
+ *   completed   → emerald/green
+ *   in_progress → sky/blue
+ *   untouched   → neutral zinc
  */
 export function getAssetStateClasses(assetId: string, progressMap: AssetProgressMap): string {
   const status = progressMap.get(assetId);
@@ -312,9 +311,21 @@ export function getAssetStateClasses(assetId: string, progressMap: AssetProgress
     case "completed":
       return "border-emerald-300 bg-emerald-50/50 hover:bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/20 dark:hover:bg-emerald-950/40";
     case "in_progress":
-      return "border-rose-300 bg-rose-50/50 hover:bg-rose-50 dark:border-rose-800 dark:bg-rose-950/20 dark:hover:bg-rose-950/40";
+      return "border-sky-300 bg-sky-50/50 hover:bg-sky-50 dark:border-sky-800 dark:bg-sky-950/20 dark:hover:bg-sky-950/40";
     default:
       return "border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50";
+  }
+}
+
+function getAssetStatusLabel(assetId: string, progressMap: AssetProgressMap): { text: string; className: string } | null {
+  const status = progressMap.get(assetId);
+  switch (status) {
+    case "completed":
+      return { text: "Done", className: "text-emerald-600 dark:text-emerald-400" };
+    case "in_progress":
+      return { text: "Started", className: "text-sky-600 dark:text-sky-400" };
+    default:
+      return null;
   }
 }
 
@@ -389,22 +400,32 @@ function StageRow({ stage, assetProgressMap }: { stage: ListeningStageGroup; ass
                 {MODE_LABELS[modeGroup.mode] ?? modeGroup.mode}
               </p>
               <div className="grid gap-1.5 sm:grid-cols-2">
-                {modeGroup.assets.map((asset) => (
-                  <Link
-                    key={asset.id}
-                    href={`/listening/${asset.id}`}
-                    className={`flex items-center justify-between rounded-md border px-3 py-2 text-sm transition ${getAssetStateClasses(asset.id, assetProgressMap)}`}
-                  >
-                    <span className="truncate text-zinc-900 dark:text-zinc-100">
-                      {asset.title}
-                    </span>
-                    <span className="ml-2 shrink-0 text-xs text-zinc-500 dark:text-zinc-400">
-                      {asset.durationSeconds != null
-                        ? formatDuration(asset.durationSeconds)
-                        : null}
-                    </span>
-                  </Link>
-                ))}
+                {modeGroup.assets.map((asset) => {
+                  const statusLabel = getAssetStatusLabel(asset.id, assetProgressMap);
+                  return (
+                    <Link
+                      key={asset.id}
+                      href={`/listening/${asset.id}`}
+                      className={`flex items-center justify-between rounded-md border px-3 py-2 text-sm transition ${getAssetStateClasses(asset.id, assetProgressMap)}`}
+                    >
+                      <span className="truncate text-zinc-900 dark:text-zinc-100">
+                        {asset.title}
+                      </span>
+                      <span className="ml-2 flex shrink-0 items-center gap-2">
+                        {statusLabel ? (
+                          <span className={`text-[11px] font-medium ${statusLabel.className}`}>
+                            {statusLabel.text}
+                          </span>
+                        ) : null}
+                        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                          {asset.durationSeconds != null
+                            ? formatDuration(asset.durationSeconds)
+                            : null}
+                        </span>
+                      </span>
+                    </Link>
+                  );
+                })}
               </div>
             </div>
           ))}

@@ -112,11 +112,18 @@ export default async function ReaderPage({
     );
   }
 
-  const [savedState, listeningAsset, dailySession, questions] = await Promise.all([
+  const [savedState, listeningAsset, dailySession, questions, progressRow] = await Promise.all([
     getSavedWordState(supabase, user.id, text.lang),
     getListeningAssetForTextId(supabase, text.id),
     getTodayDailySessionRow(supabase, user.id),
     getQuestionsForText(supabase, text.id),
+    supabase
+      .from("reading_progress")
+      .select("status")
+      .eq("user_id", user.id)
+      .eq("text_id", textId)
+      .maybeSingle()
+      .then((r) => r.data as { status: string } | null),
   ]);
   const readingDoneForText = Boolean(
     dailySession?.reading_done &&
@@ -128,6 +135,7 @@ export default async function ReaderPage({
           dailySession.listening_asset_id === listeningAsset.id,
       )
     : readingDoneForText;
+  const passageCompleted = readingDoneForText || progressRow?.status === "completed";
 
   return (
     <main className="app-shell">
@@ -146,6 +154,7 @@ export default async function ReaderPage({
         readingDone={readingDoneForText}
         listeningDone={listeningDoneForText}
         questions={questions}
+        initialCompleted={passageCompleted}
       />
     </main>
   );
