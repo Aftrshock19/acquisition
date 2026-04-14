@@ -1,3 +1,4 @@
+import { Home as HomeIcon } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CefrBandAccordion, CefrBandAccordionItem } from "@/components/CefrBandAccordion";
@@ -15,7 +16,12 @@ export default async function ListeningPage() {
     return (
       <main className="app-shell">
         <section className="app-hero">
-          <h1 className="app-title">Listening</h1>
+          <div className="flex items-center gap-3">
+            <Link href="/" aria-label="Home" className="app-icon-button shrink-0">
+              <HomeIcon aria-hidden="true" className="h-5 w-5" />
+            </Link>
+            <h1 className="app-title">Listening</h1>
+          </div>
           <p className="app-subtitle">
             Graded audio from A1 to C2, organised by stage and length.
           </p>
@@ -42,7 +48,12 @@ export default async function ListeningPage() {
     return (
       <main className="app-shell">
         <section className="app-hero">
-          <h1 className="app-title">Listening</h1>
+          <div className="flex items-center gap-3">
+            <Link href="/" aria-label="Home" className="app-icon-button shrink-0">
+              <HomeIcon aria-hidden="true" className="h-5 w-5" />
+            </Link>
+            <h1 className="app-title">Listening</h1>
+          </div>
           <p className="app-subtitle">
             Graded audio from A1 to C2, organised by stage and length.
           </p>
@@ -70,7 +81,12 @@ export default async function ListeningPage() {
     return (
       <main className="app-shell">
         <section className="app-hero">
-          <h1 className="app-title">Listening</h1>
+          <div className="flex items-center gap-3">
+            <Link href="/" aria-label="Home" className="app-icon-button shrink-0">
+              <HomeIcon aria-hidden="true" className="h-5 w-5" />
+            </Link>
+            <h1 className="app-title">Listening</h1>
+          </div>
           <p className="app-subtitle">
             Something went wrong while loading listening passages.
           </p>
@@ -169,7 +185,12 @@ export default async function ListeningPage() {
   return (
     <main className="app-shell">
       <section className="app-hero">
-        <h1 className="app-title">Listening</h1>
+        <div className="flex items-center gap-3">
+            <Link href="/" aria-label="Home" className="app-icon-button shrink-0">
+              <HomeIcon aria-hidden="true" className="h-5 w-5" />
+            </Link>
+            <h1 className="app-title">Listening</h1>
+          </div>
         <p className="app-subtitle">
           {stageCount} stages &middot; {assets.length} tracks &middot; A1 to C2
         </p>

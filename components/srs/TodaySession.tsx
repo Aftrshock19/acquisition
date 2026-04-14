@@ -12,7 +12,6 @@ import {
 } from "react";
 import { recordReview, loadMoreReviewChunk, loadMoreNewWordsChunk } from "@/app/actions/srs";
 import type { WorkloadPolicy } from "@/lib/srs/workloadPolicy";
-import { BackButton } from "@/components/BackButton";
 import { InteractiveTextProvider } from "@/components/interactive-text/InteractiveTextProvider";
 import { LeftIcon } from "@/components/LeftIcon";
 import { RightIcon } from "@/components/RightIcon";
@@ -1477,8 +1476,6 @@ function SessionProgressBar({
 }) {
   return (
     <div className="flex items-start gap-3">
-      <BackButton className="shrink-0" />
-
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex justify-between text-sm text-zinc-500 dark:text-zinc-400">
           <span>

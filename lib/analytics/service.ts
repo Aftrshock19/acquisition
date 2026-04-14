@@ -148,7 +148,7 @@ async function fetchReviewEvents(
   const { data, error } = await supabase
     .from("review_events")
     .select(
-      "id,user_id,daily_session_id,session_date,word_id,queue_kind,queue_source,card_type,grade,correct,ms_spent,shown_at,submitted_at,retry_scheduled_for,client_attempt_id,created_at,happened_at,user_answer,expected,delta_hours,first_try,retry_index,scheduler_outcome,scheduler_variant,learner_factor,item_factor,baseline_interval_days,effective_interval_days,difficulty_before,difficulty_after",
+      "id,user_id,daily_session_id,session_date,word_id,queue_kind,queue_source,card_type,grade,correct,ms_spent,shown_at,submitted_at,retry_scheduled_for,client_attempt_id,created_at,user_answer,expected,delta_hours,first_try,retry_index,scheduler_outcome,scheduler_variant,learner_factor,item_factor,baseline_interval_days,effective_interval_days,difficulty_before,difficulty_after",
     )
     .eq("user_id", userId)
     .gte("session_date", range.from)

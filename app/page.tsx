@@ -1,13 +1,21 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { TodayCard } from "@/components/home/TodayCard";
+import { WeeklyProgressCard } from "@/components/progress/WeeklyProgressCard";
+import { getAppSessionDate } from "@/lib/analytics/date";
+import { getCalendarWeekSummary, type CalendarDayStatus } from "@/lib/progress/calendar";
 import { getUserSettings } from "@/lib/settings/getUserSettings";
 import { shouldRedirectToIntro } from "@/lib/onboarding/state";
+import { getSupabaseServerContextFast } from "@/lib/supabase/server";
 
 export default async function HomePage() {
   const { signedIn } = await getUserSettings();
   if (signedIn && (await shouldRedirectToIntro())) {
     redirect("/onboarding");
   }
+
+  const week = signedIn ? await loadCurrentWeek() : null;
+  const todayStatus: CalendarDayStatus = resolveTodayStatus(week);
 
   return (
     <main className="app-shell">
@@ -19,27 +27,32 @@ export default async function HomePage() {
           <h1 className="app-title">Acquisition</h1>
           <p className="app-subtitle">Your daily Spanish practice.</p>
         </div>
-        {signedIn ? (
-          <Link href="/profile" className="app-button-secondary shrink-0">
-            Profile
-          </Link>
-        ) : null}
       </section>
+
       {signedIn ? (
-        <div className="flex flex-col gap-3">
-          <Link href="/today" className="app-link-card font-medium">
-            Today
-          </Link>
-          <Link href="/progress" className="app-link-card font-medium">
-            Progress
-          </Link>
-          <Link href="/Decks" className="app-link-card font-medium">
-            Decks
-          </Link>
-          <Link href="/settings" className="app-link-card font-medium">
-            Settings
-          </Link>
-        </div>
+        <>
+          <TodayCard status={todayStatus} />
+          {week ? <WeeklyProgressCard week={week} /> : null}
+
+          <nav
+            aria-label="Account"
+            className="flex flex-wrap items-center justify-end gap-2 pt-1 text-sm"
+          >
+            <Link
+              href="/profile"
+              className="text-zinc-600 underline-offset-4 hover:underline dark:text-zinc-400"
+            >
+              Profile
+            </Link>
+            <span aria-hidden className="text-zinc-300 dark:text-zinc-700">·</span>
+            <Link
+              href="/settings"
+              className="text-zinc-600 underline-offset-4 hover:underline dark:text-zinc-400"
+            >
+              Settings
+            </Link>
+          </nav>
+        </>
       ) : (
         <Link
           href="/login"
@@ -48,15 +61,25 @@ export default async function HomePage() {
           Sign in
         </Link>
       )}
-      {/* {signedIn && effective && (
-        <div className="app-card p-5">
-          <FlashcardSettingsPanel
-            variant="home"
-            userSettings={settings}
-            effective={effective}
-          />
-        </div>
-      )} */}
     </main>
   );
+}
+
+function resolveTodayStatus(
+  week: Awaited<ReturnType<typeof getCalendarWeekSummary>> | null,
+): CalendarDayStatus {
+  if (!week) return "empty";
+  const today = getAppSessionDate();
+  return week.days.find((d) => d.date === today)?.status ?? "empty";
+}
+
+async function loadCurrentWeek() {
+  const { supabase, user } = await getSupabaseServerContextFast();
+  if (!supabase || !user) return null;
+  try {
+    return await getCalendarWeekSummary(supabase, user.id);
+  } catch (err) {
+    console.error("[home] failed to load weekly progress card", err);
+    return null;
+  }
 }

@@ -1,3 +1,4 @@
+import { Home as HomeIcon } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getTodayFlashcards } from "@/app/actions/srs";
@@ -75,7 +76,10 @@ export default async function TodayPage() {
 
   return (
     <main className={todayShellClassName}>
-      <section className="app-hero">
+      <section className="app-hero flex flex-row items-center gap-3">
+        <Link href="/" aria-label="Home" className="app-icon-button shrink-0">
+          <HomeIcon aria-hidden="true" className="h-5 w-5" />
+        </Link>
         <h1 className="app-title">Vocabulary</h1>
       </section>
       {placementBanner.show ? (

@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, Headphones, Home, Languages } from "lucide-react";
+import { BookOpen, Headphones, Languages } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -10,28 +10,16 @@ const navItems = [
   { href: "/listening", label: "Listening", icon: Headphones },
 ];
 
+const NAVBAR_PATHS = new Set<string>(["/today", "/reading", "/listening"]);
+
 export function Navbar() {
   const pathname = usePathname();
-  const isHome = pathname === "/today";
+  if (!pathname || !NAVBAR_PATHS.has(pathname)) {
+    return null;
+  }
 
   return (
     <>
-      {/* Top-left home button */}
-      <div className="fixed top-0 left-0 z-50 p-3 md:p-4">
-        <Link
-          href="/today"
-          aria-label="Home"
-          className={[
-            "flex h-9 w-9 items-center justify-center rounded-full transition-colors md:h-10 md:w-10",
-            isHome
-              ? "text-zinc-950 dark:text-zinc-50"
-              : "text-zinc-400 hover:text-zinc-900 dark:text-zinc-500 dark:hover:text-zinc-100",
-          ].join(" ")}
-        >
-          <Home aria-hidden="true" className="h-5 w-5 md:h-6 md:w-6" />
-        </Link>
-      </div>
-
       {/* Bottom nav */}
       <nav aria-label="Primary" className="fixed inset-x-0 bottom-0 z-50">
         <div className="app-card-strong flex w-full items-stretch justify-between gap-2 rounded-none border-x-0 border-b-0 px-3 py-1.5 shadow-2xl shadow-zinc-900/10 md:px-4 md:py-2">
