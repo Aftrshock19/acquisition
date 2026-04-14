@@ -1,4 +1,4 @@
-import { getSupabaseServerContext } from "@/lib/supabase/server";
+import { getSupabaseServerContextFast } from "@/lib/supabase/server";
 import type { UserSettingsRow } from "./types";
 
 const DEFAULT_SETTINGS: UserSettingsRow = {
@@ -31,7 +31,7 @@ const DEFAULT_SETTINGS: UserSettingsRow = {
 };
 
 export async function getUserSettings() {
-  const { supabase, user, error: authError } = await getSupabaseServerContext();
+  const { supabase, user, error: authError } = await getSupabaseServerContextFast();
   if (!supabase) {
     return { settings: DEFAULT_SETTINGS, exists: false, signedIn: false };
   }

@@ -1,8 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createSupabaseServerClient, getSupabaseServerContext } from "@/lib/supabase/server";
-import { getSupabaseUser } from "@/lib/supabase/auth";
+import {
+  createSupabaseServerClient,
+  getSupabaseServerContextFast,
+} from "@/lib/supabase/server";
 import { getTodayDailySessionRow, getTodaySessionDate } from "@/lib/loop/dailySessions";
 import {
   getListeningAssetById,
@@ -144,7 +146,7 @@ export async function getDailyQueue(
     };
   }
 
-  const { supabase, user, error: authError } = await getSupabaseServerContext();
+  const { supabase, user, error: authError } = await getSupabaseServerContextFast();
   if (!supabase) {
     return {
       ok: false,
@@ -252,10 +254,33 @@ export async function getDailyQueue(
       .select("current_frontier_rank, current_frontier_rank_low, current_frontier_rank_high, placement_status")
       .eq("user_id", user.id)
       .maybeSingle();
-    const frontierRank = placementRow?.current_frontier_rank as number | null;
+    let frontierRank = placementRow?.current_frontier_rank as number | null;
+    let lowBound = placementRow?.current_frontier_rank_low as number | null;
+    let highBound = placementRow?.current_frontier_rank_high as number | null;
+
+    // Defensive fallback: if user_settings hasn't captured the frontier yet
+    // (e.g. transient write skew immediately after baseline completion), read
+    // the latest completed baseline_test_run directly so the first session is
+    // never stale. No writes here — this is read-only.
+    if (!frontierRank) {
+      const { data: completedRun } = await supabase
+        .from("baseline_test_runs")
+        .select(
+          "estimated_frontier_rank, estimated_frontier_rank_low, estimated_frontier_rank_high",
+        )
+        .eq("user_id", user.id)
+        .eq("status", "completed")
+        .order("completed_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (completedRun) {
+        frontierRank = (completedRun.estimated_frontier_rank as number | null) ?? null;
+        lowBound = (completedRun.estimated_frontier_rank_low as number | null) ?? lowBound;
+        highBound = (completedRun.estimated_frontier_rank_high as number | null) ?? highBound;
+      }
+    }
+
     if (frontierRank && frontierRank > 200 && limitNew > 0) {
-      const lowBound = placementRow?.current_frontier_rank_low as number | null;
-      const highBound = placementRow?.current_frontier_rank_high as number | null;
       const picked = await pickNewWordsNearFrontier(supabase, {
         userId: user.id,
         language: lang,
@@ -316,6 +341,7 @@ export async function getDailyQueue(
 }
 
 export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsResult> {
+  const __perfStart = performance.now();
   const [
     { settings, signedIn },
     mcqQuestionFormats,
@@ -335,6 +361,7 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     getDaysSinceLastSession(),
     getOverdueCount(),
   ]);
+  const __perfParallelDone = performance.now();
   const effective = resolveEffectiveSettings(settings, recommended);
   const completedToday = Math.max(
     0,
@@ -349,7 +376,7 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
   const adaptiveContext =
     variant === "adaptive"
       ? await (async () => {
-          const { supabase, user } = await getSupabaseServerContext();
+          const { supabase, user } = await getSupabaseServerContextFast();
           if (!supabase || !user) return null;
           return computeAdaptiveContext(supabase, user.id, variant);
         })()
@@ -380,7 +407,9 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     enabledTypes: effective.enabledModes,
   };
 
+  const __perfPreQueue = performance.now();
   const queueResult = await getDailyQueue(lang, newLimit, reviewLimit);
+  const __perfQueueDone = performance.now();
 
   if (!queueResult.ok) {
     return {
@@ -404,6 +433,13 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     adaptiveNewWordBudget: adaptiveContext ? adaptiveNewWordBudget : null,
   });
 
+  console.log(
+    `[perf] getTodayFlashcards total=${Math.round(performance.now() - __perfStart)}ms ` +
+      `parallel8=${Math.round(__perfParallelDone - __perfStart)}ms ` +
+      `adaptive+pre=${Math.round(__perfPreQueue - __perfParallelDone)}ms ` +
+      `queue=${Math.round(__perfQueueDone - __perfPreQueue)}ms ` +
+      `upsert=${Math.round(performance.now() - __perfQueueDone)}ms`,
+  );
   return {
     ok: true,
     session,
@@ -415,14 +451,14 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
 }
 
 async function getTodayDailySession(): Promise<DailySessionRow | null> {
-  const { supabase, user } = await getSupabaseServerContext();
+  const { supabase, user } = await getSupabaseServerContextFast();
   if (!supabase || !user) return null;
 
   return getTodayDailySessionRow(supabase, user.id);
 }
 
 async function getTodaySavedWordsState(language: string): Promise<SavedWordsState> {
-  const { supabase, user } = await getSupabaseServerContext();
+  const { supabase, user } = await getSupabaseServerContextFast();
   if (!supabase || !user) {
     return EMPTY_SAVED_WORDS_STATE;
   }
@@ -430,10 +466,28 @@ async function getTodaySavedWordsState(language: string): Promise<SavedWordsStat
   return getSavedWordsState(supabase, user.id, language);
 }
 
+// p50 review latency is a slow-moving diagnostic metric used only to size
+// daily workload. A 10-minute per-user cache is indistinguishable in
+// product behaviour from a live fetch and saves the 200-row scan on every
+// Today load (and every completion-triggered revalidation).
+const P50_CACHE_TTL_MS = 10 * 60 * 1000;
+const p50ReviewMsCache = new Map<
+  string,
+  { value: number | null; expiresAt: number }
+>();
+
 async function getP50ReviewMs(): Promise<number | null> {
-  const { supabase, user } = await getSupabaseServerContext();
+  const { supabase, user } = await getSupabaseServerContextFast();
   if (!supabase || !user) return null;
 
+  const cached = p50ReviewMsCache.get(user.id);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) {
+    console.log(`[perf] getP50ReviewMs cache=hit user=${user.id.slice(0, 8)}`);
+    return cached.value;
+  }
+
+  const __perfStart = performance.now();
   const { data } = await supabase
     .from("review_events")
     .select("ms_spent")
@@ -446,14 +500,20 @@ async function getP50ReviewMs(): Promise<number | null> {
     .limit(200);
 
   const values = (data ?? []).map((r) => r.ms_spent as number).filter(Boolean);
-  if (values.length === 0) return null;
+  const p50 =
+    values.length === 0
+      ? null
+      : ([...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? null);
 
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)] ?? null;
+  p50ReviewMsCache.set(user.id, { value: p50, expiresAt: now + P50_CACHE_TTL_MS });
+  console.log(
+    `[perf] getP50ReviewMs cache=miss fetch=${Math.round(performance.now() - __perfStart)}ms rows=${values.length}`,
+  );
+  return p50;
 }
 
 async function getDaysSinceLastSession(): Promise<number | null> {
-  const { supabase, user } = await getSupabaseServerContext();
+  const { supabase, user } = await getSupabaseServerContextFast();
   if (!supabase || !user) return null;
 
   const today = getTodaySessionDate();
@@ -473,17 +533,40 @@ async function getDaysSinceLastSession(): Promise<number | null> {
   return Math.floor(diffMs / 86400000);
 }
 
+// Overdue count is a slow-moving input to workload sizing. A 60-second
+// per-user cache removes an exact count scan on every Today load and on
+// every completion-triggered revalidation without changing the workload
+// policy output in a user-perceptible way.
+const OVERDUE_COUNT_CACHE_TTL_MS = 60 * 1000;
+const overdueCountCache = new Map<
+  string,
+  { value: number; expiresAt: number }
+>();
+
 async function getOverdueCount(): Promise<number> {
-  const { supabase, user } = await getSupabaseServerContext();
+  const { supabase, user } = await getSupabaseServerContextFast();
   if (!supabase || !user) return 0;
 
+  const now = Date.now();
+  const cached = overdueCountCache.get(user.id);
+  if (cached && cached.expiresAt > now) {
+    console.log(`[perf] getOverdueCount cache=hit user=${user.id.slice(0, 8)}`);
+    return cached.value;
+  }
+
+  const __perfStart = performance.now();
   const { count } = await supabase
     .from("user_words")
     .select("word_id", { count: "exact", head: true })
     .eq("user_id", user.id)
     .lte("next_due", new Date().toISOString());
 
-  return count ?? 0;
+  const value = count ?? 0;
+  overdueCountCache.set(user.id, { value, expiresAt: now + OVERDUE_COUNT_CACHE_TTL_MS });
+  console.log(
+    `[perf] getOverdueCount cache=miss fetch=${Math.round(performance.now() - __perfStart)}ms value=${value}`,
+  );
+  return value;
 }
 
 export type LoadMoreResult =
@@ -515,6 +598,7 @@ export type RecordReviewResult =
 export async function recordReview(
   payload: RecordReviewPayload,
 ): Promise<RecordReviewResult> {
+  const __perfStart = performance.now();
   try {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -525,7 +609,7 @@ export async function recordReview(
       };
     }
 
-    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    const { supabase, user, error: authError } = await getSupabaseServerContextFast();
     if (!supabase) {
       return {
         ok: false,
@@ -540,11 +624,33 @@ export async function recordReview(
       return { ok: false, error: "Not authenticated" };
     }
 
+    const __perfAuthDone = performance.now();
+
     const grade = resolveGrade(payload);
     const queueSource = payload.queueSource ?? "main";
     const retryScheduledFor = payload.retryScheduledFor ?? null;
 
-    const { settings } = await getUserSettings();
+    // Run settings + speculative adaptive wordState fetch in parallel. wordState
+    // is a cheap single-row query and is discarded in baseline variant; this
+    // removes a serial RTT in the adaptive path.
+    const [{ settings }, wordStateData] = await Promise.all([
+      getUserSettings(),
+      (async () => {
+        const { data } = await supabase
+          .from("user_words")
+          .select("difficulty,adaptive_evidence_count,words(rank)")
+          .eq("user_id", user.id)
+          .eq("word_id", payload.wordId)
+          .maybeSingle();
+        return data as
+          | {
+              difficulty: number | null;
+              adaptive_evidence_count: number | null;
+              words: { rank: number | null } | null;
+            }
+          | null;
+      })(),
+    ]);
     const variant: SchedulerVariant =
       settings.scheduler_variant === "adaptive" ? "adaptive" : "baseline";
 
@@ -552,33 +658,17 @@ export async function recordReview(
     let itemFactor = 1.0;
 
     if (variant === "adaptive") {
-      const [adaptive, wordState] = await Promise.all([
-        computeAdaptiveContext(supabase, user.id, variant),
-        (async () => {
-          const { data } = await supabase
-            .from("user_words")
-            .select("difficulty,adaptive_evidence_count,words(rank)")
-            .eq("user_id", user.id)
-            .eq("word_id", payload.wordId)
-            .maybeSingle();
-          return data as
-            | {
-                difficulty: number | null;
-                adaptive_evidence_count: number | null;
-                words: { rank: number | null } | null;
-              }
-            | null;
-        })(),
-      ]);
-
+      const adaptive = await computeAdaptiveContext(supabase, user.id, variant);
       learnerFactor = adaptive.learnerState.learnerFactor;
       const item = computeItemFactor({
-        rank: wordState?.words?.rank ?? null,
-        observedDifficulty: wordState?.difficulty ?? null,
-        evidenceCount: wordState?.adaptive_evidence_count ?? 0,
+        rank: wordStateData?.words?.rank ?? null,
+        observedDifficulty: wordStateData?.difficulty ?? null,
+        evidenceCount: wordStateData?.adaptive_evidence_count ?? 0,
       });
       itemFactor = item.itemFactor;
     }
+
+    const __perfPreRpc = performance.now();
 
     const { error } = await supabase.rpc("record_review", {
       p_word_id: payload.wordId,
@@ -605,8 +695,22 @@ export async function recordReview(
       return { ok: false, error: error.message };
     }
 
-    const debugSnapshot = await getFlashcardDebugSnapshot(payload.wordId);
+    const __perfRpcDone = performance.now();
+    // Debug snapshot is consumed only by dev tooling; skip the 3 extra
+    // queries on the hot submit path in production. Do not remove this
+    // gate — see docs/performance-guardrails.md (debug-on-hot-path rule).
+    const debugSnapshot: FlashcardDebugSnapshot =
+      process.env.NODE_ENV === "production"
+        ? { dailySession: null, currentUserWord: null, lastReviewEvent: null }
+        : await getFlashcardDebugSnapshot(payload.wordId);
 
+    console.log(
+      `[perf] recordReview total=${Math.round(performance.now() - __perfStart)}ms ` +
+        `auth=${Math.round(__perfAuthDone - __perfStart)}ms ` +
+        `pre-rpc=${Math.round(__perfPreRpc - __perfAuthDone)}ms ` +
+        `rpc=${Math.round(__perfRpcDone - __perfPreRpc)}ms ` +
+        `debug=${Math.round(performance.now() - __perfRpcDone)}ms`,
+    );
     return { ok: true, debugSnapshot };
   } catch (error) {
     return {
@@ -636,7 +740,7 @@ export async function recordReadingQuestionAttempt(payload: {
   responseMs: number;
 }): Promise<RecordReadingQuestionAttemptResult> {
   try {
-    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    const { supabase, user, error: authError } = await getSupabaseServerContextFast();
     if (!supabase) {
       return { ok: false, error: "Supabase client could not be created on the server" };
     }
@@ -675,7 +779,7 @@ export async function recordExposure(
     };
   }
 
-  const { supabase, user, error: authError } = await getSupabaseServerContext();
+  const { supabase, user, error: authError } = await getSupabaseServerContextFast();
   if (!supabase) {
     return {
       ok: false,
@@ -834,7 +938,7 @@ async function upsertDailySession(
   existingDailySession: DailySessionRow | null,
   adaptive?: AdaptiveDailySessionPatch,
 ): Promise<DailySessionRow | null> {
-  const { supabase, user } = await getSupabaseServerContext();
+  const { supabase, user } = await getSupabaseServerContextFast();
   if (!supabase || !user) return null;
 
   const sessionDate = getTodaySessionDate();
@@ -944,8 +1048,9 @@ export async function completeReadingStep({
   textId: string;
   readingTimeSeconds?: number;
 }): Promise<CompleteReadingStepResult> {
+  const __perfStart = performance.now();
   try {
-    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    const { supabase, user, error: authError } = await getSupabaseServerContextFast();
     if (!supabase) {
       return {
         ok: false,
@@ -1089,16 +1194,21 @@ export async function completeReadingStep({
       { onConflict: "user_id,text_id" },
     );
 
-    revalidatePath("/today");
-    revalidatePath("/reading");
-    revalidatePath(`/reader/${textId}`);
-    revalidatePath("/listening");
+    // Narrowed to the pages that read reading_progress or the next-step UI
+    // after a reading completion. Do not expand without re-reading
+    // docs/performance-guardrails.md.
+    revalidatePath("/today"); // perf-ok: next-step card on Today reads completion state
+    revalidatePath("/reading"); // perf-ok: reading index shows done/not-done per text
+    revalidatePath(`/reader/${textId}`); // perf-ok: the current text's own done state
     if (listeningAsset) {
-      revalidatePath(`/listening/${listeningAsset.id}`);
+      revalidatePath(`/listening/${listeningAsset.id}`); // perf-ok: matched audio unlock
     }
 
     const dailySession = data as DailySessionRow;
 
+    console.log(
+      `[perf] completeReadingStep total=${Math.round(performance.now() - __perfStart)}ms`,
+    );
     return {
       ok: true,
       dailySession,
@@ -1123,7 +1233,7 @@ export async function markReadingComplete({
   readingTimeSeconds?: number;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    const { supabase, user, error: authError } = await getSupabaseServerContextFast();
     if (!supabase) {
       return { ok: false, error: "Supabase client could not be created on the server" };
     }
@@ -1163,7 +1273,7 @@ export async function uncompleteReadingStep({
   textId: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    const { supabase, user, error: authError } = await getSupabaseServerContextFast();
     if (!supabase) {
       return { ok: false, error: "Supabase client could not be created on the server" };
     }
@@ -1204,8 +1314,9 @@ export async function completeListeningStep({
   playbackRate: number;
   listeningTimeSeconds?: number;
 }): Promise<CompleteListeningStepResult> {
+  const __perfStart = performance.now();
   try {
-    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    const { supabase, user, error: authError } = await getSupabaseServerContextFast();
     if (!supabase) {
       return {
         ok: false,
@@ -1335,8 +1446,6 @@ export async function completeListeningStep({
     revalidatePath("/today");
     revalidatePath("/listening");
     revalidatePath(`/listening/${listeningAsset.id}`);
-    revalidatePath("/reading");
-    revalidatePath(`/reader/${listeningAsset.textId}`);
 
     const dailySession = data as DailySessionRow;
 
@@ -1349,6 +1458,9 @@ export async function completeListeningStep({
       }
     }
 
+    console.log(
+      `[perf] completeListeningStep total=${Math.round(performance.now() - __perfStart)}ms`,
+    );
     return {
       ok: true,
       dailySession,
@@ -1371,7 +1483,7 @@ export async function uncompleteListeningStep({
   assetId: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    const { supabase, user, error: authError } = await getSupabaseServerContextFast();
     if (!supabase) {
       return { ok: false, error: "Supabase client could not be created on the server" };
     }
@@ -1439,7 +1551,7 @@ export async function markReadingOpened({
   textId: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    const { supabase, user, error: authError } = await getSupabaseServerContextFast();
     if (!supabase) {
       return { ok: false, error: "Supabase client could not be created on the server" };
     }
@@ -1535,7 +1647,7 @@ export async function markListeningOpened({
   assetId: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    const { supabase, user, error: authError } = await getSupabaseServerContextFast();
     if (!supabase) {
       return { ok: false, error: "Supabase client could not be created on the server" };
     }
@@ -1640,7 +1752,7 @@ export async function markListeningPlaybackStarted({
   assetId: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
-    const { supabase, user, error: authError } = await getSupabaseServerContext();
+    const { supabase, user, error: authError } = await getSupabaseServerContextFast();
     if (!supabase) {
       return { ok: false, error: "Supabase client could not be created on the server" };
     }
@@ -1747,7 +1859,7 @@ export async function getFlashcardDebugSnapshot(
     };
   }
 
-  const { user } = await getSupabaseUser(supabase);
+  const { user } = await getSupabaseServerContextFast();
   if (!user) {
     return {
       dailySession: null,

@@ -20,6 +20,20 @@ export type RetryQueueEntry<T> = {
   dueAfterCount: number;
 };
 
+/**
+ * Serialized shape persisted to localStorage for same-day session resume.
+ * Version bump invalidates older payloads so stale in-flight state cannot
+ * leak across migrations.
+ */
+export const RETRY_QUEUE_SERIAL_VERSION = 1 as const;
+
+export type SerializedRetryQueue<T> = {
+  version: typeof RETRY_QUEUE_SERIAL_VERSION;
+  answerCount: number;
+  entries: RetryQueueEntry<T>[];
+  retryHistory: Array<[string, number]>;
+};
+
 export class RetryQueue<T extends { id: string }> {
   private entries: RetryQueueEntry<T>[] = [];
   private answerCount = 0;
@@ -130,5 +144,64 @@ export class RetryQueue<T extends { id: string }> {
     this.entries = [];
     this.retryHistory.clear();
     this.answerCount = 0;
+  }
+
+  /** Snapshot the queue for persistence (e.g., localStorage). */
+  serialize(): SerializedRetryQueue<T> {
+    return {
+      version: RETRY_QUEUE_SERIAL_VERSION,
+      answerCount: this.answerCount,
+      entries: this.entries.map((e) => ({
+        card: e.card,
+        retryCount: e.retryCount,
+        dueAfterCount: e.dueAfterCount,
+      })),
+      retryHistory: Array.from(this.retryHistory.entries()),
+    };
+  }
+
+  /**
+   * Rehydrate from a snapshot. Invalid/corrupt payloads are ignored and the
+   * queue is left untouched — callers should treat failure as a no-op, not
+   * an error.
+   */
+  hydrate(snapshot: unknown): boolean {
+    if (!snapshot || typeof snapshot !== "object") return false;
+    const s = snapshot as Partial<SerializedRetryQueue<T>>;
+    if (s.version !== RETRY_QUEUE_SERIAL_VERSION) return false;
+    if (typeof s.answerCount !== "number" || !Number.isFinite(s.answerCount)) return false;
+    if (!Array.isArray(s.entries) || !Array.isArray(s.retryHistory)) return false;
+
+    const entries: RetryQueueEntry<T>[] = [];
+    for (const raw of s.entries) {
+      if (!raw || typeof raw !== "object") return false;
+      const e = raw as Partial<RetryQueueEntry<T>>;
+      if (
+        !e.card ||
+        typeof (e.card as { id?: unknown }).id !== "string" ||
+        typeof e.retryCount !== "number" ||
+        typeof e.dueAfterCount !== "number"
+      ) {
+        return false;
+      }
+      entries.push({
+        card: e.card as T,
+        retryCount: e.retryCount,
+        dueAfterCount: e.dueAfterCount,
+      });
+    }
+
+    const history = new Map<string, number>();
+    for (const pair of s.retryHistory) {
+      if (!Array.isArray(pair) || pair.length !== 2) return false;
+      const [key, val] = pair;
+      if (typeof key !== "string" || typeof val !== "number") return false;
+      history.set(key, val);
+    }
+
+    this.entries = entries;
+    this.retryHistory = history;
+    this.answerCount = s.answerCount;
+    return true;
   }
 }

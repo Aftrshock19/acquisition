@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import {
   markReadingOpened,
   markReadingComplete,
@@ -37,7 +36,6 @@ export function ReaderSession({
   questions = [],
   initialCompleted = false,
 }: ReaderSessionProps) {
-  const router = useRouter();
   const blocks = useMemo(
     () => toReadingBlocks(text.content).map((block) => tokenize(block)),
     [text.content],
@@ -112,7 +110,6 @@ export function ReaderSession({
         return;
       }
       setLocalCompleted(true);
-      router.refresh();
     });
   }
 
@@ -126,7 +123,6 @@ export function ReaderSession({
         return;
       }
       setLocalCompleted(false);
-      router.refresh();
     });
   }
 

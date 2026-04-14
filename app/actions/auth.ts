@@ -11,11 +11,12 @@ export async function signOutAction() {
     await supabase.auth.signOut();
   }
 
-  revalidatePath("/");
-  revalidatePath("/login");
-  revalidatePath("/profile");
-  revalidatePath("/settings");
-  revalidatePath("/today");
+  // Sign-out invalidates every per-user shell. Cold paths; fan-out is fine.
+  revalidatePath("/"); // perf-ok: sign-out
+  revalidatePath("/login"); // perf-ok: sign-out
+  revalidatePath("/profile"); // perf-ok: sign-out
+  revalidatePath("/settings"); // perf-ok: sign-out
+  revalidatePath("/today"); // perf-ok: sign-out
 
   redirect("/login");
 }

@@ -2,7 +2,10 @@ import { createServerClient } from "@supabase/ssr";
 import type { User } from "@supabase/supabase-js";
 import { cache } from "react";
 import { cookies } from "next/headers";
-import { getSupabaseUser } from "@/lib/supabase/auth";
+import {
+  getSupabaseUser,
+  getSupabaseUserFromSession,
+} from "@/lib/supabase/auth";
 
 export const createSupabaseServerClient = cache(async function createSupabaseServerClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -39,6 +42,34 @@ export const getSupabaseServerContext = cache(async function getSupabaseServerCo
     return { supabase: null, user: null, error: null };
   }
 
+  const __perfStart = performance.now();
   const { user, error } = await getSupabaseUser(supabase);
+  console.log(
+    `[perf] auth.getUser total=${Math.round(performance.now() - __perfStart)}ms`,
+  );
+  return { supabase, user, error };
+});
+
+/**
+ * Fast variant of getSupabaseServerContext for hot interaction paths
+ * (flashcard submit, word lookup/save, reading/listening completion).
+ * Uses a local cookie-based session read instead of a GoTrue round-trip.
+ * See `getSupabaseUserFromSession` for the security rationale.
+ */
+export const getSupabaseServerContextFast = cache(async function getSupabaseServerContextFast(): Promise<{
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  user: User | null;
+  error: string | null;
+}> {
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) {
+    return { supabase: null, user: null, error: null };
+  }
+
+  const __perfStart = performance.now();
+  const { user, error } = await getSupabaseUserFromSession(supabase);
+  console.log(
+    `[perf] auth.getSession total=${Math.round(performance.now() - __perfStart)}ms`,
+  );
   return { supabase, user, error };
 });

@@ -91,6 +91,24 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Performance guardrails
+
+Before editing any hot path (flashcard submit, Today loader, reader
+word tap, save word, reading/listening completion), read:
+
+- [docs/performance-guardrails.md](docs/performance-guardrails.md)
+- [docs/hot-path-checklist.md](docs/hot-path-checklist.md)
+- [docs/deployment-region-alignment.md](docs/deployment-region-alignment.md)
+
+Run the automated checker before opening a perf-sensitive PR:
+
+```sh
+npm run perf:check
+```
+
+For Claude-assisted performance work, paste the template in
+[docs/claude-performance-prompt.md](docs/claude-performance-prompt.md).
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

@@ -299,7 +299,6 @@ export function ListeningPlayer({
       }
 
       setLocalCompleted(true);
-      router.refresh();
     });
   }
 
@@ -316,7 +315,6 @@ export function ListeningPlayer({
       }
 
       setLocalCompleted(false);
-      router.refresh();
     });
   }
 
@@ -368,7 +366,6 @@ export function ListeningPlayer({
 
       setLocalCompleted(true);
       router.push(result.nextPath);
-      router.refresh();
     });
   }
 

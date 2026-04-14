@@ -357,4 +357,66 @@ describe("RetryQueue", () => {
       expect(rq.dequeue()).toBeNull();
     });
   });
+
+  describe("serialize / hydrate round trip", () => {
+    it("restores pending entries, retry history, and answer count", () => {
+      const rq = new RetryQueue<TestCard>();
+      rq.enqueue(makeCard("a"));
+      rq.recordAnswer();
+      rq.recordAnswer();
+      rq.enqueue(makeCard("b"));
+      rq.recordAnswer();
+
+      const snapshot = JSON.parse(JSON.stringify(rq.serialize()));
+
+      const rq2 = new RetryQueue<TestCard>();
+      expect(rq2.hydrate(snapshot)).toBe(true);
+
+      expect(rq2.pendingCount).toBe(rq.pendingCount);
+      expect(rq2.getAnswerCount()).toBe(rq.getAnswerCount());
+      expect(rq2.getRetryCount("a")).toBe(rq.getRetryCount("a"));
+      expect(rq2.getRetryCount("b")).toBe(rq.getRetryCount("b"));
+    });
+
+    it("hydrate ignores corrupt payloads without mutating state", () => {
+      const rq = new RetryQueue<TestCard>();
+      rq.enqueue(makeCard("a"));
+      const before = rq.pendingCount;
+
+      expect(rq.hydrate(null)).toBe(false);
+      expect(rq.hydrate({})).toBe(false);
+      expect(rq.hydrate({ version: 999 })).toBe(false);
+      expect(
+        rq.hydrate({ version: 1, answerCount: "x", entries: [], retryHistory: [] }),
+      ).toBe(false);
+      expect(
+        rq.hydrate({
+          version: 1,
+          answerCount: 0,
+          entries: [{ card: { id: 123 }, retryCount: 1, dueAfterCount: 1 }],
+          retryHistory: [],
+        }),
+      ).toBe(false);
+
+      expect(rq.pendingCount).toBe(before);
+    });
+
+    it("hydrated queue continues to honor MAX_RETRIES", () => {
+      const rq = new RetryQueue<TestCard>();
+      const card = makeCard("capped");
+      for (let i = 0; i < MAX_RETRIES; i++) {
+        rq.enqueue(card);
+        // Drain so we can re-enqueue.
+        for (let j = 0; j < RETRY_GAP; j++) rq.recordAnswer();
+        rq.dequeue();
+      }
+
+      const snapshot = JSON.parse(JSON.stringify(rq.serialize()));
+      const rq2 = new RetryQueue<TestCard>();
+      rq2.hydrate(snapshot);
+
+      expect(rq2.canRetry("capped")).toBe(false);
+      expect(rq2.enqueue(card)).toBe(false);
+    });
+  });
 });

@@ -90,7 +90,6 @@ export function ReaderNextStepCard({
               }
 
               router.push(result.nextPath);
-              router.refresh();
             });
           }}
         >

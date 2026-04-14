@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  useCallback,
   useEffect,
   useEffectEvent,
   useMemo,
@@ -39,6 +40,12 @@ import {
   splitDefinitionCandidates,
 } from "@/lib/srs/cloze";
 import { RetryQueue } from "@/lib/srs/retryQueue";
+import {
+  clearRetryQueue,
+  loadRetryQueue,
+  persistRetryQueue,
+  sweepStaleRetryQueues,
+} from "@/lib/srs/retryQueuePersistence";
 import type { McqQuestionFormat } from "@/lib/settings/mcqQuestionFormats";
 import type { EnabledFlashcardMode } from "@/lib/settings/types";
 import type {
@@ -213,11 +220,46 @@ export function TodaySession({
     useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingInputRef = useRef<HTMLInputElement>(null);
 
+  // Persistence key for the retry queue. We only persist when we have a
+  // real daily session row, otherwise there is no stable (user, date) pair
+  // and we fall back to the existing in-memory-only behaviour.
+  const retryPersistKey = useMemo(() => {
+    if (!initialDailySession) return null;
+    return {
+      userId: initialDailySession.user_id,
+      sessionDate: initialDailySession.session_date,
+      sessionId: initialDailySession.id,
+    };
+  }, [initialDailySession]);
+
+  const retryPersistKeyRef = useRef(retryPersistKey);
+  useEffect(() => {
+    retryPersistKeyRef.current = retryPersistKey;
+  }, [retryPersistKey]);
+
+  const persistRetry = useCallback(() => {
+    const key = retryPersistKeyRef.current;
+    if (!key) return;
+    persistRetryQueue({ ...key, queue: retryQueueRef.current });
+  }, []);
+
   useEffect(() => {
     setMainIndex(0);
     setMainCompletedCount(0);
     retryQueueRef.current.reset();
-    setRetryPending(0);
+
+    // Sweep stale persisted retries (other users / other dates) and rehydrate
+    // today's snapshot if one exists. Corrupt payloads are ignored safely.
+    let rehydrated = false;
+    if (retryPersistKey) {
+      sweepStaleRetryQueues(retryPersistKey);
+      rehydrated = loadRetryQueue({
+        ...retryPersistKey,
+        queue: retryQueueRef.current,
+      });
+    }
+
+    setRetryPending(retryQueueRef.current.pendingCount);
     setCurrent(queue[0] ?? null);
     setCurrentSource("main");
     setCurrentRetryIndex(0);
@@ -240,7 +282,12 @@ export function TodaySession({
       clearTimeout(correctionPlaceholderTimeoutRef.current);
       correctionPlaceholderTimeoutRef.current = null;
     }
-  }, [queue]);
+
+    // If we rehydrated, the reset above cleared nothing user-visible but the
+    // queue may already hold pending retries — no additional action needed
+    // since `advanceFromCurrentCard` surfaces them on the next transition.
+    void rehydrated;
+  }, [queue, retryPersistKey]);
 
   useEffect(() => {
     return () => {
@@ -475,6 +522,7 @@ export function TodaySession({
 
     if (dueRetry) {
       setRetryPending(rq.pendingCount);
+      persistRetry();
       beginCard(dueRetry.card, "retry");
       setCurrentRetryIndex(dueRetry.retryCount);
       return;
@@ -493,6 +541,7 @@ export function TodaySession({
       const forced = rq.dequeue() ?? rq.forceDequeue();
       if (forced) {
         setRetryPending(rq.pendingCount);
+        persistRetry();
         beginCard(forced.card, "retry");
         setCurrentRetryIndex(forced.retryCount);
         return;
@@ -501,6 +550,9 @@ export function TodaySession({
 
     setCurrent(null);
     setPhase("done");
+    // Session is complete: purge persisted retry state so nothing leaks to
+    // tomorrow or to a subsequent fresh session on the same day.
+    if (retryPersistKey) clearRetryQueue(retryPersistKey);
   }
 
   function scheduleSuccessAdvance() {
@@ -558,6 +610,7 @@ export function TodaySession({
         rq.enqueue(card);
         setRetryPending(rq.pendingCount);
       }
+      persistRetry();
 
       appendReviewedCard({
         card,
@@ -726,6 +779,7 @@ export function TodaySession({
         rq.enqueue(current);
         setRetryPending(rq.pendingCount);
       }
+      persistRetry();
 
       appendReviewedCard({
         card: current,
