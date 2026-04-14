@@ -2,7 +2,10 @@
 
 import type { ReactNode, RefObject } from "react";
 import { TypingFlashcardCard } from "@/components/srs/cards/TypingFlashcardCard";
-import type { UnifiedQueueCard } from "@/components/srs/logic/buildUnifiedQueue";
+import {
+  getEnglishPromptText,
+  type UnifiedQueueCard,
+} from "@/components/srs/logic/buildUnifiedQueue";
 
 type ClozeCardProps = {
   card: Extract<UnifiedQueueCard, { cardType: "cloze" }>;
@@ -52,7 +55,7 @@ export function ClozeCard({
       prompt={
         <>
           <p className="mt-2 text-zinc-700 dark:text-zinc-200">
-            {card.direction === "en_to_es" ? (card.definition ?? "—") : card.lemma}
+            {card.direction === "en_to_es" ? (getEnglishPromptText(card) ?? "—") : card.lemma}
           </p>
           {showPosHint && card.hint ? (
             <p className="mt-2 text-sm text-zinc-500">({card.hint})</p>

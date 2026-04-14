@@ -238,7 +238,7 @@ export function buildUnifiedQueue(
         ...card,
         cardType: "mcq" as const,
         questionFormat,
-        prompt: `What does "${card.lemma}" mean?`,
+        prompt: card.lemma,
         options: mcq.options,
         correctOption: mcq.correctOption,
       };
@@ -294,6 +294,28 @@ function isImplementedCardMode(type: EnabledFlashcardMode): type is ImplementedC
 
 function getAudioText(card: UnifiedQueueSourceCard) {
   return card.exampleSentence ?? card.lemma;
+}
+
+/**
+ * English-side main prompt. Source of truth is `translation` on
+ * `public.words`. Must NOT fall back to definition fields — those are
+ * optional helper content only.
+ */
+export function getEnglishPromptText(
+  card: Pick<UnifiedQueueSourceCard, "translation">,
+): string | null {
+  const trimmed = card.translation?.trim();
+  return trimmed ? trimmed : null;
+}
+
+/**
+ * Spanish-side main prompt. Source of truth is `lemma` on `public.words`.
+ */
+export function getSpanishPromptText(
+  card: Pick<UnifiedQueueSourceCard, "lemma">,
+): string | null {
+  const trimmed = card.lemma?.trim();
+  return trimmed ? trimmed : null;
 }
 
 const SRS_QUEUE_DEBUG_LOGS_ENABLED = process.env.NEXT_PUBLIC_SRS_QUEUE_DEBUG === "1";

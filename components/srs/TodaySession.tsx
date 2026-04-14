@@ -25,6 +25,7 @@ import { SentenceClozePrompt } from "@/components/srs/cards/SentenceClozePrompt"
 import { SentenceCard } from "@/components/srs/cards/SentenceCard";
 import {
   buildUnifiedQueue,
+  getEnglishPromptText,
   TYPE_LABELS,
   type UnifiedQueueCard,
 } from "@/components/srs/logic/buildUnifiedQueue";
@@ -96,7 +97,7 @@ function getClozeExpectedLabel(
     return formatDefinitionCandidates(expected);
   }
 
-  return expected[0] ?? card.definition ?? "—";
+  return expected[0] ?? getEnglishPromptText(card) ?? "—";
 }
 
 function allowContainedClozeCandidateMatch(
@@ -113,7 +114,7 @@ function getClozeExpected(
     return [card.lemma];
   }
 
-  return splitDefinitionCandidates(card.definition);
+  return splitDefinitionCandidates(getEnglishPromptText(card));
 }
 
 function getTypingExpected(
@@ -1173,8 +1174,8 @@ function ReviewedClozeCard({
     answer ??
     (card.direction === "en_to_es"
       ? card.lemma
-      : (splitDefinitionCandidates(card.definition)[0] ??
-        card.definition ??
+      : (splitDefinitionCandidates(getEnglishPromptText(card))[0] ??
+        getEnglishPromptText(card) ??
         "—"));
 
   return (
@@ -1185,7 +1186,7 @@ function ReviewedClozeCard({
         </p>
         <p className="mt-2 text-zinc-800 dark:text-zinc-100">
           {card.direction === "en_to_es"
-            ? (card.definition ?? "—")
+            ? (getEnglishPromptText(card) ?? "—")
             : card.lemma}
         </p>
         {card.hint ? (
@@ -1214,10 +1215,10 @@ function ReviewedNormalCard({
 }) {
   const promptLabel = card.direction === "en_to_es" ? "Meaning" : "Word";
   const promptValue =
-    card.direction === "en_to_es" ? (card.definition ?? "—") : card.lemma;
+    card.direction === "en_to_es" ? (getEnglishPromptText(card) ?? "—") : card.lemma;
   const answerLabel = card.direction === "en_to_es" ? "Word" : "Meaning";
   const answerValue =
-    card.direction === "en_to_es" ? card.lemma : (card.definition ?? "—");
+    card.direction === "en_to_es" ? card.lemma : (getEnglishPromptText(card) ?? "—");
   const resultLabel = getNormalReviewResultLabel(grade);
 
   return (

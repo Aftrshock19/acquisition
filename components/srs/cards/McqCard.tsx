@@ -8,7 +8,10 @@ import {
   FlashcardSuccessActions,
 } from "@/components/srs/cards/FlashcardContainer";
 import { SentenceClozePrompt } from "@/components/srs/cards/SentenceClozePrompt";
+import { SupportPanel } from "@/components/srs/cards/SupportPanel";
 import type { UnifiedQueueCard } from "@/components/srs/logic/buildUnifiedQueue";
+
+const MCQ_SUPPORT_EXPANDED_STORAGE_KEY = "mcq-card-support-expanded";
 
 type McqCardProps = {
   card: Extract<UnifiedQueueCard, { cardType: "mcq" }>;
@@ -47,6 +50,14 @@ export function McqCard({
     );
   }
 
+  const isSentenceFormat =
+    card.questionFormat === "sentence" && Boolean(card.sentenceData);
+  const wordTranslation = card.translation?.trim() || null;
+  const englishSentence = isSentenceFormat
+    ? card.exampleSentenceEn?.trim() || null
+    : null;
+  const hasSupportPanel = Boolean(wordTranslation || englishSentence);
+
   return (
     <div className="flex flex-col gap-6">
       <FlashcardContainer
@@ -55,7 +66,7 @@ export function McqCard({
         navigation={navigation}
       >
         <p className="mt-2 text-lg font-medium">{card.prompt}</p>
-        {card.questionFormat === "sentence" && card.sentenceData ? (
+        {isSentenceFormat && card.sentenceData ? (
           <SentenceClozePrompt
             sentence={card.sentenceData.sentence}
             className="mt-4 text-xl font-medium tracking-tight text-zinc-900 dark:text-zinc-100"
@@ -77,6 +88,16 @@ export function McqCard({
           </p>
         ) : null}
       </FlashcardContainer>
+
+      {hasSupportPanel ? (
+        <SupportPanel
+          translation={wordTranslation}
+          englishSentence={englishSentence}
+          storageKey={
+            isSentenceFormat ? MCQ_SUPPORT_EXPANDED_STORAGE_KEY : undefined
+          }
+        />
+      ) : null}
 
       <div className="grid gap-2">
         {card.options.map((option) => (

@@ -11,7 +11,10 @@ import {
   getNormalReviewResultLabel,
   type NormalReviewChoice,
 } from "@/lib/srs/normalReview";
-import type { UnifiedQueueCard } from "@/components/srs/logic/buildUnifiedQueue";
+import {
+  getEnglishPromptText,
+  type UnifiedQueueCard,
+} from "@/components/srs/logic/buildUnifiedQueue";
 
 type NormalEnToEsCardProps = {
   card: Extract<
@@ -60,7 +63,7 @@ export function NormalEnToEsCard({
         navigation={navigation}
       >
         <p className="mt-2 text-2xl font-semibold tracking-tight">
-          {card.definition ?? "—"}
+          {getEnglishPromptText(card) ?? "—"}
         </p>
         {showPosHint && card.hint ? (
           <p className="mt-1 text-sm text-zinc-500">({card.hint})</p>

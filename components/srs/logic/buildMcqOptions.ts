@@ -3,7 +3,7 @@ import frequencySeed from "@/data/spanish-frequency.json";
 type CandidateWord = {
   id: string;
   lemma: string;
-  definition: string | null;
+  translation?: string | null;
   hint?: string | null;
   rank?: number;
 };
@@ -23,11 +23,11 @@ export function buildMcqOptions(
   options: string[];
   correctOption: string;
 } {
-  const correctOption = sanitizeMeaning(target.definition) || target.lemma;
+  const correctOption = sanitizeMeaning(target.translation) || target.lemma;
   const candidateMeanings = pool
     .filter((candidate) => candidate.id !== target.id)
     .map((candidate) => ({
-      value: sanitizeMeaning(candidate.definition),
+      value: sanitizeMeaning(candidate.translation),
       samePos: candidate.hint && target.hint ? candidate.hint === target.hint : false,
       rankDistance:
         typeof candidate.rank === "number" && typeof target.rank === "number"
