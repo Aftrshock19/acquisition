@@ -18,6 +18,7 @@ type McqCardProps = {
   busy: boolean;
   submitError: string | null;
   showPosHint?: boolean;
+  hideTranslation?: boolean;
   feedback:
     | {
         correct: boolean;
@@ -34,6 +35,7 @@ export function McqCard({
   busy,
   submitError,
   showPosHint = true,
+  hideTranslation = false,
   feedback,
   onSelect,
   onNext,
@@ -91,8 +93,14 @@ export function McqCard({
 
       {hasSupportPanel ? (
         <SupportPanel
+          key={
+            isSentenceFormat
+              ? `${card.id}-${hideTranslation ? "hidden" : "shown"}`
+              : card.id
+          }
           translation={wordTranslation}
           englishSentence={englishSentence}
+          hideTranslation={isSentenceFormat ? hideTranslation : false}
           storageKey={
             isSentenceFormat ? MCQ_SUPPORT_EXPANDED_STORAGE_KEY : undefined
           }

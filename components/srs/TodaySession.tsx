@@ -988,6 +988,7 @@ export function TodaySession({
                 busy={busy}
                 submitError={submitError}
                 showPosHint={showPosHint}
+                hideTranslation={hideTranslationSentences}
                 feedback={feedback}
                 onSelect={(option) => {
                   void handleChoiceSelect(option);

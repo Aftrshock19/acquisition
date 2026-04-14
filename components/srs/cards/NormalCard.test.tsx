@@ -14,7 +14,7 @@ const enToEsCard: Extract<
   direction: "en_to_es",
   lemma: "casa",
   definition: "house",
-  translation: null,
+  translation: "house",
   definitionEs: null,
   definitionEn: "house",
   exampleSentence: null,
