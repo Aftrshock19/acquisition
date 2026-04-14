@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { getAppUrl } from "@/lib/url";
 import { useRouter } from "next/navigation";
+
+const EMAIL_REDIRECT_TO = `${getAppUrl()}/auth/callback`;
 
 export function LoginForm() {
   const router = useRouter();
@@ -12,6 +15,8 @@ export function LoginForm() {
   const [signUpPassword, setSignUpPassword] = useState("");
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [submitting, setSubmitting] = useState<"signIn" | "signUp" | null>(null);
+  const [confirmationPending, setConfirmationPending] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(false);
 
   async function handleSignIn(e: React.FormEvent) {
     e.preventDefault();
@@ -46,7 +51,7 @@ export function LoginForm() {
         email: signUpEmail,
         password: signUpPassword,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: EMAIL_REDIRECT_TO,
         },
       });
       if (error) {
@@ -58,12 +63,41 @@ export function LoginForm() {
         router.replace("/");
         return;
       }
-      setMessage({ type: "ok", text: "Check your email to confirm, or sign in if you already have an account." });
+      setConfirmationPending(true);
+      setMessage({
+        type: "ok",
+        text: "We sent a confirmation link to your email. Please check your inbox (and spam folder) to complete sign-up.",
+      });
       router.refresh();
     } catch (error) {
       setMessage({ type: "error", text: getErrorMessage(error) });
     } finally {
       setSubmitting(null);
+    }
+  }
+
+  async function handleResend() {
+    if (resendCooldown || !signUpEmail) return;
+    setResendCooldown(true);
+    setMessage(null);
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: signUpEmail,
+        options: {
+          emailRedirectTo: EMAIL_REDIRECT_TO,
+        },
+      });
+      if (error) {
+        setMessage({ type: "error", text: error.message });
+      } else {
+        setMessage({ type: "ok", text: "Confirmation email resent. Please check your inbox." });
+      }
+    } catch (error) {
+      setMessage({ type: "error", text: getErrorMessage(error) });
+    } finally {
+      setTimeout(() => setResendCooldown(false), 30_000);
     }
   }
 
@@ -138,6 +172,17 @@ export function LoginForm() {
         >
           {message.text}
         </p>
+      )}
+
+      {confirmationPending && (
+        <button
+          type="button"
+          onClick={handleResend}
+          disabled={resendCooldown}
+          className="app-button-secondary text-sm"
+        >
+          {resendCooldown ? "Resend available in 30s" : "Resend confirmation email"}
+        </button>
       )}
     </div>
   );

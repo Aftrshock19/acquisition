@@ -4,7 +4,12 @@ import { LoginForm } from "@/components/LoginForm";
 import { getSupabaseUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error: callbackError } = await searchParams;
   const supabase = await createSupabaseServerClient();
 
   if (!supabase) {
@@ -70,6 +75,11 @@ export default async function LoginPage() {
           Sign in or create an account to use daily reviews and new words.
         </p>
       </section>
+      {callbackError && (
+        <div className="app-card-strong flex flex-col gap-2 border-red-200 bg-red-50/90 p-6 dark:border-red-900/50 dark:bg-red-950/30">
+          <p className="text-red-800 dark:text-red-200">{callbackError}</p>
+        </div>
+      )}
       <div className="app-card p-6">
         <LoginForm />
       </div>
