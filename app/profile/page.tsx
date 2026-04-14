@@ -10,7 +10,7 @@ export default async function ProfilePage() {
   if (!supabase) {
     return (
       <main className="app-shell">
-        <BackButton />
+        <BackButton href="/" alwaysHref />
         <section className="app-hero">
           <h1 className="app-title">Profile</h1>
           <p className="app-subtitle">
@@ -26,7 +26,7 @@ export default async function ProfilePage() {
   if (error) {
     return (
       <main className="app-shell">
-        <BackButton />
+        <BackButton href="/" alwaysHref />
         <section className="app-hero">
           <h1 className="app-title">Profile</h1>
           <p className="app-subtitle">
@@ -52,7 +52,7 @@ export default async function ProfilePage() {
 
   return (
     <main className="app-shell">
-      <BackButton />
+      <BackButton href="/" alwaysHref />
       <section className="app-hero">
         <h1 className="app-title">Profile</h1>
         <p className="app-subtitle">

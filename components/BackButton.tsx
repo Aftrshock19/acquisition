@@ -6,17 +6,19 @@ type BackButtonProps = {
   href?: string;
   label?: string;
   className?: string;
+  alwaysHref?: boolean;
 };
 
 export function BackButton({
   href = "/",
   label = "Go back",
   className = "",
+  alwaysHref = false,
 }: BackButtonProps) {
   const router = useRouter();
 
   function handleClick() {
-    if (window.history.length > 1) {
+    if (!alwaysHref && window.history.length > 1) {
       router.back();
       return;
     }
