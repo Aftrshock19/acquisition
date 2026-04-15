@@ -93,11 +93,7 @@ export function McqCard({
 
       {hasSupportPanel ? (
         <SupportPanel
-          key={
-            isSentenceFormat
-              ? `${card.id}-${hideTranslation ? "hidden" : "shown"}`
-              : card.id
-          }
+          key={`${card.id}-${isSentenceFormat && hideTranslation ? "hidden" : "shown"}`}
           translation={wordTranslation}
           englishSentence={englishSentence}
           hideTranslation={isSentenceFormat ? hideTranslation : false}

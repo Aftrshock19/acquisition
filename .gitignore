@@ -2302,3 +2302,7 @@ all_passages_renamed/c2_short_stage30_8.json
 
 # Downloaded audio assets
 downloads/
+spa-eng-rank-lemma-translation-unique-additions-through-pass11.csv
+additions.csv
+words.csv
+words.patched.csv

@@ -100,8 +100,15 @@ describe("McqCard", () => {
     expect(html).toContain("house");
   });
 
-  it("never blurs translation in word MCQ even when hideTranslation=true", () => {
+  it("does not blur translation in word MCQ even when hideTranslation=true", () => {
     const html = renderMcq(wordMcqCard, { hideTranslation: true });
+    expect(html).not.toContain('aria-label="Reveal translation"');
+    expect(html).not.toContain("blur-[7px]");
+    expect(html).toContain("house");
+  });
+
+  it("does not blur translation in word MCQ when hideTranslation=false", () => {
+    const html = renderMcq(wordMcqCard, { hideTranslation: false });
     expect(html).not.toContain('aria-label="Reveal translation"');
     expect(html).not.toContain("blur-[7px]");
     expect(html).toContain("house");

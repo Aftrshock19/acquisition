@@ -68,7 +68,8 @@ const FLASHCARD_TYPE_OPTIONS: Array<{
     manualKey: "include_normal",
     recommendedKey: "normal",
     label: "Normal",
-    description: "Reveal the answer and self-grade. Direction is configured below.",
+    description:
+      "Reveal the answer and self-grade. Direction is configured below.",
   },
   {
     manualKey: "include_mcq",
@@ -113,10 +114,11 @@ export function FlashcardSettingsForm({
   );
   const [hideTranslationSentences, setHideTranslationSentences] =
     useState<boolean>(Boolean(userSettings.hide_translation_sentences));
-  const [mcqQuestionFormats, setMcqQuestionFormats] = useState<McqQuestionFormats>({
-    single_word: initialMcqQuestionFormats.includes("single_word"),
-    sentence: initialMcqQuestionFormats.includes("sentence"),
-  });
+  const [mcqQuestionFormats, setMcqQuestionFormats] =
+    useState<McqQuestionFormats>({
+      single_word: initialMcqQuestionFormats.includes("single_word"),
+      sentence: initialMcqQuestionFormats.includes("sentence"),
+    });
   const initialManualTypes: ManualTypes = {
     include_cloze: Boolean(userSettings.include_cloze),
     include_normal: Boolean(userSettings.include_normal),
@@ -124,7 +126,8 @@ export function FlashcardSettingsForm({
     include_mcq: Boolean(userSettings.include_mcq),
     include_sentences: Boolean(userSettings.include_sentences),
   };
-  const [manualTypes, setManualTypes] = useState<ManualTypes>(initialManualTypes);
+  const [manualTypes, setManualTypes] =
+    useState<ManualTypes>(initialManualTypes);
   const [directionTypes, setDirectionTypes] = useState<DirectionTypes>(() =>
     ensureDirectionsForActiveFamilies({
       directionTypes: {
@@ -247,9 +250,9 @@ export function FlashcardSettingsForm({
   function isLockedDirection(key: DirectionKey) {
     const family = familyForDirection(key);
     return (
-      isFamilyEnabled(family)
-      && isCurrentDirectionValue(directionTypes, key)
-      && !otherDirectionValue(directionTypes, key)
+      isFamilyEnabled(family) &&
+      isCurrentDirectionValue(directionTypes, key) &&
+      !otherDirectionValue(directionTypes, key)
     );
   }
 
@@ -430,7 +433,8 @@ export function FlashcardSettingsForm({
           </summary>
           <div className="border-t border-zinc-200 px-4 py-4 dark:border-zinc-700">
             <p className="text-sm text-zinc-600 dark:text-zinc-300">
-              These direction settings only apply when the main card family is enabled.
+              These direction settings only apply when the main card family is
+              enabled.
             </p>
 
             <div className="mt-4 grid gap-4">
@@ -485,7 +489,8 @@ export function FlashcardSettingsForm({
                 </div>
                 {!isFamilyEnabled("mcq") ? (
                   <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
-                    Turn on this family above to use its question format settings.
+                    Turn on this family above to use its question format
+                    settings.
                   </p>
                 ) : (
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -507,24 +512,49 @@ export function FlashcardSettingsForm({
                         <span>Single word</span>
                       </span>
                     </label>
-                    <label className="app-toggle">
-                      <span className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          name="mcq_question_format_sentence"
-                          checked={mcqQuestionFormats.sentence}
-                          onChange={(e) =>
-                            handleMcqQuestionFormatChange(
-                              "sentence",
-                              e.currentTarget.checked,
-                            )
-                          }
-                          disabled={isMcqQuestionFormatLocked("sentence")}
-                          className="app-check"
-                        />
-                        <span>Sentence</span>
-                      </span>
-                    </label>
+                    <div className="flex flex-col gap-2">
+                      <label className="app-toggle">
+                        <span className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            name="mcq_question_format_sentence"
+                            checked={mcqQuestionFormats.sentence}
+                            onChange={(e) =>
+                              handleMcqQuestionFormatChange(
+                                "sentence",
+                                e.currentTarget.checked,
+                              )
+                            }
+                            disabled={isMcqQuestionFormatLocked("sentence")}
+                            className="app-check"
+                          />
+                          <span>Sentence</span>
+                        </span>
+                      </label>
+                      {mcqQuestionFormats.sentence ? (
+                        <div
+                          className="ml-6 w-[calc(100%-1.5rem)] border-l-2 border-zinc-200 pl-3 dark:border-zinc-700"
+                          data-testid="mcq-hide-translation-row"
+                        >
+                          <label className="app-toggle w-full">
+                            <span className="flex w-full items-center gap-2">
+                              <input
+                                type="checkbox"
+                                name="mcq_hide_translation"
+                                checked={hideTranslationSentences}
+                                onChange={(e) =>
+                                  setHideTranslationSentences(
+                                    e.currentTarget.checked,
+                                  )
+                                }
+                                className="app-check"
+                              />
+                              <span>Hide translation</span>
+                            </span>
+                          </label>
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 )}
                 {isFamilyEnabled("mcq") &&
@@ -536,20 +566,20 @@ export function FlashcardSettingsForm({
                 ) : null}
               </section>
 
-              <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900/50">
-                <div className="flex flex-col gap-1">
-                  <h3 className="font-medium text-zinc-900 dark:text-zinc-100">
-                    Sentence translation
-                  </h3>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Hide the translation on Sentence cards so the learner answers from sentence context only.
-                  </p>
-                </div>
-                {!isFamilyEnabled("sentences") ? (
-                  <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
-                    Turn on this family above to use its advanced settings.
-                  </p>
-                ) : (
+              {isFamilyEnabled("sentences") ? (
+                <section
+                  className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900/50"
+                  data-testid="sentences-hide-translation-section"
+                >
+                  <div className="flex flex-col gap-1">
+                    <h3 className="font-medium text-zinc-900 dark:text-zinc-100">
+                      Sentence translation
+                    </h3>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      Hide the translation on Sentence cards so the learner
+                      answers from sentence context only.
+                    </p>
+                  </div>
                   <div className="mt-4 grid gap-3">
                     <label className="app-toggle">
                       <span className="flex items-center gap-2">
@@ -566,8 +596,8 @@ export function FlashcardSettingsForm({
                       </span>
                     </label>
                   </div>
-                )}
-              </section>
+                </section>
+              ) : null}
             </div>
           </div>
         </details>
@@ -619,10 +649,14 @@ export function FlashcardSettingsForm({
           </p>
           <p className="mt-1">
             Effective directions:{" "}
-            {summarizeDirections(effective.effectiveDirections, effective.effectiveTypes)}
+            {summarizeDirections(
+              effective.effectiveDirections,
+              effective.effectiveTypes,
+            )}
           </p>
           <p className="mt-1">
-            MCQ question format: {summarizeMcqQuestionFormats(mcqQuestionFormats)}
+            MCQ question format:{" "}
+            {summarizeMcqQuestionFormats(mcqQuestionFormats)}
           </p>
         </div>
         <button type="submit" disabled={pending} className="app-button">
@@ -653,8 +687,12 @@ function DirectionGroup({
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900/50">
       <div className="flex flex-col gap-1">
-        <h3 className="font-medium text-zinc-900 dark:text-zinc-100">{title}</h3>
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">{description}</p>
+        <h3 className="font-medium text-zinc-900 dark:text-zinc-100">
+          {title}
+        </h3>
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          {description}
+        </p>
       </div>
 
       {!enabled ? (
@@ -744,17 +782,25 @@ function summarizeDirections(
   const parts: string[] = [];
 
   if (!families || families.cloze) {
-    parts.push(`Cloze (${directionSummary(
-      Boolean(directions.cloze_en_to_es ?? directions.include_cloze_en_to_es),
-      Boolean(directions.cloze_es_to_en ?? directions.include_cloze_es_to_en),
-    )})`);
+    parts.push(
+      `Cloze (${directionSummary(
+        Boolean(directions.cloze_en_to_es ?? directions.include_cloze_en_to_es),
+        Boolean(directions.cloze_es_to_en ?? directions.include_cloze_es_to_en),
+      )})`,
+    );
   }
 
   if (!families || families.normal) {
-    parts.push(`Normal (${directionSummary(
-      Boolean(directions.normal_en_to_es ?? directions.include_normal_en_to_es),
-      Boolean(directions.normal_es_to_en ?? directions.include_normal_es_to_en),
-    )})`);
+    parts.push(
+      `Normal (${directionSummary(
+        Boolean(
+          directions.normal_en_to_es ?? directions.include_normal_en_to_es,
+        ),
+        Boolean(
+          directions.normal_es_to_en ?? directions.include_normal_es_to_en,
+        ),
+      )})`,
+    );
   }
 
   return parts.length > 0 ? parts.join(" · ") : "none";
@@ -779,7 +825,10 @@ function familyForDirection(key: DirectionKey): FlashcardFamily {
   return key.startsWith("include_cloze") ? "cloze" : "normal";
 }
 
-function otherDirectionValue(directionTypes: DirectionTypes, key: DirectionKey) {
+function otherDirectionValue(
+  directionTypes: DirectionTypes,
+  key: DirectionKey,
+) {
   switch (key) {
     case "include_cloze_en_to_es":
       return directionTypes.include_cloze_es_to_en;
@@ -817,7 +866,10 @@ function summarizeMcqQuestionFormats(formats: McqQuestionFormats) {
   return enabled.length > 0 ? enabled.join(", ") : "Single word";
 }
 
-function isCurrentDirectionValue(directionTypes: DirectionTypes, key: DirectionKey) {
+function isCurrentDirectionValue(
+  directionTypes: DirectionTypes,
+  key: DirectionKey,
+) {
   return directionTypes[key];
 }
 
@@ -839,17 +891,17 @@ function ensureDirectionsForActiveFamilies(args: {
       : manualTypes.include_normal;
 
   if (
-    clozeEnabled
-    && !next.include_cloze_en_to_es
-    && !next.include_cloze_es_to_en
+    clozeEnabled &&
+    !next.include_cloze_en_to_es &&
+    !next.include_cloze_es_to_en
   ) {
     next.include_cloze_en_to_es = true;
   }
 
   if (
-    normalEnabled
-    && !next.include_normal_en_to_es
-    && !next.include_normal_es_to_en
+    normalEnabled &&
+    !next.include_normal_en_to_es &&
+    !next.include_normal_es_to_en
   ) {
     next.include_normal_en_to_es = true;
   }
