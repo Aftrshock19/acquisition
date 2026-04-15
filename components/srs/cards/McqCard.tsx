@@ -58,7 +58,8 @@ export function McqCard({
   const englishSentence = isSentenceFormat
     ? card.exampleSentenceEn?.trim() || null
     : null;
-  const hasSupportPanel = Boolean(wordTranslation || englishSentence);
+  const hasSupportPanel =
+    isSentenceFormat && Boolean(wordTranslation || englishSentence);
 
   return (
     <div className="flex flex-col gap-6">
