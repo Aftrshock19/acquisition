@@ -24,6 +24,14 @@ const MAX_REQUEST_BYTES = 4800;
 const INITIAL_BACKOFF_MS = 1000;
 const MAX_RETRIES = 3;
 
+/**
+ * Dedicated backoff schedule for RESOURCE_EXHAUSTED (code 8).
+ * Chirp HD voices enforce per-minute quotas — short retries (<10s) are
+ * useless because the quota bucket refills per minute. Wait long enough
+ * to cross a quota window.
+ */
+const QUOTA_BACKOFF_MS = [15_000, 30_000, 60_000, 90_000];
+
 // ── Singleton client ──────────────────────────────────────────
 
 let _client: TextToSpeechClient | null = null;
@@ -91,6 +99,7 @@ async function synthesizeOneChunk(
   const client = getClient();
 
   let lastError: Error | null = null;
+  let quotaAttempt = 0;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -122,15 +131,24 @@ async function synthesizeOneChunk(
 
       // Only retry on transient errors (network, rate-limit, server errors)
       const code = (err as { code?: number }).code;
+      const isQuota = code === 8; // RESOURCE_EXHAUSTED
       const isTransient =
         code === 14 || // UNAVAILABLE
-        code === 8 || // RESOURCE_EXHAUSTED
+        isQuota ||
         code === 4; // DEADLINE_EXCEEDED
 
-      if (!isTransient || attempt === MAX_RETRIES) {
-        break;
+      if (!isTransient) break;
+
+      if (isQuota) {
+        if (quotaAttempt >= QUOTA_BACKOFF_MS.length) break;
+        const wait = QUOTA_BACKOFF_MS[quotaAttempt] + Math.random() * 2000;
+        quotaAttempt++;
+        attempt--; // quota retries don't count against MAX_RETRIES
+        await sleep(wait);
+        continue;
       }
 
+      if (attempt === MAX_RETRIES) break;
       const backoff = INITIAL_BACKOFF_MS * Math.pow(2, attempt);
       await sleep(backoff + Math.random() * 500);
     }

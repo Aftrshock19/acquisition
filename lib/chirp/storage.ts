@@ -41,6 +41,30 @@ export function storagePublicUrl(
  * Example: passageFilenameToStoragePath("a1_short_stage1_passage1.txt", "support")
  *   => "support/a1_short_stage1_passage1.mp3"
  */
+/**
+ * Word-audio variants supported for the per-word audio proof.
+ *   "lemma"          → pronunciation of the lemma alone
+ *   "lemma-sentence" → pronunciation of the canonical example sentence
+ */
+export type WordAudioVariant = "lemma" | "lemma-sentence";
+
+/**
+ * Deterministic storage path for per-word audio.
+ *
+ * Example:
+ *   wordAudioStoragePath("abc-123", "lemma")
+ *     => "audio/es-ES/words/abc-123/lemma.mp3"
+ *   wordAudioStoragePath("abc-123", "lemma-sentence")
+ *     => "audio/es-ES/words/abc-123/lemma-sentence.mp3"
+ */
+export function wordAudioStoragePath(
+  wordId: string,
+  variant: WordAudioVariant,
+  languageCode = "es-ES",
+): string {
+  return `audio/${languageCode}/words/${wordId}/${variant}.mp3`;
+}
+
 export function passageFilenameToStoragePath(
   passageFilename: string,
   variant: string,
