@@ -102,6 +102,14 @@ function commitBaselineFinish(s: FakeSettings) {
   s.placement_status = "estimated";
 }
 
+/** Simulated write side of discardPlacementResult. */
+function commitDiscard(s: FakeSettings) {
+  s.current_frontier_rank = null;
+  s.current_frontier_rank_low = null;
+  s.current_frontier_rank_high = null;
+  s.placement_status = "unknown";
+}
+
 describe("first-run onboarding flow (integration)", () => {
   it("routes a first-time user through all linear intro pages", () => {
     const settings = emptySettings();
@@ -249,5 +257,59 @@ describe("first-run onboarding flow (integration)", () => {
     for (let i = 1; i < ranks.length; i++) {
       expect(ranks[i]).toBeGreaterThan(ranks[i - 1]);
     }
+  });
+
+  it("discard clears active placement fields but preserves onboarding state", () => {
+    const settings = emptySettings();
+    commitBaselineStart(settings);
+    commitBaselineFinish(settings);
+    expect(settings.current_frontier_rank).toBe(1200);
+    expect(settings.placement_status).toBe("estimated");
+
+    commitDiscard(settings);
+    expect(settings.current_frontier_rank).toBeNull();
+    expect(settings.current_frontier_rank_low).toBeNull();
+    expect(settings.current_frontier_rank_high).toBeNull();
+    expect(settings.placement_status).toBe("unknown");
+    expect(settings.onboarding_completed_at).not.toBeNull();
+    expect(settings.onboarding_entry_mode).toBe("baseline");
+  });
+
+  it("after discard, gate still allows user through if onboarding was completed", () => {
+    const settings = emptySettings();
+    commitBaselineStart(settings);
+    commitBaselineFinish(settings);
+    commitDiscard(settings);
+
+    expect(
+      decideOnboardingGate(fakeGetOnboardingState(settings)).action,
+    ).toBe("allow");
+  });
+
+  it("after discard, gate allows through via entry_mode even without frontier", () => {
+    const settings = emptySettings();
+    commitSelfCertified(settings, "B2");
+    commitDiscard(settings);
+
+    expect(settings.current_frontier_rank).toBeNull();
+    expect(settings.placement_status).toBe("unknown");
+    expect(
+      decideOnboardingGate(fakeGetOnboardingState(settings)).action,
+    ).toBe("allow");
+  });
+
+  it("after discard, choosing a CEFR level restores frontier and placement_status", () => {
+    const settings = emptySettings();
+    commitBaselineStart(settings);
+    commitBaselineFinish(settings);
+    commitDiscard(settings);
+    commitSelfCertified(settings, "A2");
+
+    expect(settings.current_frontier_rank).toBe(cefrOption("A2").frontierRank);
+    expect(settings.placement_status).toBe("estimated");
+    expect(settings.onboarding_entry_mode).toBe("self_certified");
+    expect(
+      decideOnboardingGate(fakeGetOnboardingState(settings)).action,
+    ).toBe("allow");
   });
 });

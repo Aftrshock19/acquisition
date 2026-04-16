@@ -21,9 +21,11 @@ type ClozeCardProps = {
     | null;
   correctionPlaceholder?: string;
   correctionPlaceholderVisible?: boolean;
+  answerRevealed?: boolean;
   inputRef?: RefObject<HTMLInputElement | null>;
   onChange: (value: string) => void;
   onCheck: () => void;
+  onReveal?: () => void;
   onNext: () => void;
   navigation?: ReactNode;
 };
@@ -37,9 +39,11 @@ export function ClozeCard({
   feedback,
   correctionPlaceholder,
   correctionPlaceholderVisible = false,
+  answerRevealed = false,
   inputRef,
   onChange,
   onCheck,
+  onReveal,
   onNext,
   navigation,
 }: ClozeCardProps) {
@@ -68,12 +72,14 @@ export function ClozeCard({
       feedback={feedback}
       correctionPlaceholder={correctionPlaceholder}
       correctionPlaceholderVisible={correctionPlaceholderVisible}
+      answerRevealed={answerRevealed}
       inputRef={inputRef}
       inputPlaceholder={`${translationLabel}...`}
       showAcceptedAnswers={Boolean(feedback?.expected.includes(" or "))}
       navigation={navigation}
       onChange={onChange}
       onCheck={onCheck}
+      onReveal={onReveal}
       onNext={onNext}
     />
   );

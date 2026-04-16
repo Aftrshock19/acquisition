@@ -10,7 +10,6 @@ export type PlacementState = {
   status: PlacementRunStatus | "none";
   language: string;
   sequenceIndex: number;
-  totalPlanned: number;
   currentItem: PlacementItem | null;
   currentPlan: PlacementPlan | null;
   estimate: AdaptivePlacementEstimate | null;

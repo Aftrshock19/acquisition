@@ -226,9 +226,11 @@ export function TodaySession({
   } | null>(null);
   const [showCorrectionPlaceholder, setShowCorrectionPlaceholder] =
     useState(false);
+  const [answerRevealed, setAnswerRevealed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  const sessionStartedAtRef = useRef<number>(Date.now());
   const startedAtRef = useRef<number>(Date.now());
   const currentAttemptRef = useRef<{
     id: string;
@@ -290,6 +292,7 @@ export function TodaySession({
     setNormalSubmittedGrade(null);
     setFeedback(null);
     setShowCorrectionPlaceholder(false);
+    setAnswerRevealed(false);
     setBusy(false);
     setSubmitError(null);
     startedAtRef.current = Date.now();
@@ -332,6 +335,7 @@ export function TodaySession({
     setNormalSubmittedGrade(null);
     setFeedback(null);
     setShowCorrectionPlaceholder(false);
+    setAnswerRevealed(false);
     setPhase("prompt");
     startedAtRef.current = Date.now();
     currentAttemptRef.current = current
@@ -374,7 +378,11 @@ export function TodaySession({
 
     if (current.cardType === "cloze" || current.cardType === "sentences") {
       event.preventDefault();
-      void handleTypingCheck();
+      if (!typingInput.trim()) {
+        void handleTypingReveal();
+      } else {
+        void handleTypingCheck();
+      }
       return;
     }
 
@@ -592,6 +600,7 @@ export function TodaySession({
     userAnswer: string;
     expected: string[];
     feedbackExpected: string;
+    skipCorrection?: boolean;
   }) {
     const { card, correct, userAnswer, expected, feedbackExpected } = args;
 
@@ -658,7 +667,7 @@ export function TodaySession({
         expected: feedbackExpected,
       });
 
-      if (card.cardType === "cloze" || card.cardType === "sentences") {
+      if (!args.skipCorrection && (card.cardType === "cloze" || card.cardType === "sentences")) {
         revealCorrectionPlaceholder();
         setPhase("correction");
         return;
@@ -741,6 +750,45 @@ export function TodaySession({
       card: current,
       correct: option === current.correctOption,
       userAnswer: option,
+      expected: [current.correctOption],
+      feedbackExpected: current.correctOption,
+    });
+  }
+
+  async function handleTypingReveal() {
+    if (
+      !current ||
+      (current.cardType !== "cloze" && current.cardType !== "sentences") ||
+      busy
+    ) {
+      return;
+    }
+
+    const expected = getTypingExpected(current);
+    const feedbackExpected = getTypingExpectedLabel(current, expected);
+
+    setAnswerRevealed(true);
+
+    await submitObjectiveReview({
+      card: current,
+      correct: false,
+      userAnswer: "[revealed]",
+      expected,
+      feedbackExpected,
+      skipCorrection: true,
+    });
+  }
+
+  async function handleDontKnow() {
+    if (!current || phase !== "prompt" || busy) return;
+    if (current.cardType !== "audio" && current.cardType !== "mcq") return;
+
+    setAnswerRevealed(true);
+
+    await submitObjectiveReview({
+      card: current,
+      correct: false,
+      userAnswer: "[dont_know]",
       expected: [current.correctOption],
       feedbackExpected: current.correctOption,
     });
@@ -933,53 +981,18 @@ export function TodaySession({
         </div>
       ) : null}
 
-      {enabledImplementedTypes.length > 1 ? (
-        <section className="app-card-muted p-4 text-sm text-zinc-600 dark:text-zinc-300">
-          Cards are mixed evenly across your enabled types:{" "}
-          {enabledImplementedTypes.map((type) => TYPE_LABELS[type]).join(", ")}.
-        </section>
-      ) : null}
-
       {phase === "done" ? (
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 rounded-xl border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900/50">
-          <h2 className="text-xl font-semibold tracking-tight">
-            Flashcards done
-          </h2>
-          <p className="text-zinc-600 dark:text-zinc-400">
-            Enough words for now. Move on to one short reading before you finish for today.
-          </p>
-          <Link href="/reading" className="app-button self-start">
-            Continue to reading
-          </Link>
-
-          <div className="mt-2 border-t border-zinc-200 pt-4 dark:border-zinc-700">
-            <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
-              Want to keep going? You can always do more.
-            </p>
-            <div className="flex flex-wrap gap-3">
-              {!reviewsExhausted ? (
-                <button
-                  type="button"
-                  className="app-button-secondary text-sm"
-                  disabled={loadingMore}
-                  onClick={() => void handleLoadMoreReviews()}
-                >
-                  {loadingMore ? "Loading…" : `Load ${workloadPolicy?.continuationReviewChunk ?? 12} more reviews`}
-                </button>
-              ) : null}
-              {!newWordsExhausted ? (
-                <button
-                  type="button"
-                  className="app-button-secondary text-sm"
-                  disabled={loadingMore}
-                  onClick={() => void handleLoadMoreNewWords()}
-                >
-                  {loadingMore ? "Loading…" : `Learn ${workloadPolicy?.continuationNewChunk ?? 5} new words`}
-                </button>
-              ) : null}
-            </div>
-          </div>
-        </div>
+        <PracticeCompleteScreen
+          reviewedCards={reviewedCards}
+          sessionStartedAt={sessionStartedAtRef.current}
+          reviewsExhausted={reviewsExhausted}
+          newWordsExhausted={newWordsExhausted}
+          loadingMore={loadingMore}
+          continuationReviewChunk={workloadPolicy?.continuationReviewChunk ?? 12}
+          continuationNewChunk={workloadPolicy?.continuationNewChunk ?? 5}
+          onLoadMoreReviews={() => void handleLoadMoreReviews()}
+          onLoadMoreNewWords={() => void handleLoadMoreNewWords()}
+        />
       ) : current ? (
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
           <SessionProgressBar
@@ -1009,11 +1022,14 @@ export function TodaySession({
                 showPosHint={showPosHint}
                 hideTranslation={hideTranslationSentences}
                 feedback={feedback}
+                dontKnowRevealed={answerRevealed}
                 onSelect={(option) => {
                   void handleChoiceSelect(option);
                 }}
+                onDontKnow={() => {
+                  void handleDontKnow();
+                }}
                 onNext={() => advanceFromCurrentCard()}
-        
                 navigation={flashcardNavigation}
               />
             </InteractiveTextProvider>
@@ -1038,10 +1054,14 @@ export function TodaySession({
                   feedback?.expected
                 }
                 correctionPlaceholderVisible={showCorrectionPlaceholder}
+                answerRevealed={answerRevealed}
                 inputRef={typingInputRef}
                 onChange={handleTypingInputChange}
                 onCheck={() => {
                   void handleTypingCheck();
+                }}
+                onReveal={() => {
+                  void handleTypingReveal();
                 }}
                 onNext={() => advanceFromCurrentCard()}
                 navigation={flashcardNavigation}
@@ -1059,10 +1079,14 @@ export function TodaySession({
                 feedback?.expected
               }
               correctionPlaceholderVisible={showCorrectionPlaceholder}
+              answerRevealed={answerRevealed}
               inputRef={typingInputRef}
               onChange={handleTypingInputChange}
               onCheck={() => {
                 void handleTypingCheck();
+              }}
+              onReveal={() => {
+                void handleTypingReveal();
               }}
               onNext={() => advanceFromCurrentCard()}
               navigation={flashcardNavigation}
@@ -1076,11 +1100,14 @@ export function TodaySession({
               submitError={submitError}
               showPosHint={showPosHint}
               feedback={feedback}
+              dontKnowRevealed={answerRevealed}
               onSelect={(option) => {
                 void handleChoiceSelect(option);
               }}
+              onDontKnow={() => {
+                void handleDontKnow();
+              }}
               onNext={() => advanceFromCurrentCard()}
-      
               navigation={flashcardNavigation}
             />
           ) : null}
@@ -1525,6 +1552,104 @@ function SessionProgressBar({
 
 function getCardKindLabel(kind: UnifiedQueueCard["kind"]) {
   return kind === "review" ? "Review" : "New";
+}
+
+function PracticeCompleteScreen({
+  reviewedCards,
+  sessionStartedAt,
+  reviewsExhausted,
+  newWordsExhausted,
+  loadingMore,
+  continuationReviewChunk,
+  continuationNewChunk,
+  onLoadMoreReviews,
+  onLoadMoreNewWords,
+}: {
+  reviewedCards: ReviewedCardSnapshot[];
+  sessionStartedAt: number;
+  reviewsExhausted: boolean;
+  newWordsExhausted: boolean;
+  loadingMore: boolean;
+  continuationReviewChunk: number;
+  continuationNewChunk: number;
+  onLoadMoreReviews: () => void;
+  onLoadMoreNewWords: () => void;
+}) {
+  const mainCards = reviewedCards.filter((r) => r.source === "main");
+  const newCount = mainCards.filter((r) => r.card.kind === "new").length;
+  const reviewCount = mainCards.filter((r) => r.card.kind === "review").length;
+  const correctMain = mainCards.filter((r) => r.feedback?.correct || r.grade === "good" || r.grade === "easy").length;
+  const accuracy = mainCards.length > 0 ? Math.round((100 * correctMain) / mainCards.length) : null;
+  const elapsedMs = Date.now() - sessionStartedAt;
+  const elapsedMin = Math.max(1, Math.round(elapsedMs / 60_000));
+  const hasDoMore = !reviewsExhausted || !newWordsExhausted;
+
+  return (
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 rounded-xl border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900/50">
+      <h2 className="text-xl font-semibold tracking-tight">
+        Practice complete
+      </h2>
+
+      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <SummaryStat label="Cards practiced" value={String(mainCards.length)} />
+        {newCount > 0 ? <SummaryStat label="New" value={String(newCount)} /> : null}
+        {reviewCount > 0 ? <SummaryStat label="Reviews" value={String(reviewCount)} /> : null}
+        {accuracy !== null ? <SummaryStat label="Accuracy" value={`${accuracy}%`} /> : null}
+        <SummaryStat label="Time on task" value={`${elapsedMin}m`} />
+      </dl>
+
+      <p className="text-sm text-zinc-500 dark:text-zinc-400">
+        Some of these words will come back in future sessions. Next, you'll see them in context.
+      </p>
+
+      <Link href="/reading" className="app-button self-start">
+        Continue to reading
+      </Link>
+
+      {hasDoMore ? (
+        <div className="border-t border-zinc-200 pt-4 dark:border-zinc-700">
+          <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+            Want to keep going?
+          </p>
+          <div className="flex flex-wrap gap-3">
+            {!reviewsExhausted ? (
+              <button
+                type="button"
+                className="app-button-secondary text-sm"
+                disabled={loadingMore}
+                onClick={onLoadMoreReviews}
+              >
+                {loadingMore ? "Loading…" : `Load ${continuationReviewChunk} more reviews`}
+              </button>
+            ) : null}
+            {!newWordsExhausted ? (
+              <button
+                type="button"
+                className="app-button-secondary text-sm"
+                disabled={loadingMore}
+                onClick={onLoadMoreNewWords}
+              >
+                {loadingMore ? "Loading…" : `Practice ${continuationNewChunk} new words`}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SummaryStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col gap-1 rounded-lg bg-white px-3 py-2.5 dark:bg-zinc-800/60">
+      <dt className="text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+        {label}
+      </dt>
+      <dd className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+        {value}
+      </dd>
+    </div>
+  );
 }
 
 function ComingSoonNotice({

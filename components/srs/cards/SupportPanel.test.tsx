@@ -55,8 +55,9 @@ describe("SupportPanel", () => {
     expect(html).not.toContain("items-center");
     expect(html).not.toContain("mx-auto");
     expect(html).not.toContain("text-center");
-    // Shrinkable translation wrapper + compact toggle preserved.
+    // Shrinkable full-width translation wrapper + compact toggle preserved.
     expect(html).toContain("min-w-0");
+    expect(html).toContain("w-full");
     expect(html).toContain("shrink-0");
     expect(html).toContain("whitespace-nowrap");
     expect(html).toContain("self-start");
@@ -84,14 +85,44 @@ describe("SupportPanel", () => {
     if (html.includes(longSentence)) {
       // Expanded path: verify wrapping safety on the sentence paragraph.
       expect(html).toContain("break-words");
-      expect(html).toContain("overflow-wrap:anywhere");
+      expect(html).toContain("overflow-wrap:break-word");
     } else {
       // Environment without localStorage: at minimum the toggle control must be present.
       expect(html).toContain("Show sentence");
     }
   });
 
-  it("allows long translation text to wrap inside the container", () => {
+  it("uses block-level full-width button instead of shrink-to-fit inline-flex for translation", () => {
+    const html = renderToStaticMarkup(
+      <SupportPanel
+        translation="vision"
+        englishSentence="I have a vision."
+        hideTranslation
+      />,
+    );
+    // The outer button must be block+full-width, NOT inline-flex.
+    expect(html).not.toMatch(/inline-flex/);
+    // The button should be block-level and full-width.
+    const buttonMatch = html.match(/<button[^>]*>/);
+    expect(buttonMatch).toBeTruthy();
+    expect(buttonMatch![0]).toContain("block");
+    expect(buttonMatch![0]).toContain("w-full");
+  });
+
+  it("does not use overflow-wrap:anywhere on revealed/plain translation paths", () => {
+    // Plain translation (hideTranslation=false)
+    const plainHtml = renderToStaticMarkup(
+      <SupportPanel
+        translation="I leave the decision to you"
+        englishSentence="Example sentence."
+        hideTranslation={false}
+      />,
+    );
+    expect(plainHtml).toContain("overflow-wrap:break-word");
+    expect(plainHtml).not.toContain("overflow-wrap:anywhere");
+  });
+
+  it("allows long translation text to wrap inside the container without letter-by-letter breaks", () => {
     const longTranslation =
       "to engage in an extended unbroken confrontation that never yields even slightly";
     const html = renderToStaticMarkup(
@@ -103,10 +134,12 @@ describe("SupportPanel", () => {
     expect(html).toContain(longTranslation);
     expect(html).toContain("break-words");
     expect(html).toContain("whitespace-normal");
-    expect(html).toContain("overflow-wrap:anywhere");
+    // Uses break-word, NOT anywhere (which causes min-content collapse on WebKit).
+    expect(html).toContain("overflow-wrap:break-word");
+    expect(html).not.toContain("overflow-wrap:anywhere");
   });
 
-  it("clamps the masked reveal pill width to 100% of the container", () => {
+  it("clamps the masked reveal pill width using min() to prevent overflow", () => {
     const longTranslation =
       "to engage in an extended unbroken confrontation that never yields even slightly";
     const html = renderToStaticMarkup(
@@ -118,11 +151,31 @@ describe("SupportPanel", () => {
     );
     expect(html).toContain('aria-label="Reveal translation"');
     expect(html).toContain("blur-[7px]");
-    // Preserves the ch-based width but clamps to the parent width:
-    expect(html).toMatch(/width:\s*\d+ch/);
-    expect(html).toContain("max-width:100%");
-    // Reveal pill span wraps instead of forcing a horizontal line:
+    // Uses min(100%, Xch) for inline-size clamping instead of raw width.
+    expect(html).toMatch(/inline-size:\s*min\(100%,\s*\d+ch\)/);
+    expect(html).toContain("max-inline-size:100%");
+    // Inner span wraps instead of forcing a horizontal line.
     expect(html).toContain("whitespace-normal");
     expect(html).toContain("break-words");
+  });
+
+  it("keeps expanded English sentence safely wrapped inside the card", () => {
+    const longSentence =
+      "I leave the decision entirely to you because you have demonstrated excellent judgement in similar situations before";
+    const storageKey = "support-panel-test-sentence-wrap";
+    globalThis.localStorage?.setItem?.(storageKey, "true");
+    const html = renderToStaticMarkup(
+      <SupportPanel
+        translation="to leave"
+        englishSentence={longSentence}
+        storageKey={storageKey}
+      />,
+    );
+    globalThis.localStorage?.removeItem?.(storageKey);
+    if (html.includes(longSentence)) {
+      expect(html).toContain("break-words");
+      expect(html).toContain("overflow-wrap:break-word");
+      expect(html).toContain("max-w-full");
+    }
   });
 });

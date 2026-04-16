@@ -251,18 +251,14 @@ export async function getDailyQueue(
   try {
     const { data: placementRow } = await supabase
       .from("user_settings")
-      .select("current_frontier_rank, current_frontier_rank_low, current_frontier_rank_high, placement_status")
+      .select("current_frontier_rank, current_frontier_rank_low, current_frontier_rank_high, placement_status, baseline_test_run_id")
       .eq("user_id", user.id)
       .maybeSingle();
     let frontierRank = placementRow?.current_frontier_rank as number | null;
     let lowBound = placementRow?.current_frontier_rank_low as number | null;
     let highBound = placementRow?.current_frontier_rank_high as number | null;
 
-    // Defensive fallback: if user_settings hasn't captured the frontier yet
-    // (e.g. transient write skew immediately after baseline completion), read
-    // the latest completed baseline_test_run directly so the first session is
-    // never stale. No writes here — this is read-only.
-    if (!frontierRank) {
+    if (!frontierRank && placementRow?.baseline_test_run_id) {
       const { data: completedRun } = await supabase
         .from("baseline_test_runs")
         .select(

@@ -6,7 +6,7 @@ import { getSupabaseServerContext } from "@/lib/supabase/server";
 import { getUserSettings } from "@/lib/settings/getUserSettings";
 import { pickItemForCheckpoint } from "@/lib/placement/itemBank";
 import { checkpointByIndex } from "@/lib/placement/checkpoints";
-import { planNextItem, totalPlanned } from "@/lib/placement/selection";
+import { planNextItem } from "@/lib/placement/selection";
 import { estimatePlacement } from "@/lib/placement/scoring";
 import { classifyCognate, lexicalWeightForCognate, type CognateClass } from "@/lib/placement/cognate";
 import {
@@ -85,7 +85,6 @@ export async function getPlacementState(): Promise<
     status: active?.status ?? "none",
     language,
     sequenceIndex: 0,
-    totalPlanned: totalPlanned(),
     currentItem: null,
     currentPlan: null,
     estimate: null,
@@ -493,6 +492,38 @@ function serializeTrace(
       at: new Date().toISOString(),
     },
   ];
+}
+
+export async function discardPlacementResult(): Promise<
+  { ok: true } | { ok: false; error: string }
+> {
+  const ctx = await requireAuth();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, userId } = ctx;
+
+  const { error } = await supabase
+    .from("user_settings")
+    .upsert(
+      {
+        user_id: userId,
+        current_frontier_rank: null,
+        current_frontier_rank_low: null,
+        current_frontier_rank_high: null,
+        baseline_test_run_id: null,
+        placement_confidence: null,
+        placement_status: "unknown",
+        placement_source: null,
+      },
+      { onConflict: "user_id" },
+    );
+
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath("/placement");
+  revalidatePath("/today");
+  revalidatePath("/reading");
+  revalidatePath("/listening");
+  return { ok: true };
 }
 
 export async function retakePlacementTest(): Promise<

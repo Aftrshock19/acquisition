@@ -149,7 +149,7 @@ export default async function TodayPage() {
               Reading is next
             </h2>
             <p className="text-zinc-600 dark:text-zinc-400">
-              Flashcards are done. Read one short text, then move on to the matched audio.
+              Flashcard practice is done. Read one short text, then move on to the matched audio.
             </p>
             <Link
               href={
@@ -181,10 +181,26 @@ export default async function TodayPage() {
               Continue to listening
             </Link>
           </div>
-        ) : (
+        ) : dailySession?.stage === "completed" ? (
           <div className="app-card flex flex-col gap-4 p-8">
             <h2 className="text-xl font-semibold tracking-tight">
               All done for today
+            </h2>
+            <p className="text-zinc-600 dark:text-zinc-400">
+              Today&apos;s loop is complete. Come back tomorrow or check your{" "}
+              <Link
+                href="/progress"
+                className="font-medium text-zinc-900 underline dark:text-zinc-100"
+              >
+                progress
+              </Link>
+              .
+            </p>
+          </div>
+        ) : (
+          <div className="app-card flex flex-col gap-4 p-8">
+            <h2 className="text-xl font-semibold tracking-tight">
+              Nothing due today
             </h2>
             <p className="text-zinc-600 dark:text-zinc-400">
               No reviews or new words due. Come back tomorrow or check your{" "}
@@ -194,11 +210,7 @@ export default async function TodayPage() {
               >
                 progress
               </Link>
-              . If you haven’t added vocabulary yet, run{" "}
-              <code className="rounded bg-zinc-200 px-1 dark:bg-zinc-700">
-                npm run seed
-              </code>{" "}
-              to load sample words.
+              .
             </p>
           </div>
         )

@@ -42,16 +42,16 @@ export function ProgressDayDetail({ day, todayDate }: Props) {
 
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <DetailRow
-          label="Flashcards done"
+          label="Cards practiced"
           value={`${day.flashcardsDone}${day.flashcardsAssigned ? ` / ${day.flashcardsAssigned}` : ""}`}
         />
         <DetailRow label="Accuracy" value={formatPercent(day.flashcardAccuracy)} />
         <DetailRow label="New words" value={String(day.newWords)} />
-        <DetailRow label="Reviews completed" value={String(day.reviewsDone)} />
+        <DetailRow label="Reviews" value={String(day.reviewsDone)} />
         <DetailRow label="Saved words" value={String(day.savedWords)} />
-        <DetailRow label="Total learning time" value={`${day.timeOnTaskMinutes}m`} />
-        <DetailRow label="Reading completed" value={day.readingCompleted ? "Yes" : "No"} />
-        <DetailRow label="Listening completed" value={day.listeningCompleted ? "Yes" : "No"} />
+        <DetailRow label="Time on task" value={`${day.timeOnTaskMinutes}m`} />
+        <DetailRow label="Reading complete" value={day.readingCompleted ? "Yes" : "No"} />
+        <DetailRow label="Listening complete" value={day.listeningCompleted ? "Yes" : "No"} />
         <DetailRow label="Retries" value={String(day.retryCount)} />
       </dl>
 
@@ -78,7 +78,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 function StatusPill({ status }: { status: CalendarDayMetrics["status"] }) {
   const label =
     status === "completed"
-      ? "Completed"
+      ? "Loop complete"
       : status === "partial"
         ? "Some activity"
         : "No activity";

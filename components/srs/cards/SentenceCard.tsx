@@ -29,9 +29,11 @@ type SentenceCardProps = {
     | null;
   correctionPlaceholder?: string;
   correctionPlaceholderVisible?: boolean;
+  answerRevealed?: boolean;
   inputRef?: RefObject<HTMLInputElement | null>;
   onChange: (value: string) => void;
   onCheck: () => void;
+  onReveal?: () => void;
   onNext: () => void;
   navigation?: ReactNode;
 };
@@ -46,15 +48,18 @@ export function SentenceCard({
   feedback,
   correctionPlaceholder,
   correctionPlaceholderVisible = false,
+  answerRevealed = false,
   inputRef,
   onChange,
   onCheck,
+  onReveal,
   onNext,
   navigation,
 }: SentenceCardProps) {
-  const needsCorrection = feedback?.correct === false;
+  const needsCorrection = feedback?.correct === false && !answerRevealed;
   const showingSuccess = feedback?.correct === true;
   const tone = showingSuccess ? "success" : needsCorrection ? "error" : "default";
+  const isShowAnswer = !needsCorrection && !showingSuccess && !answerRevealed && !value.trim() && onReveal;
   const wordTranslation = card.translation?.trim() || null;
   const englishSentence = card.exampleSentenceEn?.trim() || null;
   const hasSupportPanel = Boolean(wordTranslation || englishSentence);
@@ -76,19 +81,25 @@ export function SentenceCard({
           sentence={card.sentenceData.sentence}
           className="mt-2 text-xl font-medium tracking-tight text-zinc-900 dark:text-zinc-100"
           blankContent={
-            <TextAnswerInput
-              value={value}
-              onChange={onChange}
-              correctionHint={correctionPlaceholder}
-              correctionHintVisible={correctionPlaceholderVisible}
-              tone={tone}
-              inputRef={inputRef}
-              readOnly={showingSuccess}
-              disabled={busy}
-              variant="inline"
-              wrapperClassName="mx-1 inline-flex align-baseline"
-              inputStyle={{ width: `${inputWidth}ch` }}
-            />
+            answerRevealed && feedback ? (
+              <span className="mx-1 inline-flex min-w-16 items-center justify-center rounded-md border border-zinc-300 bg-zinc-50 px-3 py-1 align-middle text-base font-medium text-zinc-900 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-100">
+                {feedback.expected}
+              </span>
+            ) : (
+              <TextAnswerInput
+                value={value}
+                onChange={onChange}
+                correctionHint={correctionPlaceholder}
+                correctionHintVisible={correctionPlaceholderVisible}
+                tone={tone}
+                inputRef={inputRef}
+                readOnly={showingSuccess}
+                disabled={busy}
+                variant="inline"
+                wrapperClassName="mx-1 inline-flex align-baseline"
+                inputStyle={{ width: `${inputWidth}ch` }}
+              />
+            )
           }
           renderTextPart={
             (part, index) => (
@@ -122,20 +133,33 @@ export function SentenceCard({
         />
       ) : null}
 
-      {showingSuccess ? (
+      {answerRevealed ? (
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={busy}
+          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+        >
+          Continue
+        </button>
+      ) : showingSuccess ? (
         <FlashcardSuccessActions onNext={onNext} busy={busy} />
       ) : (
         <>
           <button
             type="button"
-            onClick={onCheck}
-            disabled={busy || !value.trim()}
+            onClick={isShowAnswer ? onReveal : onCheck}
+            disabled={busy || (needsCorrection && !value.trim())}
             className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
           >
-            {needsCorrection ? "Continue" : "Check"}
+            {needsCorrection ? "Continue" : isShowAnswer ? "Show answer" : "Check"}
           </button>
           <p className="text-sm text-zinc-500">
-            {needsCorrection ? "Press Enter to continue" : "Press Enter to check"}
+            {needsCorrection
+              ? "Press Enter to continue"
+              : isShowAnswer
+                ? "Press Enter to show answer"
+                : "Press Enter to check"}
           </p>
         </>
       )}

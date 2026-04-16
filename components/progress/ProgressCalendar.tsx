@@ -109,7 +109,7 @@ export function ProgressCalendar({
       <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-600 dark:text-zinc-400">
         <LegendSwatch status="empty" label="No activity" />
         <LegendSwatch status="partial" label="Some activity" />
-        <LegendSwatch status="completed" label="Daily loop completed" />
+        <LegendSwatch status="completed" label="Daily loop complete" />
       </div>
 
       <ProgressDayDetail day={selectedDay} todayDate={todayDate} />

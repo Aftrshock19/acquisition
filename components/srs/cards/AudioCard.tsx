@@ -19,7 +19,9 @@ type AudioCardProps = {
         expected: string;
       }
     | null;
+  dontKnowRevealed?: boolean;
   onSelect: (option: string) => void;
+  onDontKnow?: () => void;
   onNext: () => void;
   navigation?: ReactNode;
 };
@@ -30,7 +32,9 @@ export function AudioCard({
   submitError,
   showPosHint = true,
   feedback,
+  dontKnowRevealed = false,
   onSelect,
+  onDontKnow,
   onNext,
   navigation,
 }: AudioCardProps) {
@@ -40,11 +44,13 @@ export function AudioCard({
     void playCardAudio(card, audioRef.current);
   }, [card]);
 
-  if (feedback) {
+  const resolved = Boolean(feedback);
+
+  if (resolved && !dontKnowRevealed) {
     return (
       <FeedbackBlock
-        correct={feedback.correct}
-        expected={feedback.expected}
+        correct={feedback!.correct}
+        expected={feedback!.expected}
         onNext={onNext}
         busy={busy}
       />
@@ -80,18 +86,64 @@ export function AudioCard({
       </FlashcardContainer>
 
       <div className="grid gap-2">
-        {card.options.map((option) => (
-          <button
-            key={option}
-            type="button"
-            onClick={() => onSelect(option)}
-            disabled={busy}
-            className="rounded-lg border border-zinc-300 bg-white px-4 py-3 text-left text-sm text-zinc-800 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
-          >
-            {option}
-          </button>
-        ))}
+        {card.options.map((option) => {
+          const isCorrect = option === card.correctOption;
+
+          if (dontKnowRevealed) {
+            return (
+              <div
+                key={option}
+                className={`rounded-lg border px-4 py-3 text-left text-sm ${
+                  isCorrect
+                    ? "border-green-300 bg-green-50 text-green-900 dark:border-green-800 dark:bg-green-950/40 dark:text-green-100"
+                    : "border-zinc-200 bg-zinc-50 text-zinc-400 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-500"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span>{option}</span>
+                  {isCorrect ? (
+                    <span className="text-xs uppercase tracking-[0.12em]">
+                      Correct answer
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <button
+              key={option}
+              type="button"
+              onClick={() => onSelect(option)}
+              disabled={busy}
+              className="rounded-lg border border-zinc-300 bg-white px-4 py-3 text-left text-sm text-zinc-800 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+            >
+              {option}
+            </button>
+          );
+        })}
       </div>
+
+      {dontKnowRevealed ? (
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={busy}
+          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+        >
+          Continue
+        </button>
+      ) : onDontKnow ? (
+        <button
+          type="button"
+          onClick={onDontKnow}
+          disabled={busy}
+          className="self-center text-sm text-zinc-400 transition-colors hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+        >
+          I don&apos;t know
+        </button>
+      ) : null}
     </div>
   );
 }

@@ -114,3 +114,82 @@ describe("McqCard", () => {
     expect(html).toContain("house");
   });
 });
+
+describe("McqCard — I don't know flow", () => {
+  function renderMcqWithDontKnow(
+    card: Extract<UnifiedQueueCard, { cardType: "mcq" }>,
+    props: {
+      feedback?: { correct: boolean; expected: string } | null;
+      dontKnowRevealed?: boolean;
+      onDontKnow?: () => void;
+    } = {},
+  ) {
+    return renderToStaticMarkup(
+      <InteractiveTextProvider
+        lang="es"
+        initialSavedWordIds={[card.id]}
+        initialSavedLemmas={[card.lemma]}
+        interactionContext="mcq_sentence"
+      >
+        <McqCard
+          card={card}
+          busy={false}
+          submitError={null}
+          feedback={props.feedback ?? null}
+          dontKnowRevealed={props.dontKnowRevealed}
+          onSelect={() => {}}
+          onDontKnow={props.onDontKnow}
+          onNext={() => {}}
+        />
+      </InteractiveTextProvider>,
+    );
+  }
+
+  it("shows 'I don't know' button when onDontKnow is provided and unresolved", () => {
+    const html = renderMcqWithDontKnow(wordMcqCard, {
+      onDontKnow: () => {},
+    });
+    expect(html).toContain("I don&#x27;t know");
+  });
+
+  it("does not show 'I don't know' when onDontKnow is not provided", () => {
+    const html = renderMcqWithDontKnow(wordMcqCard);
+    expect(html).not.toContain("don");
+  });
+
+  it("reveals correct option and disables others when dontKnowRevealed", () => {
+    const html = renderMcqWithDontKnow(wordMcqCard, {
+      feedback: { correct: false, expected: "casa" },
+      dontKnowRevealed: true,
+      onDontKnow: () => {},
+    });
+    // Correct option highlighted
+    expect(html).toContain("Correct answer");
+    expect(html).toContain("bg-green-50");
+    // Options are rendered as divs, only Continue remains as a button
+    const buttonCount = html.match(/<button/g)?.length ?? 0;
+    expect(buttonCount).toBe(1);
+    expect(html).toContain("Continue");
+    // No FeedbackBlock title
+    expect(html).not.toContain("Incorrect");
+  });
+
+  it("shows FeedbackBlock for genuine wrong selection (not dontKnowRevealed)", () => {
+    const html = renderMcqWithDontKnow(wordMcqCard, {
+      feedback: { correct: false, expected: "casa" },
+      dontKnowRevealed: false,
+    });
+    expect(html).toContain("Incorrect");
+    expect(html).toContain("Expected:");
+    expect(html).not.toContain("Correct answer");
+  });
+
+  it("still shows FeedbackBlock for correct selection", () => {
+    const html = renderMcqWithDontKnow(wordMcqCard, {
+      feedback: { correct: true, expected: "casa" },
+      dontKnowRevealed: false,
+    });
+    expect(html).toContain("Correct");
+    expect(html).toContain("Next");
+  });
+});
