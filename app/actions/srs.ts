@@ -369,7 +369,15 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
       existingDailySession?.reviews_done ??
       0,
   );
-  const remainingDailyLimit = Math.max(0, effective.effectiveDailyLimit - completedToday);
+  const existingAssignedCount = Math.max(
+    0,
+    existingDailySession?.assigned_flashcard_count ?? 0,
+  );
+  const sessionTargetCount = Math.max(
+    effective.effectiveDailyLimit,
+    existingAssignedCount,
+  );
+  const remainingDailyLimit = Math.max(0, sessionTargetCount - completedToday);
 
   const variant: SchedulerVariant =
     settings.scheduler_variant === "adaptive" ? "adaptive" : "baseline";
@@ -400,7 +408,7 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
   const reviewLimit  = isManualMode ? manualChunk : workloadPolicy.recommendedReviews;
 
   const effectiveSettings = {
-    dailyLimit: effective.effectiveDailyLimit,
+    dailyLimit: sessionTargetCount,
     manualTargetMode: isManualMode,
     autoAdvanceCorrect: effective.autoAdvanceCorrect,
     showPosHint: effective.showPosHint,
@@ -1061,6 +1069,101 @@ async function upsertDailySession(
 
   if (error) return null;
   return data as DailySessionRow;
+}
+
+export type ExtendFlashcardsResult =
+  | { ok: true }
+  | { ok: false; reason: string };
+
+const EXTEND_FLASHCARDS_MAX = 200;
+
+export async function extendFlashcardsSession(
+  count: number,
+): Promise<ExtendFlashcardsResult> {
+  if (!Number.isFinite(count) || count < 1 || count > EXTEND_FLASHCARDS_MAX) {
+    return { ok: false, reason: "invalid_count" };
+  }
+
+  const { supabase, user, error: authError } = await getSupabaseServerContextFast();
+  if (!supabase) return { ok: false, reason: "supabase_unavailable" };
+  if (authError) return { ok: false, reason: authError };
+  if (!user) return { ok: false, reason: "not_authenticated" };
+
+  const currentDailySession = await getTodayDailySessionRow(supabase, user.id);
+  if (!currentDailySession) return { ok: false, reason: "no_session" };
+  if (currentDailySession.stage !== "reading") {
+    return { ok: false, reason: "wrong_stage" };
+  }
+  if (!currentDailySession.flashcards_completed_at) {
+    return { ok: false, reason: "flashcards_not_complete" };
+  }
+  if (currentDailySession.listening_done) {
+    return { ok: false, reason: "listening_already_done" };
+  }
+
+  const currentProgress = getDailySessionProgressState(currentDailySession);
+  const nextProgress: DailySessionProgressState = {
+    ...currentProgress,
+    assignedFlashcardCount: currentProgress.assignedFlashcardCount + count,
+    assignedNewWordsCount: currentProgress.assignedNewWordsCount + count,
+  };
+  const stage = resolveDailySessionStage(nextProgress);
+  const now = new Date().toISOString();
+  const sessionDate = getTodaySessionDate();
+
+  const { error } = await supabase
+    .from("daily_sessions")
+    .upsert(
+      {
+        user_id: user.id,
+        session_date: sessionDate,
+        stage,
+        assigned_flashcard_count: nextProgress.assignedFlashcardCount,
+        assigned_new_words_count: nextProgress.assignedNewWordsCount,
+        assigned_review_cards_count: nextProgress.assignedReviewCardsCount,
+        new_words_count: nextProgress.assignedFlashcardCount,
+        reviews_done: nextProgress.flashcardCompletedCount,
+        flashcard_completed_count: nextProgress.flashcardCompletedCount,
+        flashcard_new_completed_count:
+          currentDailySession.flashcard_new_completed_count ?? 0,
+        flashcard_review_completed_count:
+          currentDailySession.flashcard_review_completed_count ?? 0,
+        flashcard_attempts_count:
+          currentDailySession.flashcard_attempts_count ?? 0,
+        flashcard_retry_count: currentDailySession.flashcard_retry_count ?? 0,
+        started_at: currentDailySession.started_at ?? now,
+        last_active_at: now,
+        flashcards_completed_at: null,
+        reading_done: false,
+        reading_text_id: currentDailySession.reading_text_id,
+        reading_opened_at: currentDailySession.reading_opened_at,
+        reading_completed_at: currentDailySession.reading_completed_at,
+        reading_time_seconds: currentDailySession.reading_time_seconds ?? 0,
+        listening_done: currentDailySession.listening_done ?? false,
+        listening_asset_id: currentDailySession.listening_asset_id,
+        listening_opened_at: currentDailySession.listening_opened_at,
+        listening_playback_started_at:
+          currentDailySession.listening_playback_started_at,
+        listening_completed_at: currentDailySession.listening_completed_at,
+        listening_max_position_seconds:
+          currentDailySession.listening_max_position_seconds,
+        listening_required_seconds:
+          currentDailySession.listening_required_seconds,
+        listening_transcript_opened:
+          currentDailySession.listening_transcript_opened ?? false,
+        listening_playback_rate: currentDailySession.listening_playback_rate,
+        listening_time_seconds:
+          currentDailySession.listening_time_seconds ?? 0,
+        completed: false,
+        completed_at: null,
+      },
+      { onConflict: "user_id,session_date" },
+    );
+
+  if (error) return { ok: false, reason: error.message };
+
+  revalidatePath("/today");
+  return { ok: true };
 }
 
 export async function completeReadingStep({

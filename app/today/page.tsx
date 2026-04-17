@@ -2,6 +2,7 @@ import { Home as HomeIcon } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getTodayFlashcards } from "@/app/actions/srs";
+import { ExtendFlashcardsPanel } from "@/components/srs/ExtendFlashcardsPanel";
 import { PracticeCompleteScreen } from "@/components/srs/PracticeCompleteScreen";
 import { TodaySession } from "@/components/srs/TodaySession";
 import { getPlacementBannerState } from "@/lib/placement/status";
@@ -204,6 +205,9 @@ export default async function TodayPage() {
             >
               Continue to reading
             </Link>
+            <div className="border-t border-zinc-200 pt-4 dark:border-zinc-700">
+              <ExtendFlashcardsPanel />
+            </div>
           </div>
         ) : dailySession?.stage === "listening" ? (
           <div className="app-card flex flex-col gap-4 p-8">
