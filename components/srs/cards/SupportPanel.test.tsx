@@ -40,24 +40,25 @@ describe("SupportPanel", () => {
     expect(html).toContain("to fight");
   });
 
-  it("left-aligns the sentence toggle inside the support panel and does not center it", () => {
+  it("places translation and sentence toggle on one row with safe wrapping", () => {
     const html = renderToStaticMarkup(
       <SupportPanel
         translation="to fight"
         englishSentence="I have to fight."
       />,
     );
-    // Top section is a left-aligned flex column, not a horizontally-centered row.
-    expect(html).toContain("flex-col");
-    expect(html).toContain("items-start");
-    // No centering classes snuck in.
+    // Row layout with wrap, vertically centered, spaced apart — not stacked column.
+    expect(html).toContain("flex-row");
+    expect(html).toContain("flex-wrap");
+    expect(html).toContain("items-center");
+    expect(html).toContain("justify-between");
+    // No horizontal-centering classes snuck in.
     expect(html).not.toContain("justify-center");
-    expect(html).not.toContain("items-center");
     expect(html).not.toContain("mx-auto");
     expect(html).not.toContain("text-center");
-    // Shrinkable full-width translation wrapper + compact toggle preserved.
+    // Translation wrapper shrinks (min-w-0 + flex-1); toggle stays compact.
     expect(html).toContain("min-w-0");
-    expect(html).toContain("w-full");
+    expect(html).toContain("flex-1");
     expect(html).toContain("shrink-0");
     expect(html).toContain("whitespace-nowrap");
     expect(html).toContain("self-start");
@@ -139,7 +140,7 @@ describe("SupportPanel", () => {
     expect(html).not.toContain("overflow-wrap:anywhere");
   });
 
-  it("clamps the masked reveal pill width using min() to prevent overflow", () => {
+  it("sizes the masked reveal pill to match the real translation's footprint", () => {
     const longTranslation =
       "to engage in an extended unbroken confrontation that never yields even slightly";
     const html = renderToStaticMarkup(
@@ -151,9 +152,9 @@ describe("SupportPanel", () => {
     );
     expect(html).toContain('aria-label="Reveal translation"');
     expect(html).toContain("blur-[7px]");
-    // Uses min(100%, Xch) for inline-size clamping instead of raw width.
-    expect(html).toMatch(/inline-size:\s*min\(100%,\s*\d+ch\)/);
-    expect(html).toContain("max-inline-size:100%");
+    // Mask character count equals the translation length so its width
+    // naturally matches the revealed text — no explicit inline-size clamp.
+    expect(html).toContain("m".repeat(longTranslation.length));
     // Inner span wraps instead of forcing a horizontal line.
     expect(html).toContain("whitespace-normal");
     expect(html).toContain("break-words");
