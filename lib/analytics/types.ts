@@ -114,7 +114,7 @@ export type DailyAggregate = {
   learner_state_score: number | null;
   learner_factor: number | null;
   workload_factor: number | null;
-  adaptive_new_word_budget: number | null;
+  adaptive_new_word_cap: number | null;
   reading_question_accuracy: number | null;
   reading_question_attempts_count: number;
 };

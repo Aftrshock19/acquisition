@@ -52,7 +52,7 @@ const CSV_FIELD_ORDER: Record<Exclude<ExportDataset, "all">, string[]> = {
     "learner_state_score",
     "learner_factor",
     "workload_factor",
-    "adaptive_new_word_budget",
+    "adaptive_new_word_cap",
     "reading_question_accuracy",
     "reading_question_attempts_count",
   ],

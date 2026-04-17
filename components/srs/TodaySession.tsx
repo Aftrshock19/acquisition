@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
   useCallback,
   useEffect,
@@ -16,6 +15,7 @@ import { InteractiveTextProvider } from "@/components/interactive-text/Interacti
 import { LeftIcon } from "@/components/LeftIcon";
 import { RightIcon } from "@/components/RightIcon";
 import { SettingsButton } from "@/components/SettingsButton";
+import { PracticeCompleteScreen } from "@/components/srs/PracticeCompleteScreen";
 import { AudioCard } from "@/components/srs/cards/AudioCard";
 import { ClozeCard } from "@/components/srs/cards/ClozeCard";
 import { McqCard } from "@/components/srs/cards/McqCard";
@@ -61,6 +61,7 @@ type Props = {
   initialSavedWordIds: string[];
   initialSavedLemmas: string[];
   dailyLimit: number;
+  manualTargetMode?: boolean;
   autoAdvanceCorrect?: boolean;
   showPosHint?: boolean;
   hideTranslationSentences?: boolean;
@@ -72,6 +73,7 @@ type SessionPhase = "prompt" | "feedback" | "correction" | "done";
 const TEXT_SUCCESS_DELAY_MS = 1200;
 const CORRECTION_PLACEHOLDER_DELAY_MS = 1900;
 const FLASHCARD_LOOKUP_LANG = "es";
+const MANUAL_TARGET_CHUNK = 50;
 function generateAttemptId(): string {
   const cryptoApi =
     typeof globalThis !== "undefined"
@@ -175,6 +177,7 @@ export function TodaySession({
   initialSavedWordIds,
   initialSavedLemmas,
   dailyLimit,
+  manualTargetMode = false,
   autoAdvanceCorrect = true,
   showPosHint = true,
   hideTranslationSentences = false,
@@ -200,9 +203,11 @@ export function TodaySession({
       initialDailySession?.reviews_done ??
       0,
   );
+  const normalizedInitialCompleted = Math.max(0, Math.floor(initialCompletedCount));
 
   const [mainIndex, setMainIndex] = useState(0);
   const [mainCompletedCount, setMainCompletedCount] = useState(0);
+  const [totalAnswered, setTotalAnswered] = useState(0);
   const retryQueueRef = useRef(new RetryQueue<UnifiedQueueCard>());
   const [retryPending, setRetryPending] = useState(0);
   const [current, setCurrent] = useState<UnifiedQueueCard | null>(
@@ -268,6 +273,7 @@ export function TodaySession({
   useEffect(() => {
     setMainIndex(0);
     setMainCompletedCount(0);
+    setTotalAnswered(0);
     retryQueueRef.current.reset();
 
     // Sweep stale persisted retries (other users / other dates) and rehydrate
@@ -304,6 +310,13 @@ export function TodaySession({
     if (correctionPlaceholderTimeoutRef.current) {
       clearTimeout(correctionPlaceholderTimeoutRef.current);
       correctionPlaceholderTimeoutRef.current = null;
+    }
+
+    // Seed exclusion set with all initial queue card IDs so prefetch loads
+    // don't duplicate cards already in the queue.
+    seenWordIdsRef.current.clear();
+    for (const card of queue) {
+      seenWordIdsRef.current.add(card.id);
     }
 
     // If we rehydrated, the reset above cleared nothing user-visible but the
@@ -443,7 +456,13 @@ export function TodaySession({
     setHistoryIndex(null);
   }
 
-  async function handleLoadMore(count: number) {
+  /**
+   * Load more cards. In prefetch mode, cards are silently appended to the
+   * queue so the user never sees a loading gap. In immediate mode (default),
+   * the first new card is started right away — used when the queue is already
+   * exhausted (phase === "done").
+   */
+  async function handleLoadMore(count: number, prefetch = false) {
     setLoadingMore(true);
     const result = await loadMoreFlashcards(count, [...seenWordIdsRef.current]);
     setLoadingMore(false);
@@ -456,6 +475,12 @@ export function TodaySession({
       setNewWordsExhausted(true);
       setUnlimitedMode(false);
       return;
+    }
+
+    // If fewer cards came back than requested, supply is running out
+    if (totalLoaded < count) {
+      setReviewsExhausted(true);
+      setNewWordsExhausted(true);
     }
 
     const { queue: newCards } = buildUnifiedQueue(
@@ -471,20 +496,63 @@ export function TodaySession({
       return;
     }
 
+    // Register new card IDs so future fetches exclude them
+    for (const card of newCards) {
+      seenWordIdsRef.current.add(card.id);
+    }
+
     setExtraCards((prev) => [...prev, ...newCards]);
-    beginCard(newCards[0], "main");
-    setCurrentRetryIndex(0);
-    setPhase("prompt");
+
+    if (!prefetch) {
+      // Immediate mode: start practicing the first new card now
+      beginCard(newCards[0], "main");
+      setCurrentRetryIndex(0);
+      setPhase("prompt");
+    }
   }
 
-  // Auto-load continuation in unlimited mode
   const handleLoadMoreRef = useRef(handleLoadMore);
   handleLoadMoreRef.current = handleLoadMore;
+  const allExhausted = reviewsExhausted && newWordsExhausted;
+  const targetRemaining = manualTargetMode
+    ? dailyLimit - normalizedInitialCompleted - totalAnswered
+    : dailyLimit - normalizedInitialCompleted - mainCompletedCount;
+
+  // --- Prefetch: load next chunk while user still has cards to practice ---
+  const PREFETCH_THRESHOLD = 10;
+  const unseenRemaining = allCards.length - mainIndex - 1;
+  const shouldPrefetch =
+    manualTargetMode &&
+    !unlimitedMode &&
+    !loadingMore &&
+    !allExhausted &&
+    targetRemaining > 0 &&
+    unseenRemaining <= PREFETCH_THRESHOLD &&
+    unseenRemaining >= 0;
 
   useEffect(() => {
-    if (phase !== "done" || !unlimitedMode || loadingMore) return;
-    void handleLoadMoreRef.current(12);
-  }, [phase, unlimitedMode, loadingMore]);
+    if (!shouldPrefetch || phase === "done") return;
+    const chunk = Math.min(MANUAL_TARGET_CHUNK, targetRemaining);
+    void handleLoadMoreRef.current(chunk, true);
+  }, [shouldPrefetch, targetRemaining, phase]);
+
+  // --- Fallback: immediate load when queue is fully exhausted ---
+  const shouldAutoLoadChunk =
+    manualTargetMode && !unlimitedMode && targetRemaining > 0 && !allExhausted;
+
+  useEffect(() => {
+    if (phase !== "done" || loadingMore) return;
+
+    if (unlimitedMode) {
+      void handleLoadMoreRef.current(12);
+      return;
+    }
+
+    if (shouldAutoLoadChunk) {
+      const chunk = Math.min(MANUAL_TARGET_CHUNK, targetRemaining);
+      void handleLoadMoreRef.current(chunk);
+    }
+  }, [phase, unlimitedMode, loadingMore, shouldAutoLoadChunk, targetRemaining]);
 
   function renderNormalCard(
     card: Extract<UnifiedQueueCard, { cardType: "normal" }>,
@@ -534,6 +602,24 @@ export function TodaySession({
 
     clearSuccessAdvanceTimeout();
 
+    const rq = retryQueueRef.current;
+
+    // Manual-target strict cap: retries count toward the session total. Once
+    // normalizedInitialCompleted + totalAnswered hits dailyLimit the session
+    // ends, any pending retries are dropped (they are already logged in
+    // review_events and will resurface tomorrow via SRS).
+    if (
+      manualTargetMode &&
+      normalizedInitialCompleted + totalAnswered >= dailyLimit
+    ) {
+      rq.reset();
+      setRetryPending(0);
+      setCurrent(null);
+      setPhase("done");
+      if (retryPersistKey) clearRetryQueue(retryPersistKey);
+      return;
+    }
+
     const nextMainIndex = currentSource === "main" ? mainIndex + 1 : mainIndex;
     const nextMainCompleted =
       currentSource === "main" ? mainCompletedCount + 1 : mainCompletedCount;
@@ -542,7 +628,6 @@ export function TodaySession({
     setMainCompletedCount(nextMainCompleted);
 
     // Check if a retry card is ready (count-based, no wall-clock delay)
-    const rq = retryQueueRef.current;
     const dueRetry = rq.dequeue();
 
     if (dueRetry) {
@@ -630,6 +715,8 @@ export function TodaySession({
       if (!result.ok) {
         throw new Error(result.error);
       }
+
+      setTotalAnswered((n) => n + 1);
 
       // Enqueue for retry if incorrect and budget remains
       if (!correct) {
@@ -839,6 +926,8 @@ export function TodaySession({
         throw new Error(result.error);
       }
 
+      setTotalAnswered((n) => n + 1);
+
       // Enqueue for retry if incorrect and budget remains
       if (outcome.retry) {
         rq.enqueue(current);
@@ -887,22 +976,41 @@ export function TodaySession({
       onNext={goToNextCard}
     />
   );
-  const normalizedInitialCompleted = Math.max(
-    0,
-    Math.floor(initialCompletedCount),
-  );
-  const progressTotal = Math.max(
-    totalCards,
-    Math.min(dailyLimit, normalizedInitialCompleted + totalCards),
-  );
-  const localCompletedCount =
-    currentSource === "main" && (phase === "feedback" || phase === "correction")
-      ? mainCompletedCount + 1
-      : mainCompletedCount;
-  const completedCount = Math.min(
-    progressTotal,
-    normalizedInitialCompleted + localCompletedCount,
-  );
+  const totalDelivered = queue.length + extraCards.length;
+  let progressTotal: number;
+  if (manualTargetMode && !allExhausted) {
+    // Chunked manual target: show full target as denominator
+    progressTotal = dailyLimit;
+  } else if (manualTargetMode && allExhausted) {
+    // Supply exhausted before target met: reconcile to actual
+    progressTotal = Math.max(1, normalizedInitialCompleted + totalDelivered);
+  } else {
+    // Recommended mode: original formula grounded in delivered queue
+    progressTotal = Math.max(
+      totalCards,
+      Math.min(dailyLimit, normalizedInitialCompleted + totalCards),
+    );
+  }
+  let completedCount: number;
+  if (manualTargetMode) {
+    // Retries count toward the manual target. totalAnswered is bumped after
+    // recordReview succeeds, so the feedback phase already reflects the card
+    // currently shown — no +1 trick needed.
+    completedCount = Math.min(
+      progressTotal,
+      normalizedInitialCompleted + totalAnswered,
+    );
+  } else {
+    const localCompletedCount =
+      currentSource === "main" &&
+      (phase === "feedback" || phase === "correction")
+        ? mainCompletedCount + 1
+        : mainCompletedCount;
+    completedCount = Math.min(
+      progressTotal,
+      normalizedInitialCompleted + localCompletedCount,
+    );
+  }
   const progressPercent =
     progressTotal > 0 ? (100 * completedCount) / progressTotal : 0;
   const interactiveTextCloseSignal = current
@@ -979,38 +1087,62 @@ export function TodaySession({
         </div>
       ) : null}
 
-      {phase === "done" && unlimitedMode ? (
+      {phase === "done" && (unlimitedMode || shouldAutoLoadChunk) ? (
         <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-4 rounded-xl border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900/50">
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
             Loading more cards...
           </p>
-          <button
-            type="button"
-            className="text-sm text-zinc-500 underline hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-            onClick={() => setUnlimitedMode(false)}
-          >
-            Stop and see results
-          </button>
+          {unlimitedMode ? (
+            <button
+              type="button"
+              className="text-sm text-zinc-500 underline hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+              onClick={() => setUnlimitedMode(false)}
+            >
+              Stop and see results
+            </button>
+          ) : null}
         </div>
       ) : phase === "done" ? (
-        <PracticeCompleteScreen
-          reviewedCards={reviewedCards}
-          sessionStartedAt={sessionStartedAtRef.current}
-          reviewsExhausted={reviewsExhausted}
-          newWordsExhausted={newWordsExhausted}
-          loadingMore={loadingMore}
-          onLoadMore={(count) => void handleLoadMore(count)}
-          onStartUnlimited={() => {
-            setUnlimitedMode(true);
-            void handleLoadMore(12);
-          }}
-        />
+        (() => {
+          const mainCards = reviewedCards.filter((r) => r.source === "main");
+          const newCount = mainCards.filter(
+            (r) => r.card.kind === "new",
+          ).length;
+          const reviewCount = mainCards.filter(
+            (r) => r.card.kind === "review",
+          ).length;
+          const correctMain = mainCards.filter(
+            (r) => r.feedback?.correct || r.grade === "good" || r.grade === "easy",
+          ).length;
+          const accuracy =
+            mainCards.length > 0
+              ? Math.round((100 * correctMain) / mainCards.length)
+              : null;
+          return (
+            <PracticeCompleteScreen
+              cardsPracticed={mainCards.length}
+              newCardsPracticed={newCount}
+              reviewCardsPracticed={reviewCount}
+              accuracy={accuracy}
+              timeOnTaskMs={Date.now() - sessionStartedAtRef.current}
+              reviewsExhausted={reviewsExhausted}
+              newWordsExhausted={newWordsExhausted}
+              loadingMore={loadingMore}
+              onLoadMore={(count) => void handleLoadMore(count)}
+              onStartUnlimited={() => {
+                setUnlimitedMode(true);
+                void handleLoadMore(12);
+              }}
+            />
+          );
+        })()
       ) : current ? (
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
           <SessionProgressBar
             completedCount={completedCount}
             progressPercent={progressPercent}
             progressTotal={progressTotal}
+            hideTarget={unlimitedMode}
           />
 
           {showingHistory ? (
@@ -1529,19 +1661,23 @@ function SessionProgressBar({
   completedCount,
   progressPercent,
   progressTotal,
+  hideTarget,
 }: {
   completedCount: number;
   progressPercent: number;
   progressTotal: number;
+  hideTarget?: boolean;
 }) {
   return (
     <div className="flex items-start gap-3">
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex justify-between text-sm text-zinc-500 dark:text-zinc-400">
           <span>
-            Card {completedCount} of {progressTotal}
+            {hideTarget
+              ? `Card ${completedCount}`
+              : `Card ${completedCount} of ${progressTotal}`}
           </span>
-          <span>{Math.round(progressPercent)}%</span>
+          {hideTarget ? null : <span>{Math.round(progressPercent)}%</span>}
         </div>
         <div
           className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700"
@@ -1564,187 +1700,6 @@ function SessionProgressBar({
 
 function getCardKindLabel(kind: UnifiedQueueCard["kind"]) {
   return kind === "review" ? "Review" : "New";
-}
-
-function PracticeCompleteScreen({
-  reviewedCards,
-  sessionStartedAt,
-  reviewsExhausted,
-  newWordsExhausted,
-  loadingMore,
-  onLoadMore,
-  onStartUnlimited,
-}: {
-  reviewedCards: ReviewedCardSnapshot[];
-  sessionStartedAt: number;
-  reviewsExhausted: boolean;
-  newWordsExhausted: boolean;
-  loadingMore: boolean;
-  onLoadMore: (count: number) => void;
-  onStartUnlimited: () => void;
-}) {
-  const [view, setView] = useState<"results" | "chooser">("results");
-  const [customAmount, setCustomAmount] = useState("");
-
-  const mainCards = reviewedCards.filter((r) => r.source === "main");
-  const newCount = mainCards.filter((r) => r.card.kind === "new").length;
-  const reviewCount = mainCards.filter((r) => r.card.kind === "review").length;
-  const correctMain = mainCards.filter(
-    (r) =>
-      r.feedback?.correct || r.grade === "good" || r.grade === "easy",
-  ).length;
-  const accuracy =
-    mainCards.length > 0
-      ? Math.round((100 * correctMain) / mainCards.length)
-      : null;
-  const elapsedMs = Date.now() - sessionStartedAt;
-  const elapsedMin = Math.max(1, Math.round(elapsedMs / 60_000));
-  const allExhausted = reviewsExhausted && newWordsExhausted;
-
-  function handlePreset(n: number) {
-    onLoadMore(n);
-    setView("results");
-    setCustomAmount("");
-  }
-
-  function handleCustomSubmit() {
-    const n = parseInt(customAmount, 10);
-    if (Number.isFinite(n) && n > 0) {
-      onLoadMore(Math.min(n, 200));
-      setView("results");
-      setCustomAmount("");
-    }
-  }
-
-  function handleUnlimited() {
-    onStartUnlimited();
-    setView("results");
-  }
-
-  if (view === "chooser") {
-    return (
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 rounded-xl border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900/50">
-        <h2 className="text-lg font-semibold tracking-tight">
-          How many more would you like to do?
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          {[5, 10, 20, 50].map((n) => (
-            <button
-              key={n}
-              type="button"
-              className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
-              disabled={loadingMore}
-              onClick={() => handlePreset(n)}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="number"
-            min={1}
-            max={200}
-            placeholder="Other amount"
-            value={customAmount}
-            onChange={(e) => setCustomAmount(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                handleCustomSubmit();
-              }
-            }}
-            className="w-32 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-          />
-          {customAmount ? (
-            <button
-              type="button"
-              className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
-              disabled={loadingMore}
-              onClick={handleCustomSubmit}
-            >
-              Go
-            </button>
-          ) : null}
-        </div>
-        <button
-          type="button"
-          className="self-start text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-          disabled={loadingMore}
-          onClick={handleUnlimited}
-        >
-          Keep going until I stop
-        </button>
-        <button
-          type="button"
-          className="self-start text-xs text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
-          onClick={() => setView("results")}
-        >
-          Cancel
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 rounded-xl border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900/50">
-      <h2 className="text-xl font-semibold tracking-tight">
-        Practice complete
-      </h2>
-
-      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <SummaryStat label="Cards practiced" value={String(mainCards.length)} />
-        {newCount > 0 ? (
-          <SummaryStat label="New" value={String(newCount)} />
-        ) : null}
-        {reviewCount > 0 ? (
-          <SummaryStat label="Reviews" value={String(reviewCount)} />
-        ) : null}
-        {accuracy !== null ? (
-          <SummaryStat label="Accuracy" value={`${accuracy}%`} />
-        ) : null}
-        <SummaryStat label="Time on task" value={`${elapsedMin}m`} />
-      </dl>
-
-      <p className="text-sm text-zinc-500 dark:text-zinc-400">
-        Some words will come back later. Next, you&apos;ll see them again in
-        context.
-      </p>
-
-      <Link href="/reading" className="app-button self-start">
-        Go to reading
-      </Link>
-
-      {!allExhausted ? (
-        <div className="border-t border-zinc-200 pt-4 dark:border-zinc-700">
-          <button
-            type="button"
-            className="text-sm text-zinc-600 underline hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
-            onClick={() => setView("chooser")}
-          >
-            Do more flashcards
-          </button>
-        </div>
-      ) : (
-        <p className="text-xs text-zinc-400 dark:text-zinc-500">
-          No more flashcards are available right now.
-        </p>
-      )}
-    </div>
-  );
-}
-
-function SummaryStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex flex-col gap-1 rounded-lg bg-white px-3 py-2.5 dark:bg-zinc-800/60">
-      <dt className="text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-        {label}
-      </dt>
-      <dd className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-        {value}
-      </dd>
-    </div>
-  );
 }
 
 function ComingSoonNotice({

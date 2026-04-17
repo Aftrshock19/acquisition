@@ -2,9 +2,20 @@ import { Home as HomeIcon } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getTodayFlashcards } from "@/app/actions/srs";
+import { PracticeCompleteScreen } from "@/components/srs/PracticeCompleteScreen";
 import { TodaySession } from "@/components/srs/TodaySession";
 import { getPlacementBannerState } from "@/lib/placement/status";
 import { shouldRedirectToIntro } from "@/lib/onboarding/state";
+import type { DailySessionRow } from "@/lib/srs/types";
+
+function computeDailySessionElapsedMs(session: DailySessionRow) {
+  const start = session.started_at ? Date.parse(session.started_at) : NaN;
+  const end = session.last_active_at ? Date.parse(session.last_active_at) : NaN;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return 0;
+  }
+  return end - start;
+}
 
 export default async function TodayPage() {
   if (await shouldRedirectToIntro()) {
@@ -30,6 +41,38 @@ export default async function TodayPage() {
   const enabledTypeCount = Object.values(effectiveSettings.enabledTypes).filter(
     Boolean,
   ).length;
+
+  if (!hasCards) {
+    console.log("[today-page:!hasCards]", {
+      hasCards,
+      effectiveDailyLimit: effectiveSettings.dailyLimit,
+      manualTargetMode: effectiveSettings.manualTargetMode,
+      dailySession: dailySession
+        ? {
+            id: dailySession.id,
+            stage: dailySession.stage,
+            flashcard_completed_count: dailySession.flashcard_completed_count,
+            flashcard_new_completed_count:
+              dailySession.flashcard_new_completed_count,
+            flashcard_review_completed_count:
+              dailySession.flashcard_review_completed_count,
+            flashcard_retry_count: dailySession.flashcard_retry_count,
+            assigned_flashcard_count: dailySession.assigned_flashcard_count,
+            reading_done: dailySession.reading_done,
+            listening_done: dailySession.listening_done,
+          }
+        : null,
+      targetMetComparison: dailySession
+        ? {
+            completed: dailySession.flashcard_completed_count,
+            limit: effectiveSettings.dailyLimit,
+            completedGteLimit:
+              dailySession.flashcard_completed_count >=
+              effectiveSettings.dailyLimit,
+          }
+        : null,
+    });
+  }
 
   if (session.configMissing) {
     return (
@@ -197,6 +240,16 @@ export default async function TodayPage() {
               .
             </p>
           </div>
+        ) : dailySession &&
+          dailySession.flashcard_completed_count >=
+            effectiveSettings.dailyLimit ? (
+          <PracticeCompleteScreen
+            cardsPracticed={dailySession.flashcard_completed_count}
+            newCardsPracticed={dailySession.flashcard_new_completed_count}
+            reviewCardsPracticed={dailySession.flashcard_review_completed_count}
+            accuracy={null}
+            timeOnTaskMs={computeDailySessionElapsedMs(dailySession)}
+          />
         ) : dailySession ? (
           <div className="app-card flex flex-col gap-4 p-8">
             <h2 className="text-xl font-semibold tracking-tight">
@@ -238,6 +291,7 @@ export default async function TodayPage() {
           initialSavedWordIds={result.savedWords.wordIds}
           initialSavedLemmas={result.savedWords.lemmas}
           dailyLimit={effectiveSettings.dailyLimit}
+          manualTargetMode={effectiveSettings.manualTargetMode}
           autoAdvanceCorrect={effectiveSettings.autoAdvanceCorrect}
           showPosHint={effectiveSettings.showPosHint}
           hideTranslationSentences={effectiveSettings.hideTranslationSentences}

@@ -332,7 +332,10 @@ export function FlashcardSettingsForm({
                 min={0}
                 max={getSliderValues(removeDailyLimit).length - 1}
                 step={1}
-                value={valueToTick(manualDailyLimit, getSliderValues(removeDailyLimit))}
+                value={valueToTick(
+                  manualDailyLimit,
+                  getSliderValues(removeDailyLimit),
+                )}
                 onChange={(e) => {
                   const values = getSliderValues(removeDailyLimit);
                   const v = values[Number(e.currentTarget.value)] ?? 1;
@@ -369,7 +372,7 @@ export function FlashcardSettingsForm({
                   }}
                   className="app-check h-3.5 w-3.5"
                 />
-                <span>Remove limit</span>
+                <span>No ceiling</span>
               </label>
               <p className="mt-1 pl-6 text-xs text-zinc-400 dark:text-zinc-500">
                 Allows targets above 200 for advanced practice needs.
@@ -869,18 +872,18 @@ function range(start: number, end: number, step: number): number[] {
 }
 
 const STANDARD_SLIDER_VALUES: number[] = [
-  ...range(1, 20, 1),     // 1–20 by 1
-  ...range(25, 100, 5),   // 25–100 by 5
+  ...range(1, 20, 1), // 1–20 by 1
+  ...range(25, 100, 5), // 25–100 by 5
   ...range(110, 200, 10), // 110–200 by 10
 ];
 
 const EXTENDED_SLIDER_VALUES: number[] = [
   ...STANDARD_SLIDER_VALUES,
-  ...range(225, 500, 25),   // 225–500 by 25
-  ...range(550, 1000, 50),  // 550–1000 by 50
+  ...range(225, 500, 25), // 225–500 by 25
+  ...range(550, 1000, 50), // 550–1000 by 50
   ...range(1100, 3000, 100), // 1100–3000 by 100
   ...range(3250, 9750, 250), // 3250–9750 by 250
-  9999,                      // exact cap
+  9999, // exact cap
 ];
 
 function getSliderValues(removeLimitEnabled: boolean): number[] {
@@ -930,13 +933,6 @@ function SliderMilestones({ removeLimit }: { removeLimit: boolean }) {
 }
 
 function TargetGuidance({ value }: { value: number }) {
-  if (value >= 1000) {
-    return (
-      <p className="text-xs text-zinc-500 dark:text-zinc-400">
-        Extreme target. Your future review queue has concerns.
-      </p>
-    );
-  }
   if (value >= 501) {
     return (
       <p className="text-xs text-zinc-500 dark:text-zinc-400">

@@ -320,7 +320,7 @@ export function buildDailyAggregates({
       learner_state_score: session?.learner_state_score ?? null,
       learner_factor: session?.learner_factor ?? null,
       workload_factor: session?.workload_factor ?? null,
-      adaptive_new_word_budget: session?.adaptive_new_word_budget ?? null,
+      adaptive_new_word_cap: session?.adaptive_new_word_cap ?? null,
       reading_question_accuracy: session?.reading_question_accuracy ?? null,
       reading_question_attempts_count: session?.reading_question_attempts_count ?? 0,
     };

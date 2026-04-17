@@ -41,7 +41,7 @@ function makeDay(overrides: Partial<DailyAggregate> = {}): DailyAggregate {
     learner_state_score: null,
     learner_factor: null,
     workload_factor: null,
-    adaptive_new_word_budget: null,
+    adaptive_new_word_cap: null,
     reading_question_accuracy: null,
     reading_question_attempts_count: 0,
     ...overrides,

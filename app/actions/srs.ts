@@ -59,6 +59,7 @@ export type TodayFlashcardsResult =
       workloadPolicy: WorkloadPolicy;
       effectiveSettings: {
         dailyLimit: number;
+        manualTargetMode: boolean;
         autoAdvanceCorrect: boolean;
         showPosHint: boolean;
         showDefinitionFirst: boolean;
@@ -79,6 +80,7 @@ export type TodayFlashcardsResult =
       dailySession?: DailySessionRow | null;
       effectiveSettings: {
         dailyLimit: number;
+        manualTargetMode: boolean;
         autoAdvanceCorrect: boolean;
         showPosHint: boolean;
         showDefinitionFirst: boolean;
@@ -107,6 +109,8 @@ type DailySessionProgressState = {
 };
 
 const SESSION_RESUME_THRESHOLD_MS = 15 * 60 * 1000;
+/** Max cards fetched per chunk in manual-target mode. */
+const MANUAL_TARGET_CHUNK = 50;
 
 export type CompleteReadingStepResult =
   | {
@@ -180,7 +184,7 @@ export async function getDailyQueue(
     p_new_limit: limitNew,
     p_review_limit: limitReview,
     p_exclude_word_ids: excludeWordIds ?? [],
-  } as never);
+  } as never).limit(limitNew + limitReview);
 
   if (error) {
     return {
@@ -379,7 +383,7 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
       : null;
 
   const baseNewWordBudget = MAX_NEW_WORDS;
-  const adaptiveNewWordBudget = adaptiveContext
+  const adaptiveNewWordCap = adaptiveContext
     ? adaptiveContext.workload.adaptiveNewWordCap(baseNewWordBudget)
     : baseNewWordBudget;
 
@@ -387,15 +391,17 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     p50ReviewMs,
     daysSinceLastSession,
     overdueCount,
-    scheduledNewCount: adaptiveNewWordBudget,
+    scheduledNewCount: adaptiveNewWordCap,
   });
 
   const isManualMode = settings.daily_plan_mode === "manual";
-  const newLimit    = isManualMode ? remainingDailyLimit : workloadPolicy.recommendedNewWords;
-  const reviewLimit = isManualMode ? remainingDailyLimit : workloadPolicy.recommendedReviews;
+  const manualChunk  = Math.min(remainingDailyLimit, MANUAL_TARGET_CHUNK);
+  const newLimit     = isManualMode ? manualChunk : workloadPolicy.recommendedNewWords;
+  const reviewLimit  = isManualMode ? manualChunk : workloadPolicy.recommendedReviews;
 
   const effectiveSettings = {
     dailyLimit: effective.effectiveDailyLimit,
+    manualTargetMode: isManualMode,
     autoAdvanceCorrect: effective.autoAdvanceCorrect,
     showPosHint: effective.showPosHint,
     showDefinitionFirst: effective.showDefinitionFirst,
@@ -421,13 +427,14 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     };
   }
 
-  const session = limitTodaySession(queueResult.session, remainingDailyLimit);
+  const sessionLimit = isManualMode ? manualChunk : remainingDailyLimit;
+  const session = limitTodaySession(queueResult.session, sessionLimit);
   const dailySession = await upsertDailySession(session, existingDailySession, {
     variant,
     learnerStateScore: adaptiveContext?.learnerState.learnerStateScore ?? null,
     learnerFactor: adaptiveContext?.learnerState.learnerFactor ?? null,
     workloadFactor: adaptiveContext?.workload.workloadFactor ?? null,
-    adaptiveNewWordBudget: adaptiveContext ? adaptiveNewWordBudget : null,
+    adaptiveNewWordCap: adaptiveContext ? adaptiveNewWordCap : null,
   });
 
   console.log(
@@ -945,7 +952,7 @@ type AdaptiveDailySessionPatch = {
   learnerStateScore: number | null;
   learnerFactor: number | null;
   workloadFactor: number | null;
-  adaptiveNewWordBudget: number | null;
+  adaptiveNewWordCap: number | null;
 };
 
 async function upsertDailySession(
@@ -1043,7 +1050,7 @@ async function upsertDailySession(
               learner_state_score: adaptive.learnerStateScore,
               learner_factor: adaptive.learnerFactor,
               workload_factor: adaptive.workloadFactor,
-              adaptive_new_word_budget: adaptive.adaptiveNewWordBudget,
+              adaptive_new_word_cap: adaptive.adaptiveNewWordCap,
             }
           : {}),
       },
