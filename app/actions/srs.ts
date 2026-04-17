@@ -390,8 +390,9 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     scheduledNewCount: adaptiveNewWordBudget,
   });
 
-  const newLimit    = workloadPolicy.recommendedNewWords;
-  const reviewLimit = workloadPolicy.recommendedReviews;
+  const isManualMode = settings.daily_plan_mode === "manual";
+  const newLimit    = isManualMode ? remainingDailyLimit : workloadPolicy.recommendedNewWords;
+  const reviewLimit = isManualMode ? remainingDailyLimit : workloadPolicy.recommendedReviews;
 
   const effectiveSettings = {
     dailyLimit: effective.effectiveDailyLimit,
@@ -585,6 +586,24 @@ export async function loadMoreNewWordsChunk(
   const result = await getDailyQueue(lang, CONTINUATION_NEW_CHUNK, 0, excludeWordIds);
   if (!result.ok) return { ok: false, error: result.error ?? "Failed to load new words" };
   return { ok: true, dueReviews: [], newWords: result.session.newWords };
+}
+
+/**
+ * Load a user-chosen number of extra flashcards. Reviews are prioritised;
+ * remaining slots are filled with new words.
+ */
+export async function loadMoreFlashcards(
+  count: number,
+  excludeWordIds: string[],
+  lang = "es",
+): Promise<LoadMoreResult> {
+  const safeCount = Math.max(1, Math.min(count, 200));
+  const result = await getDailyQueue(lang, safeCount, safeCount, excludeWordIds);
+  if (!result.ok) return { ok: false, error: result.error ?? "Failed to load cards" };
+  const reviews = result.session.dueReviews;
+  const remainingSlots = Math.max(0, safeCount - reviews.length);
+  const newWords = result.session.newWords.slice(0, remainingSlots);
+  return { ok: true, dueReviews: reviews, newWords };
 }
 
 export type RecordReviewResult =

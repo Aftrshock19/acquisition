@@ -160,6 +160,7 @@ export default async function ListeningPage() {
     show_pos_hint: true,
     show_definition_first: true,
     hide_translation_sentences: false,
+    remove_daily_limit: false,
     scheduler_variant: "baseline",
     has_seen_intro: false,
     onboarding_completed_at: null,

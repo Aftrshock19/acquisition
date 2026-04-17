@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { recordReview, loadMoreReviewChunk, loadMoreNewWordsChunk } from "@/app/actions/srs";
+import { recordReview, loadMoreFlashcards } from "@/app/actions/srs";
 import type { WorkloadPolicy } from "@/lib/srs/workloadPolicy";
 import { InteractiveTextProvider } from "@/components/interactive-text/InteractiveTextProvider";
 import { LeftIcon } from "@/components/LeftIcon";
@@ -191,6 +191,7 @@ export function TodaySession({
   const [loadingMore, setLoadingMore] = useState(false);
   const [reviewsExhausted, setReviewsExhausted] = useState(false);
   const [newWordsExhausted, setNewWordsExhausted] = useState(false);
+  const [unlimitedMode, setUnlimitedMode] = useState(false);
   const [comebackDismissed, setComebackDismissed] = useState(false);
   const seenWordIdsRef = useRef<Set<string>>(new Set());
   const initialCompletedCount = Math.max(
@@ -442,51 +443,48 @@ export function TodaySession({
     setHistoryIndex(null);
   }
 
-  async function handleLoadMoreReviews() {
+  async function handleLoadMore(count: number) {
     setLoadingMore(true);
-    const result = await loadMoreReviewChunk([...seenWordIdsRef.current]);
+    const result = await loadMoreFlashcards(count, [...seenWordIdsRef.current]);
     setLoadingMore(false);
-    if (!result.ok || result.dueReviews.length === 0) {
+
+    if (!result.ok) return;
+
+    const totalLoaded = result.dueReviews.length + result.newWords.length;
+    if (totalLoaded === 0) {
       setReviewsExhausted(true);
+      setNewWordsExhausted(true);
+      setUnlimitedMode(false);
       return;
     }
+
     const { queue: newCards } = buildUnifiedQueue(
-      { dueReviews: result.dueReviews, newWords: [] },
+      { dueReviews: result.dueReviews, newWords: result.newWords },
       enabledTypes,
       mcqQuestionFormats,
     );
+
     if (newCards.length === 0) {
       setReviewsExhausted(true);
+      setNewWordsExhausted(true);
+      setUnlimitedMode(false);
       return;
     }
+
     setExtraCards((prev) => [...prev, ...newCards]);
     beginCard(newCards[0], "main");
     setCurrentRetryIndex(0);
     setPhase("prompt");
   }
 
-  async function handleLoadMoreNewWords() {
-    setLoadingMore(true);
-    const result = await loadMoreNewWordsChunk([...seenWordIdsRef.current]);
-    setLoadingMore(false);
-    if (!result.ok || result.newWords.length === 0) {
-      setNewWordsExhausted(true);
-      return;
-    }
-    const { queue: newCards } = buildUnifiedQueue(
-      { dueReviews: [], newWords: result.newWords },
-      enabledTypes,
-      mcqQuestionFormats,
-    );
-    if (newCards.length === 0) {
-      setNewWordsExhausted(true);
-      return;
-    }
-    setExtraCards((prev) => [...prev, ...newCards]);
-    beginCard(newCards[0], "main");
-    setCurrentRetryIndex(0);
-    setPhase("prompt");
-  }
+  // Auto-load continuation in unlimited mode
+  const handleLoadMoreRef = useRef(handleLoadMore);
+  handleLoadMoreRef.current = handleLoadMore;
+
+  useEffect(() => {
+    if (phase !== "done" || !unlimitedMode || loadingMore) return;
+    void handleLoadMoreRef.current(12);
+  }, [phase, unlimitedMode, loadingMore]);
 
   function renderNormalCard(
     card: Extract<UnifiedQueueCard, { cardType: "normal" }>,
@@ -981,17 +979,31 @@ export function TodaySession({
         </div>
       ) : null}
 
-      {phase === "done" ? (
+      {phase === "done" && unlimitedMode ? (
+        <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-4 rounded-xl border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900/50">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            Loading more cards...
+          </p>
+          <button
+            type="button"
+            className="text-sm text-zinc-500 underline hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+            onClick={() => setUnlimitedMode(false)}
+          >
+            Stop and see results
+          </button>
+        </div>
+      ) : phase === "done" ? (
         <PracticeCompleteScreen
           reviewedCards={reviewedCards}
           sessionStartedAt={sessionStartedAtRef.current}
           reviewsExhausted={reviewsExhausted}
           newWordsExhausted={newWordsExhausted}
           loadingMore={loadingMore}
-          continuationReviewChunk={workloadPolicy?.continuationReviewChunk ?? 12}
-          continuationNewChunk={workloadPolicy?.continuationNewChunk ?? 5}
-          onLoadMoreReviews={() => void handleLoadMoreReviews()}
-          onLoadMoreNewWords={() => void handleLoadMoreNewWords()}
+          onLoadMore={(count) => void handleLoadMore(count)}
+          onStartUnlimited={() => {
+            setUnlimitedMode(true);
+            void handleLoadMore(12);
+          }}
         />
       ) : current ? (
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
@@ -1560,29 +1572,119 @@ function PracticeCompleteScreen({
   reviewsExhausted,
   newWordsExhausted,
   loadingMore,
-  continuationReviewChunk,
-  continuationNewChunk,
-  onLoadMoreReviews,
-  onLoadMoreNewWords,
+  onLoadMore,
+  onStartUnlimited,
 }: {
   reviewedCards: ReviewedCardSnapshot[];
   sessionStartedAt: number;
   reviewsExhausted: boolean;
   newWordsExhausted: boolean;
   loadingMore: boolean;
-  continuationReviewChunk: number;
-  continuationNewChunk: number;
-  onLoadMoreReviews: () => void;
-  onLoadMoreNewWords: () => void;
+  onLoadMore: (count: number) => void;
+  onStartUnlimited: () => void;
 }) {
+  const [view, setView] = useState<"results" | "chooser">("results");
+  const [customAmount, setCustomAmount] = useState("");
+
   const mainCards = reviewedCards.filter((r) => r.source === "main");
   const newCount = mainCards.filter((r) => r.card.kind === "new").length;
   const reviewCount = mainCards.filter((r) => r.card.kind === "review").length;
-  const correctMain = mainCards.filter((r) => r.feedback?.correct || r.grade === "good" || r.grade === "easy").length;
-  const accuracy = mainCards.length > 0 ? Math.round((100 * correctMain) / mainCards.length) : null;
+  const correctMain = mainCards.filter(
+    (r) =>
+      r.feedback?.correct || r.grade === "good" || r.grade === "easy",
+  ).length;
+  const accuracy =
+    mainCards.length > 0
+      ? Math.round((100 * correctMain) / mainCards.length)
+      : null;
   const elapsedMs = Date.now() - sessionStartedAt;
   const elapsedMin = Math.max(1, Math.round(elapsedMs / 60_000));
-  const hasDoMore = !reviewsExhausted || !newWordsExhausted;
+  const allExhausted = reviewsExhausted && newWordsExhausted;
+
+  function handlePreset(n: number) {
+    onLoadMore(n);
+    setView("results");
+    setCustomAmount("");
+  }
+
+  function handleCustomSubmit() {
+    const n = parseInt(customAmount, 10);
+    if (Number.isFinite(n) && n > 0) {
+      onLoadMore(Math.min(n, 200));
+      setView("results");
+      setCustomAmount("");
+    }
+  }
+
+  function handleUnlimited() {
+    onStartUnlimited();
+    setView("results");
+  }
+
+  if (view === "chooser") {
+    return (
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 rounded-xl border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900/50">
+        <h2 className="text-lg font-semibold tracking-tight">
+          How many more would you like to do?
+        </h2>
+        <div className="flex flex-wrap gap-2">
+          {[5, 10, 20, 50].map((n) => (
+            <button
+              key={n}
+              type="button"
+              className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+              disabled={loadingMore}
+              onClick={() => handlePreset(n)}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={1}
+            max={200}
+            placeholder="Other amount"
+            value={customAmount}
+            onChange={(e) => setCustomAmount(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleCustomSubmit();
+              }
+            }}
+            className="w-32 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+          />
+          {customAmount ? (
+            <button
+              type="button"
+              className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+              disabled={loadingMore}
+              onClick={handleCustomSubmit}
+            >
+              Go
+            </button>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          className="self-start text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+          disabled={loadingMore}
+          onClick={handleUnlimited}
+        >
+          Keep going until I stop
+        </button>
+        <button
+          type="button"
+          className="self-start text-xs text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+          onClick={() => setView("results")}
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 rounded-xl border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900/50">
@@ -1592,49 +1694,42 @@ function PracticeCompleteScreen({
 
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <SummaryStat label="Cards practiced" value={String(mainCards.length)} />
-        {newCount > 0 ? <SummaryStat label="New" value={String(newCount)} /> : null}
-        {reviewCount > 0 ? <SummaryStat label="Reviews" value={String(reviewCount)} /> : null}
-        {accuracy !== null ? <SummaryStat label="Accuracy" value={`${accuracy}%`} /> : null}
+        {newCount > 0 ? (
+          <SummaryStat label="New" value={String(newCount)} />
+        ) : null}
+        {reviewCount > 0 ? (
+          <SummaryStat label="Reviews" value={String(reviewCount)} />
+        ) : null}
+        {accuracy !== null ? (
+          <SummaryStat label="Accuracy" value={`${accuracy}%`} />
+        ) : null}
         <SummaryStat label="Time on task" value={`${elapsedMin}m`} />
       </dl>
 
       <p className="text-sm text-zinc-500 dark:text-zinc-400">
-        Some of these words will come back in future sessions. Next, you'll see them in context.
+        Some words will come back later. Next, you&apos;ll see them again in
+        context.
       </p>
 
       <Link href="/reading" className="app-button self-start">
-        Continue to reading
+        Go to reading
       </Link>
 
-      {hasDoMore ? (
+      {!allExhausted ? (
         <div className="border-t border-zinc-200 pt-4 dark:border-zinc-700">
-          <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
-            Want to keep going?
-          </p>
-          <div className="flex flex-wrap gap-3">
-            {!reviewsExhausted ? (
-              <button
-                type="button"
-                className="app-button-secondary text-sm"
-                disabled={loadingMore}
-                onClick={onLoadMoreReviews}
-              >
-                {loadingMore ? "Loading…" : `Load ${continuationReviewChunk} more reviews`}
-              </button>
-            ) : null}
-            {!newWordsExhausted ? (
-              <button
-                type="button"
-                className="app-button-secondary text-sm"
-                disabled={loadingMore}
-                onClick={onLoadMoreNewWords}
-              >
-                {loadingMore ? "Loading…" : `Practice ${continuationNewChunk} new words`}
-              </button>
-            ) : null}
-          </div>
+          <button
+            type="button"
+            className="text-sm text-zinc-600 underline hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+            onClick={() => setView("chooser")}
+          >
+            Do more flashcards
+          </button>
         </div>
-      ) : null}
+      ) : (
+        <p className="text-xs text-zinc-400 dark:text-zinc-500">
+          No more flashcards are available right now.
+        </p>
+      )}
     </div>
   );
 }

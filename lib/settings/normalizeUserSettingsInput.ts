@@ -3,6 +3,7 @@ import type { UserSettingsRow } from './types';
 export type RawSettingsInput = Partial<{
   daily_plan_mode: string;
   manual_daily_card_limit: string | number;
+  remove_daily_limit: string | boolean;
   flashcard_selection_mode: string;
   include_cloze: string | boolean;
   include_normal: string | boolean;
@@ -30,8 +31,13 @@ export function normalizeUserSettingsInput(raw: RawSettingsInput): Partial<UserS
     out.flashcard_selection_mode = raw.flashcard_selection_mode;
   }
 
+  if (raw.remove_daily_limit !== undefined) {
+    out.remove_daily_limit = toBool(raw.remove_daily_limit);
+  }
+
   if (raw.manual_daily_card_limit !== undefined) {
-    const n = clampNumber(raw.manual_daily_card_limit, 10, 200, 30);
+    const maxLimit = out.remove_daily_limit ? 9999 : 200;
+    const n = clampNumber(raw.manual_daily_card_limit, 1, maxLimit, 30);
     out.manual_daily_card_limit = n;
   }
 

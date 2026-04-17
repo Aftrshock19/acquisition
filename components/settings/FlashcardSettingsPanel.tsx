@@ -41,7 +41,7 @@ export function FlashcardSettingsPanel({
     <section className="app-card-muted flex flex-col gap-4 p-4 text-sm">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold tracking-tight">
-          Flashcard settings
+          Flashcard target
           {variant === "home" ? " (today)" : ""}
         </h2>
         <Link
@@ -60,7 +60,7 @@ export function FlashcardSettingsPanel({
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-zinc-500">Daily amount:</span>
+          <span className="text-xs text-zinc-500">Daily target:</span>
           <button
             type="submit"
             name="daily_plan_mode"
@@ -77,14 +77,14 @@ export function FlashcardSettingsPanel({
             disabled={pending}
             className={buttonClass(userSettings.daily_plan_mode === "manual")}
           >
-            Manual
+            Custom
           </button>
           {userSettings.daily_plan_mode === "manual" ? (
             <input
               type="number"
               name="manual_daily_card_limit"
-              min={10}
-              max={200}
+              min={1}
+              max={userSettings.remove_daily_limit ? 9999 : 200}
               defaultValue={userSettings.manual_daily_card_limit}
               className="app-input app-input-no-spinner w-16 px-2 py-1 text-xs"
             />

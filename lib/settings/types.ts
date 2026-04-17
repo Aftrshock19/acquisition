@@ -44,6 +44,7 @@ export type UserSettingsRow = {
   show_pos_hint: boolean;
   show_definition_first: boolean;
   hide_translation_sentences: boolean;
+  remove_daily_limit: boolean;
   scheduler_variant: "baseline" | "adaptive";
   has_seen_intro: boolean;
   onboarding_completed_at: string | null;

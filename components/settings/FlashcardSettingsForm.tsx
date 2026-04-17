@@ -109,6 +109,9 @@ export function FlashcardSettingsForm({
   const [manualDailyLimit, setManualDailyLimit] = useState<number>(
     userSettings.manual_daily_card_limit,
   );
+  const [removeDailyLimit, setRemoveDailyLimit] = useState<boolean>(
+    Boolean(userSettings.remove_daily_limit),
+  );
   const [autoAdvanceCorrect, setAutoAdvanceCorrect] = useState<boolean>(
     Boolean(userSettings.auto_advance_correct),
   );
@@ -155,6 +158,7 @@ export function FlashcardSettingsForm({
     const formData = new FormData(e.currentTarget);
     formData.set("daily_plan_mode", dailyPlanMode);
     formData.set("manual_daily_card_limit", String(manualDailyLimit));
+    formData.set("remove_daily_limit", String(removeDailyLimit));
     formData.set("flashcard_selection_mode", flashcardSelectionMode);
     for (const key of MANUAL_TYPE_FIELDS) {
       formData.set(key, String(manualTypes[key]));
@@ -274,11 +278,11 @@ export function FlashcardSettingsForm({
 
       <section className="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
         <h2 className="text-base font-semibold tracking-tight">
-          Daily card amount
+          Daily flashcard target
         </h2>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Recommended is the low-burden default. Manual lets you choose an exact
-          number.
+          This sets how many cards you start with each day. You can always do
+          more later.
         </p>
         <div className="mt-4 grid gap-3 text-sm">
           <label
@@ -295,7 +299,7 @@ export function FlashcardSettingsForm({
               className="app-check app-check-round"
             />
             <span className="flex flex-col">
-              <span>Use recommended amount</span>
+              <span>Recommended</span>
               <span className="text-xs text-zinc-500">
                 ({recommended.recommendedDailyLimit} cards/day)
               </span>
@@ -311,40 +315,68 @@ export function FlashcardSettingsForm({
               name="daily_plan_mode"
               value="manual"
               checked={dailyPlanMode === "manual"}
-              onChange={() => setDailyPlanMode("manual")}
+              onChange={() => {
+                setDailyPlanMode("manual");
+                setManualDailyLimit(recommended.recommendedDailyLimit);
+              }}
               className="app-check app-check-round"
             />
-            <span>Choose my own amount</span>
+            <span>Choose my own target</span>
           </label>
         </div>
-        <div className="mt-5 flex items-center gap-3">
-          <input
-            type="range"
-            name="manual_daily_card_limit"
-            min={10}
-            max={200}
-            step={10}
-            value={manualDailyLimit}
-            onChange={(e) =>
-              setManualDailyLimit(clampLimit(Number(e.currentTarget.value)))
-            }
-            disabled={dailyPlanMode !== "manual"}
-            className="app-range flex-1"
-          />
-          <input
-            type="number"
-            min={10}
-            max={200}
-            value={manualDailyLimit}
-            onChange={(e) => {
-              const next = Number(e.currentTarget.value);
-              if (!Number.isFinite(next)) return;
-              setManualDailyLimit(clampLimit(next));
-            }}
-            disabled={dailyPlanMode !== "manual"}
-            className="app-input app-input-no-spinner w-16 px-2 py-1 text-sm"
-          />
-        </div>
+        {dailyPlanMode === "manual" ? (
+          <div className="mt-5 flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min={0}
+                max={getSliderValues(removeDailyLimit).length - 1}
+                step={1}
+                value={valueToTick(manualDailyLimit, getSliderValues(removeDailyLimit))}
+                onChange={(e) => {
+                  const values = getSliderValues(removeDailyLimit);
+                  const v = values[Number(e.currentTarget.value)] ?? 1;
+                  setManualDailyLimit(clampLimit(v, removeDailyLimit));
+                }}
+                className="app-range flex-1"
+              />
+              <input
+                type="number"
+                name="manual_daily_card_limit"
+                min={1}
+                max={removeDailyLimit ? 9999 : 200}
+                value={manualDailyLimit}
+                onChange={(e) => {
+                  const next = Number(e.currentTarget.value);
+                  if (!Number.isFinite(next)) return;
+                  setManualDailyLimit(clampLimit(next, removeDailyLimit));
+                }}
+                className="app-input app-input-no-spinner w-20 px-2 py-1 text-sm"
+              />
+            </div>
+            <TargetGuidance value={manualDailyLimit} />
+            <div className="mt-1 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+              <label className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
+                <input
+                  type="checkbox"
+                  checked={removeDailyLimit}
+                  onChange={(e) => {
+                    const checked = e.currentTarget.checked;
+                    setRemoveDailyLimit(checked);
+                    if (!checked && manualDailyLimit > 200) {
+                      setManualDailyLimit(200);
+                    }
+                  }}
+                  className="app-check h-3.5 w-3.5"
+                />
+                <span>Remove limit</span>
+              </label>
+              <p className="mt-1 pl-6 text-xs text-zinc-400 dark:text-zinc-500">
+                Allows targets above 200 for advanced practice needs.
+              </p>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <section className="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
@@ -817,8 +849,109 @@ function typeLabel(key: string) {
   return key.replace(/_/g, " ");
 }
 
-function clampLimit(value: number) {
-  return Math.min(200, Math.max(10, Math.round(value)));
+function clampLimit(value: number, removeDailyLimit = false) {
+  const max = removeDailyLimit ? 9999 : 200;
+  return Math.min(max, Math.max(1, Math.round(value)));
+}
+
+// ---------------------------------------------------------------------------
+// Explicit slider value schedule
+// ---------------------------------------------------------------------------
+// The slider operates on index/tick space over a fixed list of allowed values.
+// The numeric input remains exact value-space — typed values are preserved
+// even if they don't land on a slider stop.
+// ---------------------------------------------------------------------------
+
+function range(start: number, end: number, step: number): number[] {
+  const out: number[] = [];
+  for (let v = start; v <= end; v += step) out.push(v);
+  return out;
+}
+
+const STANDARD_SLIDER_VALUES: number[] = [
+  ...range(1, 20, 1),     // 1–20 by 1
+  ...range(25, 100, 5),   // 25–100 by 5
+  ...range(110, 200, 10), // 110–200 by 10
+];
+
+const EXTENDED_SLIDER_VALUES: number[] = [
+  ...STANDARD_SLIDER_VALUES,
+  ...range(225, 500, 25),   // 225–500 by 25
+  ...range(550, 1000, 50),  // 550–1000 by 50
+  ...range(1100, 3000, 100), // 1100–3000 by 100
+  ...range(3250, 9750, 250), // 3250–9750 by 250
+  9999,                      // exact cap
+];
+
+function getSliderValues(removeLimitEnabled: boolean): number[] {
+  return removeLimitEnabled ? EXTENDED_SLIDER_VALUES : STANDARD_SLIDER_VALUES;
+}
+
+/** Snap a value to the nearest entry in the values array, return its index. */
+function valueToTick(value: number, values: number[]): number {
+  let best = 0;
+  let bestDist = Math.abs(value - values[0]);
+  for (let i = 1; i < values.length; i++) {
+    const dist = Math.abs(value - values[i]);
+    if (dist < bestDist) {
+      best = i;
+      bestDist = dist;
+    }
+    if (values[i] >= value) break; // values are sorted, no need to keep going
+  }
+  return best;
+}
+
+const MILESTONES_STANDARD = [1, 25, 50, 100, 200];
+const MILESTONES_EXTENDED = [1, 25, 50, 100, 200, 500, 1000, 3000, 9999];
+
+function SliderMilestones({ removeLimit }: { removeLimit: boolean }) {
+  const values = getSliderValues(removeLimit);
+  const milestones = removeLimit ? MILESTONES_EXTENDED : MILESTONES_STANDARD;
+  const maxTick = values.length - 1;
+  if (maxTick <= 0) return null;
+  return (
+    <div className="relative h-4 select-none" aria-hidden>
+      {milestones.map((v) => {
+        const t = valueToTick(v, values);
+        const pct = (t / maxTick) * 100;
+        return (
+          <span
+            key={v}
+            className="absolute -translate-x-1/2 text-[10px] text-zinc-400 dark:text-zinc-500"
+            style={{ left: `${pct}%` }}
+          >
+            {v >= 1000 ? `${v / 1000}k` : v}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function TargetGuidance({ value }: { value: number }) {
+  if (value >= 1000) {
+    return (
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        Extreme target. Your future review queue has concerns.
+      </p>
+    );
+  }
+  if (value >= 501) {
+    return (
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        Very ambitious target. This may build up future reviews quickly.
+      </p>
+    );
+  }
+  if (value >= 251) {
+    return (
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        Ambitious target.
+      </p>
+    );
+  }
+  return null;
 }
 
 function familyForDirection(key: DirectionKey): FlashcardFamily {

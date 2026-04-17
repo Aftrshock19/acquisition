@@ -36,6 +36,7 @@ const DEBUG_SETTINGS_KEYS = [
   'show_pos_hint',
   'show_definition_first',
   'hide_translation_sentences',
+  'remove_daily_limit',
 ] as const;
 
 export async function updateUserSettingsAction(

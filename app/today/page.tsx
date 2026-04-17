@@ -197,13 +197,29 @@ export default async function TodayPage() {
               .
             </p>
           </div>
+        ) : dailySession ? (
+          <div className="app-card flex flex-col gap-4 p-8">
+            <h2 className="text-xl font-semibold tracking-tight">
+              Target reached
+            </h2>
+            <p className="text-zinc-600 dark:text-zinc-400">
+              You&apos;ve met your flashcard target for today. Come back tomorrow for your next session, or check your{" "}
+              <Link
+                href="/progress"
+                className="font-medium text-zinc-900 underline dark:text-zinc-100"
+              >
+                progress
+              </Link>
+              .
+            </p>
+          </div>
         ) : (
           <div className="app-card flex flex-col gap-4 p-8">
             <h2 className="text-xl font-semibold tracking-tight">
-              Nothing due today
+              All caught up
             </h2>
             <p className="text-zinc-600 dark:text-zinc-400">
-              No reviews or new words due. Come back tomorrow or check your{" "}
+              No reviews or new words are scheduled right now. Check back tomorrow or view your{" "}
               <Link
                 href="/progress"
                 className="font-medium text-zinc-900 underline dark:text-zinc-100"

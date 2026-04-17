@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { getAppUrl } from "@/lib/url";
 import { useRouter } from "next/navigation";
@@ -130,6 +131,12 @@ export function LoginForm() {
         >
           {submitting === "signIn" ? "…" : "Sign in"}
         </button>
+        <Link
+          href="/auth/forgot-password"
+          className="text-sm text-zinc-500 underline dark:text-zinc-400"
+        >
+          Forgot password?
+        </Link>
       </form>
 
       <form onSubmit={handleSignUp} className="flex flex-col gap-3 border-t border-zinc-200 pt-6 dark:border-zinc-800">

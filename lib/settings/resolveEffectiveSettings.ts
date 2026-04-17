@@ -12,10 +12,11 @@ export function resolveEffectiveSettings(
 ): EffectiveFlashcardSettings {
   const { recommendedDailyLimit, recommendedTypes } = recommended;
 
+  const maxLimit = user.remove_daily_limit ? 9999 : 200;
   const effectiveDailyLimit =
     user.daily_plan_mode === "recommended"
       ? recommendedDailyLimit
-      : clamp(user.manual_daily_card_limit, 10, 200);
+      : clamp(user.manual_daily_card_limit, 1, maxLimit);
 
   const manualTypes: FamilySettings = {
     cloze: user.include_cloze,

@@ -47,7 +47,7 @@ export async function recommendSettings(): Promise<RecommendedSettings> {
     recommendedDailyLimit = 40;
   }
 
-  recommendedDailyLimit = Math.min(200, Math.max(10, recommendedDailyLimit));
+  recommendedDailyLimit = Math.min(200, Math.max(1, recommendedDailyLimit));
 
   const totalReviews = events.length;
   if (totalReviews < 50) {

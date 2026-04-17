@@ -24,8 +24,19 @@ export const createSupabaseServerClient = cache(async function createSupabaseSer
           cookiesToSet.forEach(({ name, value, options }) =>
             cookieStore.set(name, value, options),
           );
-        } catch {
-          // setAll from Server Component; middleware refreshes sessions
+        } catch (err) {
+          // Next.js disallows cookie writes from Server Components — this fires
+          // on every SC render where Supabase tries to refresh a session and is
+          // safe to ignore. Only warn on unexpected errors (e.g. a Route Handler
+          // or Server Action failing to set cookies for a real reason).
+          const msg = err instanceof Error ? err.message : String(err);
+          const isExpectedServerComponentError =
+            msg.includes("Cookies can only be modified") ||
+            msg.includes("Server Action") ||
+            msg.includes("Route Handler");
+          if (!isExpectedServerComponentError) {
+            console.warn("[supabase/server] cookie set failed:", err);
+          }
         }
       },
     },
