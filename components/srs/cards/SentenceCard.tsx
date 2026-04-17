@@ -11,8 +11,7 @@ import { SupportPanel } from "@/components/srs/cards/SupportPanel";
 import { TextAnswerInput } from "@/components/srs/cards/TextAnswerInput";
 import type { UnifiedQueueCard } from "@/components/srs/logic/buildUnifiedQueue";
 
-const SENTENCE_SUPPORT_EXPANDED_STORAGE_KEY =
-  "sentence-card-support-expanded";
+const SENTENCE_SUPPORT_EXPANDED_STORAGE_KEY = "sentence-card-support-expanded";
 
 type SentenceCardProps = {
   card: Extract<UnifiedQueueCard, { cardType: "sentences" }>;
@@ -21,12 +20,10 @@ type SentenceCardProps = {
   submitError: string | null;
   showPosHint?: boolean;
   hideTranslation?: boolean;
-  feedback:
-    | {
-        correct: boolean;
-        expected: string;
-      }
-    | null;
+  feedback: {
+    correct: boolean;
+    expected: string;
+  } | null;
   correctionPlaceholder?: string;
   correctionPlaceholderVisible?: boolean;
   answerRevealed?: boolean;
@@ -58,8 +55,17 @@ export function SentenceCard({
 }: SentenceCardProps) {
   const needsCorrection = feedback?.correct === false && !answerRevealed;
   const showingSuccess = feedback?.correct === true;
-  const tone = showingSuccess ? "success" : needsCorrection ? "error" : "default";
-  const isShowAnswer = !needsCorrection && !showingSuccess && !answerRevealed && !value.trim() && onReveal;
+  const tone = showingSuccess
+    ? "success"
+    : needsCorrection
+      ? "error"
+      : "default";
+  const isShowAnswer =
+    !needsCorrection &&
+    !showingSuccess &&
+    !answerRevealed &&
+    !value.trim() &&
+    onReveal;
   const wordTranslation = card.translation?.trim() || null;
   const englishSentence = card.exampleSentenceEn?.trim() || null;
   const hasSupportPanel = Boolean(wordTranslation || englishSentence);
@@ -79,10 +85,10 @@ export function SentenceCard({
       >
         <SentenceClozePrompt
           sentence={card.sentenceData.sentence}
-          className="mt-2 text-xl font-medium tracking-tight text-zinc-900 dark:text-zinc-100"
+          className="mt-2 text-xl font-medium tracking-tight break-words text-zinc-900 dark:text-zinc-100"
           blankContent={
             answerRevealed && feedback ? (
-              <span className="mx-1 inline-flex min-w-16 items-center justify-center rounded-md border border-zinc-300 bg-zinc-50 px-3 py-1 align-middle text-base font-medium text-zinc-900 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-100">
+              <span className="inline-flex min-w-16 max-w-[20ch] items-center justify-center overflow-hidden rounded-md border border-zinc-300 bg-zinc-50 px-1 py-0.5 align-middle text-xl font-medium tracking-tight text-zinc-900 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-100">
                 {feedback.expected}
               </span>
             ) : (
@@ -96,20 +102,18 @@ export function SentenceCard({
                 readOnly={showingSuccess}
                 disabled={busy}
                 variant="inline"
-                wrapperClassName="mx-1 inline-flex align-baseline"
+                wrapperClassName="inline-flex max-w-[20ch] items-center justify-center overflow-hidden rounded-md px-1 py-0.5 align-middle"
                 inputStyle={{ width: `${inputWidth}ch` }}
               />
             )
           }
-          renderTextPart={
-            (part, index) => (
-              <InteractiveText
-                text={part}
-                tokenKeyPrefix={`sentence-card-${card.id}-${index}`}
-                preserveFocusOnPress
-              />
-            )
-          }
+          renderTextPart={(part, index) => (
+            <InteractiveText
+              text={part}
+              tokenKeyPrefix={`sentence-card-${card.id}-${index}`}
+              preserveFocusOnPress
+            />
+          )}
         />
 
         {showPosHint && card.hint ? (
@@ -152,11 +156,15 @@ export function SentenceCard({
             disabled={busy || (needsCorrection && !value.trim())}
             className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
           >
-            {needsCorrection ? "Continue" : isShowAnswer ? "Show answer" : "Check"}
+            {needsCorrection
+              ? "Try again"
+              : isShowAnswer
+                ? "Show answer"
+                : "Check"}
           </button>
           <p className="text-sm text-zinc-500">
             {needsCorrection
-              ? "Press Enter to continue"
+              ? "Press Enter to try again"
               : isShowAnswer
                 ? "Press Enter to show answer"
                 : "Press Enter to check"}

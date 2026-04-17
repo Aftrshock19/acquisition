@@ -22,7 +22,7 @@ export function FlashcardContainer({
     typeLabel.trim().toLowerCase() !== title.trim().toLowerCase();
 
   return (
-    <section className="relative rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+    <section className="relative min-w-0 rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
       {navigation ? <div className="absolute inset-x-6 top-6">{navigation}</div> : null}
       <div className="flex min-h-9 flex-col items-center justify-center gap-1 px-12 text-center">
         <p className="text-sm uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">

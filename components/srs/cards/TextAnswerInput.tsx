@@ -42,11 +42,11 @@ export function TextAnswerInput({
   const wrapperBaseClassName = variant === "inline" ? "relative" : "relative";
   const inputBaseClassName =
     variant === "inline"
-      ? "min-w-16 rounded-md px-3 py-1 align-baseline text-center text-base text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-1 disabled:opacity-50 dark:text-zinc-100"
+      ? "rounded-md px-0 pb-1 align-baseline text-center text-xl font-medium tracking-tight text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-1 disabled:opacity-50 dark:text-zinc-100"
       : "w-full rounded-lg px-3 py-2 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-1 disabled:opacity-50 dark:text-zinc-100";
   const correctionHintBaseClassName =
     variant === "inline"
-      ? "pointer-events-none absolute inset-0 flex items-center justify-center px-3 text-center text-sm text-zinc-400 transition-opacity duration-300 dark:text-zinc-500"
+      ? "pointer-events-none absolute inset-0 flex items-center justify-center px-3 text-center text-xl font-medium tracking-tight text-zinc-400 transition-opacity duration-300 dark:text-zinc-500"
       : "pointer-events-none absolute inset-y-0 left-0 flex items-center px-3 text-sm text-zinc-400 transition-opacity duration-300 dark:text-zinc-500";
 
   return (
@@ -65,6 +65,7 @@ export function TextAnswerInput({
         placeholder={tone === "error" ? undefined : placeholder}
         aria-invalid={tone === "error"}
         autoComplete={autoComplete}
+        spellCheck={false}
         readOnly={readOnly}
         disabled={disabled}
         style={inputStyle}
@@ -77,9 +78,7 @@ export function TextAnswerInput({
           aria-hidden="true"
           className={`${correctionHintBaseClassName}${
             correctionHintClassName ? ` ${correctionHintClassName}` : ""
-          } ${
-            correctionHintVisible && !value ? "opacity-100" : "opacity-0"
-          }`}
+          } ${correctionHintVisible && !value ? "opacity-100" : "opacity-0"}`}
         >
           {correctionHint}
         </span>
