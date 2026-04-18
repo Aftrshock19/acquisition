@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CefrBandAccordion, CefrBandAccordionItem } from "@/components/CefrBandAccordion";
 import { RecommendedListeningCard } from "@/components/listening/RecommendedListeningCard";
+import { deriveSubstageLabel } from "@/lib/cefr/substageLabel";
 import { getListeningRecommendation, getUserStageIndex, stageIndexToCefrLabel } from "@/lib/listening/recommendation";
 import { getListeningIndexData, type ListeningAsset } from "@/lib/loop/listening";
 import { getSupabaseUser } from "@/lib/supabase/auth";
@@ -391,7 +392,7 @@ function StageRow({ stage, assetProgressMap }: { stage: ListeningStageGroup; ass
           &#9654;
         </span>
         <span className="font-medium text-zinc-900 dark:text-zinc-100">
-          {stage.displayLabel}
+          {deriveSubstageLabel(stage.stageIndex)}
         </span>
         <span className="text-xs text-zinc-500 dark:text-zinc-400">
           {trackCount} tracks

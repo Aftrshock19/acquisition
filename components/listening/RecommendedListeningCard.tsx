@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { deriveSubstageLabel } from "@/lib/cefr/substageLabel";
 import type { ListeningRecommendation } from "@/lib/listening/recommendation";
 
 type Props = {
@@ -27,9 +28,9 @@ export function RecommendedListeningCard({ recommendation }: Props) {
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-        {asset.text?.displayLabel ? (
+        {asset.text?.stageIndex != null ? (
           <span className="rounded-full border border-zinc-200 px-2.5 py-1 dark:border-zinc-800">
-            {asset.text.displayLabel}
+            {deriveSubstageLabel(asset.text.stageIndex)}
           </span>
         ) : null}
         {duration ? (
