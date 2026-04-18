@@ -21,7 +21,7 @@ type ListeningPlayerProps = {
     audioUrl: string;
     transcript: string | null;
     durationSeconds: number | null;
-    text?: { id: string; lang: string; title: string } | null;
+    text?: { id: string; lang: string; title: string; content?: string | null } | null;
   };
   completedForToday: boolean;
   prevAssetId?: string | null;
@@ -195,11 +195,13 @@ export function ListeningPlayer({
     effectiveDuration > 0 ? effectiveDuration * 0.9 : 30;
   const thresholdMet = maxPositionSeconds >= requiredListenSeconds;
   const transcriptBlocks = useMemo(
-    () =>
-      asset.transcript
-        ? toReadingBlocks(asset.transcript).map((block) => tokenize(block))
-        : [],
-    [asset.transcript],
+    () => {
+      const source = asset.transcript ?? asset.text?.content;
+      return source
+        ? toReadingBlocks(source).map((block) => tokenize(block))
+        : [];
+    },
+    [asset.transcript, asset.text?.content],
   );
   const transcriptLang = asset.text?.lang ?? "es";
 
@@ -424,7 +426,7 @@ export function ListeningPlayer({
 
       {/* ── Title ──────────────────────────────────────────── */}
       <h2 className="mt-1 text-lg font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 sm:text-xl">
-        {asset.title}
+        {asset.text?.title ?? asset.title}
       </h2>
 
       {/* ── Transport controls ─────────────────────────────── */}
@@ -599,7 +601,7 @@ export function ListeningPlayer({
       ) : null}
 
       {/* ── Transcript accordion ───────────────────────────── */}
-      {asset.transcript ? (
+      {(asset.transcript ?? asset.text?.content) ? (
         <div className="mt-5 border-t border-zinc-200 pt-4 dark:border-zinc-800">
           <button
             type="button"

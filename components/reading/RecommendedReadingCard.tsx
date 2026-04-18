@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { deriveSubstageLabel } from "@/lib/cefr/substageLabel";
 import type { ReadingRecommendation } from "@/lib/reading/recommendation";
 
 type Props = {
@@ -30,7 +29,7 @@ export function RecommendedReadingCard({ recommendation }: Props) {
 
       <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
         <span className="rounded-full border border-zinc-200 px-2.5 py-1 dark:border-zinc-800">
-          {deriveSubstageLabel(passage.stageIndex)}
+          {passage.displayLabel}
         </span>
         {passage.estimatedMinutes ? (
           <span className="rounded-full border border-zinc-200 px-2.5 py-1 dark:border-zinc-800">

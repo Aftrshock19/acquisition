@@ -3,7 +3,6 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CefrBandAccordion, CefrBandAccordionItem } from "@/components/CefrBandAccordion";
 import { RecommendedReadingCard } from "@/components/reading/RecommendedReadingCard";
-import { deriveSubstageLabel } from "@/lib/cefr/substageLabel";
 import { getUserStageIndex, stageIndexToCefrLabel } from "@/lib/listening/recommendation";
 import { getPassageIndex } from "@/lib/reading/passages";
 import { getReadingRecommendation } from "@/lib/reading/recommendation";
@@ -302,7 +301,7 @@ function StageRow({ stage }: { stage: ReadingStageGroup }) {
           &#9654;
         </span>
         <span className="font-medium text-zinc-900 dark:text-zinc-100">
-          {deriveSubstageLabel(stage.stageIndex)}
+          {stage.displayLabel}
         </span>
         <span className="text-xs text-zinc-500 dark:text-zinc-400">
           {passageCount} passages

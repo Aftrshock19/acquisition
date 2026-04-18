@@ -10,6 +10,7 @@ const UUID_RE =
 type ListeningTextRow = {
   id: string;
   title: string;
+  content: string;
   lang: string;
   stage: string;
   stage_index: number | null;
@@ -48,6 +49,7 @@ export type ListeningAsset = {
   text: {
     id: string;
     title: string;
+    content: string;
     lang: string;
     stage: string;
     stageIndex: number | null;
@@ -74,6 +76,7 @@ const ASSET_SELECT = `
   texts (
     id,
     title,
+    content,
     lang,
     stage,
     stage_index,
@@ -172,6 +175,7 @@ function toListeningAsset(row: ListeningAssetRow): ListeningAsset {
       ? {
           id: text.id,
           title: text.title,
+          content: text.content,
           lang: text.lang,
           stage: text.stage,
           stageIndex: text.stage_index ?? null,

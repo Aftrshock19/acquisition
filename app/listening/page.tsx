@@ -3,7 +3,6 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CefrBandAccordion, CefrBandAccordionItem } from "@/components/CefrBandAccordion";
 import { RecommendedListeningCard } from "@/components/listening/RecommendedListeningCard";
-import { deriveSubstageLabel } from "@/lib/cefr/substageLabel";
 import { getListeningRecommendation, getUserStageIndex, stageIndexToCefrLabel } from "@/lib/listening/recommendation";
 import { getListeningIndexData, type ListeningAsset } from "@/lib/loop/listening";
 import { getSupabaseUser } from "@/lib/supabase/auth";
@@ -392,7 +391,7 @@ function StageRow({ stage, assetProgressMap }: { stage: ListeningStageGroup; ass
           &#9654;
         </span>
         <span className="font-medium text-zinc-900 dark:text-zinc-100">
-          {deriveSubstageLabel(stage.stageIndex)}
+          {stage.displayLabel}
         </span>
         <span className="text-xs text-zinc-500 dark:text-zinc-400">
           {trackCount} tracks
@@ -426,7 +425,7 @@ function StageRow({ stage, assetProgressMap }: { stage: ListeningStageGroup; ass
                       className={`flex items-center justify-between rounded-md border px-3 py-2 text-sm transition ${getAssetStateClasses(asset.id, assetProgressMap)}`}
                     >
                       <span className="truncate text-zinc-900 dark:text-zinc-100">
-                        {asset.title}
+                        {asset.text?.title ?? asset.title}
                       </span>
                       <span className="ml-2 flex shrink-0 items-center gap-2">
                         {statusLabel ? (

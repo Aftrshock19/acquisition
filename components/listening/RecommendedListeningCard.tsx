@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { deriveSubstageLabel } from "@/lib/cefr/substageLabel";
 import type { ListeningRecommendation } from "@/lib/listening/recommendation";
 
 type Props = {
@@ -23,14 +22,14 @@ export function RecommendedListeningCard({ recommendation }: Props) {
           {isContinue ? "Continue listening" : "Recommended for you"}
         </p>
         <h2 className="text-lg font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
-          {asset.title}
+          {asset.text?.title ?? asset.title}
         </h2>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-        {asset.text?.stageIndex != null ? (
+        {asset.text?.displayLabel ? (
           <span className="rounded-full border border-zinc-200 px-2.5 py-1 dark:border-zinc-800">
-            {deriveSubstageLabel(asset.text.stageIndex)}
+            {asset.text.displayLabel}
           </span>
         ) : null}
         {duration ? (

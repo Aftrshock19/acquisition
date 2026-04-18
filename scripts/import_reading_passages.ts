@@ -177,28 +177,93 @@ async function main() {
   );
 
   // ── Phase 2: Delete old reading passages ────────────────
-  // reading_questions cascade-deletes via FK; reading_progress,
-  // comprehension_responses also cascade; daily_sessions.reading_text_id
-  // gets SET NULL. text_collections are left intact and reused.
+  // SCOPED: only reading texts (stage IS NOT NULL AND stage NOT ILIKE 'listening_%').
+  // Cascades: reading_questions, reading_progress, reading_question_attempts DROP.
+  // daily_sessions.reading_text_id → SET NULL. audio.text_id (listening only) untouched.
 
-  const { data: oldPassages, error: countErr } = await supabase
+  const { count: preReadingCount, error: countErr } = await supabase
     .from("texts")
     .select("id", { count: "exact", head: true })
-    .not("stage", "is", null);
+    .not("stage", "is", null)
+    .not("stage", "ilike", "listening_%");
 
-  const oldCount = (countErr ? 0 : (oldPassages as any)?.length) || 0;
+  if (countErr) {
+    console.error("Error counting reading texts:", countErr);
+    process.exit(1);
+  }
 
-  const { error: delErr } = await supabase
+  const { count: preListeningCount, error: lCountErr } = await supabase
     .from("texts")
-    .delete()
-    .not("stage", "is", null);
+    .select("id", { count: "exact", head: true })
+    .ilike("stage", "listening_%");
+
+  if (lCountErr) {
+    console.error("Error counting listening texts:", lCountErr);
+    process.exit(1);
+  }
+
+  const { count: preAudioCount, error: aCountErr } = await supabase
+    .from("audio")
+    .select("id", { count: "exact", head: true })
+    .not("text_id", "is", null);
+
+  if (aCountErr) {
+    console.error("Error counting audio rows:", aCountErr);
+    process.exit(1);
+  }
+
+  console.log(
+    `Pre-delete counts: reading=${preReadingCount}, listening=${preListeningCount}, audio(text_id NOT NULL)=${preAudioCount}`,
+  );
+
+  if (preReadingCount == null || preReadingCount < 800 || preReadingCount > 900) {
+    console.error(
+      `HALT: pre-delete reading count ${preReadingCount} is outside [800, 900].`,
+    );
+    process.exit(1);
+  }
+
+  const { error: delErr, count: deletedCount } = await supabase
+    .from("texts")
+    .delete({ count: "exact" })
+    .not("stage", "is", null)
+    .not("stage", "ilike", "listening_%");
 
   if (delErr) {
     console.error("Error deleting old reading passages:", delErr);
     process.exit(1);
   }
 
-  console.log(`Deleted old reading passages from texts table.`);
+  console.log(`Deleted ${deletedCount} reading rows.`);
+
+  // ── Post-delete invariants ──
+  const { count: postListeningCount } = await supabase
+    .from("texts")
+    .select("id", { count: "exact", head: true })
+    .ilike("stage", "listening_%");
+
+  const { count: postAudioCount } = await supabase
+    .from("audio")
+    .select("id", { count: "exact", head: true })
+    .not("text_id", "is", null);
+
+  console.log(
+    `Post-delete counts: listening=${postListeningCount}, audio(text_id NOT NULL)=${postAudioCount}`,
+  );
+
+  if (postListeningCount !== 839) {
+    console.error(
+      `HALT: listening count changed from 839 → ${postListeningCount}.`,
+    );
+    process.exit(1);
+  }
+
+  if (postAudioCount !== preAudioCount) {
+    console.error(
+      `HALT: audio(text_id NOT NULL) changed from ${preAudioCount} → ${postAudioCount}.`,
+    );
+    process.exit(1);
+  }
 
   // ── Phase 3: Ensure text_collections per stage ───────────
 
@@ -333,6 +398,69 @@ async function main() {
   console.log(
     `Done. Imported ${importedTexts} passages, ${importedQuestions} questions. Errors: ${errors}.`,
   );
+
+  // ── Final verification ──
+  const expectedCount = parsed.length;
+  if (importedTexts !== expectedCount) {
+    console.error(
+      `HALT: imported ${importedTexts} !== expected ${expectedCount}. Errors: ${errors}.`,
+    );
+    process.exit(1);
+  }
+
+  const { count: finalReadingCount } = await supabase
+    .from("texts")
+    .select("id", { count: "exact", head: true })
+    .not("stage", "is", null)
+    .not("stage", "ilike", "listening_%");
+  console.log(`Final reading row count in DB: ${finalReadingCount}`);
+
+  const { data: nullChecks } = await supabase
+    .from("texts")
+    .select("id, stage, display_label, stage_index")
+    .not("stage", "ilike", "listening_%")
+    .not("stage", "is", null)
+    .or("display_label.is.null,stage_index.is.null");
+
+  if (nullChecks && nullChecks.length > 0) {
+    console.error(
+      `HALT: ${nullChecks.length} reading rows missing display_label or stage_index:`,
+      nullChecks.slice(0, 5),
+    );
+    process.exit(1);
+  }
+
+  // Sample 5 random reading rows with their question counts
+  const { data: sample } = await supabase
+    .from("texts")
+    .select("id, stage, stage_index, display_label, title, passage_mode")
+    .not("stage", "ilike", "listening_%")
+    .not("stage", "is", null)
+    .limit(500);
+
+  if (sample && sample.length > 0) {
+    const picked: typeof sample = [];
+    const pool = [...sample];
+    for (let i = 0; i < 5 && pool.length > 0; i++) {
+      const idx = Math.floor(Math.random() * pool.length);
+      picked.push(pool.splice(idx, 1)[0]!);
+    }
+    console.log("\nSample 5 random reading rows:");
+    for (const row of picked) {
+      const { count: qCount } = await supabase
+        .from("reading_questions")
+        .select("id", { count: "exact", head: true })
+        .eq("text_id", row.id);
+      console.log(
+        `  stage=${row.stage} stage_index=${row.stage_index} display_label=${row.display_label} mode=${row.passage_mode} questions=${qCount} title="${row.title}"`,
+      );
+    }
+
+    const distinctLabels = new Set(picked.map((r) => r.display_label));
+    console.log(
+      `\nDistinct display_labels in sample: ${distinctLabels.size} (${Array.from(distinctLabels).join(", ")})`,
+    );
+  }
 }
 
 main().catch((err) => {
