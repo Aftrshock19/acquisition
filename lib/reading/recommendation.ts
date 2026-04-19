@@ -47,6 +47,16 @@ export function getUserStageIndex(settings: UserSettingsRow): number {
 
 // ── Helpers ─────────────────────────────────────────────────
 
+const MIN_STAGE = 0;
+const MAX_STAGE = 29;
+
+const MODE_DURATION_BONUS: Record<string, number> = {
+  short: 3,
+  medium: 1,
+  long: -1,
+  very_long: -3,
+};
+
 function stageIndexToCefrLabel(stageIndex: number): string {
   if (stageIndex <= 5) return "A1";
   if (stageIndex <= 10) return "A2";
@@ -56,106 +66,68 @@ function stageIndexToCefrLabel(stageIndex: number): string {
   return "C2";
 }
 
-const MODE_DURATION_BONUS: Record<string, number> = {
-  short: 3,
-  medium: 1,
-  long: -1,
-  very_long: -3,
-};
-
-// ── Scoring ─────────────────────────────────────────────────
-
-export type ScoredPassage = {
-  passage: ReadingPassageSummary;
-  score: number;
-  reason: string;
-};
-
-/**
- * Score a reading passage for recommendation.
- *
- * Pure scoring — does NOT consider exclusion. Callers must filter
- * started/completed passages out before calling this.
- */
-export function scorePassage(
-  passage: ReadingPassageSummary,
-  userStageIndex: number,
-): ScoredPassage {
-  const levelDelta = passage.stageIndex - userStageIndex;
-  const absDelta = Math.abs(levelDelta);
-
-  let score = Math.max(0, 20 - absDelta * 3);
-
-  // Bonus for at-level or slightly below (comprehensible input sweet spot)
-  if (levelDelta >= -2 && levelDelta <= 0) {
-    score += 5;
-  } else if (levelDelta === 1) {
-    score += 2;
+export function buildTryStageOrder(userStage: number): number[] {
+  const order: number[] = [
+    userStage,
+    userStage - 1,
+    userStage + 1,
+    userStage - 2,
+    userStage + 2,
+  ];
+  for (let s = userStage + 3; s <= MAX_STAGE; s++) {
+    order.push(s);
   }
+  return order;
+}
 
-  // Penalty for too hard
-  if (levelDelta > 3) {
-    score -= (levelDelta - 3) * 4;
-  }
+function withinBucketScore(passage: ReadingPassageSummary): number {
+  const modeBonus = MODE_DURATION_BONUS[passage.mode] ?? 0;
+  return modeBonus - passage.passageNumber * 0.01;
+}
 
-  // Mode bonus
-  score += MODE_DURATION_BONUS[passage.mode] ?? 0;
-
-  // Tiebreaker: prefer lower passage_number
-  score -= passage.passageNumber * 0.01;
-
-  // Build reason
-  const cefrLabel = stageIndexToCefrLabel(passage.stageIndex);
-  const parts = [cefrLabel];
+function buildReason(passage: ReadingPassageSummary): string {
+  const parts = [stageIndexToCefrLabel(passage.stageIndex)];
   if (passage.estimatedMinutes) parts.push(`${passage.estimatedMinutes} min`);
   if (passage.mode === "short") parts.push("short passage");
   else if (passage.mode === "medium") parts.push("medium passage");
-
-  return { passage, score, reason: parts.join(" · ") };
+  return parts.join(" · ");
 }
 
 /**
- * Pick the single best reading recommendation for a user.
+ * Pick the single best fresh reading recommendation for a user.
  *
- * @param inProgressPassage - The most recently updated in-progress passage (from reading_progress)
- * @param allPassages - All available reading passages
- * @param settings - User settings for level estimation
- * @param excludedTextIds - Text IDs the user has started or completed (from reading_progress).
- *        These are hard-excluded before scoring — they can never appear in Recommended.
+ * Walks stage buckets outward from the user's stage:
+ *   [user, user-1, user+1, user-2, user+2, user+3, user+4, ... up to 29]
+ * Returns the first bucket with a non-excluded candidate; within a bucket
+ * picks by mode bonus with passage-number tiebreak.
  */
 export function getReadingRecommendation(
-  inProgressPassage: ReadingPassageSummary | null,
   allPassages: ReadingPassageSummary[],
   settings: UserSettingsRow,
   excludedTextIds: Set<string>,
 ): ReadingRecommendation | null {
-  // Priority 1: Resume in-progress reading
-  if (inProgressPassage) {
+  const userStage = getUserStageIndex(settings);
+  const tryStages = buildTryStageOrder(userStage);
+
+  for (const stage of tryStages) {
+    if (stage < MIN_STAGE || stage > MAX_STAGE) continue;
+
+    const candidates = allPassages.filter(
+      (p) => p.stageIndex === stage && !excludedTextIds.has(p.id),
+    );
+
+    if (candidates.length === 0) continue;
+
+    const best = candidates.reduce((a, b) =>
+      withinBucketScore(a) >= withinBucketScore(b) ? a : b,
+    );
+
     return {
-      kind: "continue",
-      passage: inProgressPassage,
-      reason: "Continue where you left off",
+      kind: "recommended",
+      passage: best,
+      reason: buildReason(best),
     };
   }
 
-  // Priority 2: Recommend a new passage based on level
-  // Hard-exclude all passages the user has any progress record for
-  const freshPassages = allPassages.filter((p) => !excludedTextIds.has(p.id));
-
-  if (freshPassages.length === 0) return null;
-
-  const userStage = getUserStageIndex(settings);
-
-  const scored = freshPassages
-    .map((p) => scorePassage(p, userStage))
-    .sort((a, b) => b.score - a.score);
-
-  const best = scored[0];
-  if (!best) return null;
-
-  return {
-    kind: "recommended",
-    passage: best.passage,
-    reason: best.reason,
-  };
+  return null;
 }

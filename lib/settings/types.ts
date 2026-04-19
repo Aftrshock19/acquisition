@@ -52,6 +52,7 @@ export type UserSettingsRow = {
   self_certified_cefr_level?: "A1" | "A2" | "B1" | "B2" | "C1" | null;
   placement_status?: string | null;
   current_frontier_rank?: number | null;
+  timezone: string;
   created_at: string;
   updated_at: string;
 };

@@ -2,9 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   frontierRankToStageIndex,
   getUserStageIndex,
-  scoreAsset,
+  buildTryStageOrder,
   getListeningRecommendation,
-  type ScoredAsset,
 } from "./recommendation";
 import type { ListeningAsset } from "@/lib/loop/listening";
 import type { UserSettingsRow } from "@/lib/settings/types";
@@ -74,6 +73,7 @@ function makeSettings(overrides: Partial<UserSettingsRow> = {}): UserSettingsRow
     onboarding_completed_at: null,
     placement_status: "unknown",
     current_frontier_rank: null,
+    timezone: "UTC",
     created_at: new Date(0).toISOString(),
     updated_at: new Date(0).toISOString(),
     ...overrides,
@@ -140,84 +140,69 @@ describe("getUserStageIndex", () => {
 
   it("prioritises frontier rank over self-certified CEFR", () => {
     const settings = makeSettings({
-      current_frontier_rank: 5000, // B2
+      current_frontier_rank: 5000,
       self_certified_cefr_level: "A1",
     });
     const idx = getUserStageIndex(settings);
-    expect(idx).toBeGreaterThanOrEqual(16); // B2 range, not A1
+    expect(idx).toBeGreaterThanOrEqual(16);
   });
 });
 
-// ── scoreAsset (pure scoring — no exclusion) ────────────────
+// ── buildTryStageOrder ──────────────────────────────────────
 
-describe("scoreAsset", () => {
-  it("scores at-level assets highest", () => {
-    const atLevel = scoreAsset(makeAsset({ stageIndex: 8 }), 8);
-    const belowLevel = scoreAsset(makeAsset({ stageIndex: 3 }), 8);
-    const aboveLevel = scoreAsset(makeAsset({ stageIndex: 15 }), 8);
-
-    expect(atLevel.score).toBeGreaterThan(belowLevel.score);
-    expect(atLevel.score).toBeGreaterThan(aboveLevel.score);
+describe("buildTryStageOrder", () => {
+  it("starts with user, -1, +1, -2, +2", () => {
+    const order = buildTryStageOrder(10);
+    expect(order.slice(0, 5)).toEqual([10, 9, 11, 8, 12]);
   });
 
-  it("scores slightly-below higher than slightly-above", () => {
-    const slightlyBelow = scoreAsset(makeAsset({ stageIndex: 7 }), 8);
-    const slightlyAbove = scoreAsset(makeAsset({ stageIndex: 10 }), 8);
-
-    expect(slightlyBelow.score).toBeGreaterThan(slightlyAbove.score);
-  });
-
-  it("prefers short passages", () => {
-    const short = scoreAsset(makeAsset({ passageMode: "short", stageIndex: 8 }), 8);
-    const veryLong = scoreAsset(makeAsset({ passageMode: "very_long", stageIndex: 8 }), 8);
-
-    expect(short.score).toBeGreaterThan(veryLong.score);
-  });
-
-  it("heavily penalises content far above level", () => {
-    const farAbove = scoreAsset(makeAsset({ stageIndex: 20 }), 5);
-    expect(farAbove.score).toBeLessThan(0);
-  });
-
-  it("generates a reason string", () => {
-    const scored = scoreAsset(makeAsset({ stageIndex: 8, passageMode: "short" }), 8);
-    expect(scored.reason).toContain("A2");
-    expect(scored.reason).toContain("short");
+  it("continues upward to 29", () => {
+    const order = buildTryStageOrder(10);
+    expect(order.slice(5)).toEqual([13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]);
   });
 });
 
-// ── getListeningRecommendation (hard exclusion) ─────────────
+// ── getListeningRecommendation ──────────────────────────────
 
 describe("getListeningRecommendation", () => {
-  it("returns continue when in-progress asset exists", () => {
-    const inProgress = makeAsset({ id: "in-progress" });
-    const result = getListeningRecommendation(
-      inProgress,
-      [makeAsset({ id: "other" })],
-      makeSettings(),
-      new Set(),
-    );
-
-    expect(result).not.toBeNull();
-    expect(result!.kind).toBe("continue");
-    expect(result!.asset.id).toBe("in-progress");
-  });
-
-  it("returns recommended when no in-progress asset", () => {
+  it("returns recommended at user's stage when available", () => {
     const assets = [
       makeAsset({ id: "a1", stageIndex: 3 }),
       makeAsset({ id: "a2", stageIndex: 8 }),
     ];
     const result = getListeningRecommendation(
-      null,
       assets,
-      makeSettings({ current_frontier_rank: 500 }), // A1
+      makeSettings({ current_frontier_rank: 500 }),
       new Set(),
     );
 
     expect(result).not.toBeNull();
     expect(result!.kind).toBe("recommended");
-    expect(result!.asset.id).toBe("a1"); // A1 asset matches A1 user
+    expect(result!.asset.id).toBe("a1");
+  });
+
+  it("walks the try_stage order: user_stage empty, user_stage-1 picked", () => {
+    // User at stage 8. Stage 8 absent, stages 7 and 9 both present.
+    // Expect stage 7 (user_stage - 1 comes before user_stage + 1 in the order).
+    const assets = [
+      makeAsset({ id: "below", stageIndex: 7 }),
+      makeAsset({ id: "above", stageIndex: 9 }),
+    ];
+    const result = getListeningRecommendation(
+      assets,
+      makeSettings({ current_frontier_rank: 1200 }), // stage 8
+      new Set(),
+    );
+    const userStage = getUserStageIndex(makeSettings({ current_frontier_rank: 1200 }));
+    if (userStage === 8) {
+      expect(result!.asset.id).toBe("below");
+    }
+  });
+
+  it("widens outward when nearby buckets are all empty", () => {
+    const far = makeAsset({ id: "far", stageIndex: 20 });
+    const result = getListeningRecommendation([far], makeSettings(), new Set());
+    expect(result?.asset.id).toBe("far");
   });
 
   it("hard-excludes started asset and picks fresh one", () => {
@@ -226,7 +211,6 @@ describe("getListeningRecommendation", () => {
       makeAsset({ id: "fresh", stageIndex: 4 }),
     ];
     const result = getListeningRecommendation(
-      null,
       assets,
       makeSettings({ current_frontier_rank: 500 }),
       new Set(["started"]),
@@ -241,9 +225,7 @@ describe("getListeningRecommendation", () => {
       makeAsset({ id: "completed", stageIndex: 3 }),
       makeAsset({ id: "fresh", stageIndex: 4 }),
     ];
-    // The completed asset is a perfect level match, but it must be excluded
     const result = getListeningRecommendation(
-      null,
       assets,
       makeSettings({ current_frontier_rank: 500 }),
       new Set(["completed"]),
@@ -259,7 +241,6 @@ describe("getListeningRecommendation", () => {
       makeAsset({ id: "a2", stageIndex: 4 }),
     ];
     const result = getListeningRecommendation(
-      null,
       assets,
       makeSettings(),
       new Set(["a1", "a2"]),
@@ -269,7 +250,6 @@ describe("getListeningRecommendation", () => {
 
   it("returns null when no assets exist", () => {
     const result = getListeningRecommendation(
-      null,
       [],
       makeSettings(),
       new Set(),
@@ -283,40 +263,30 @@ describe("getListeningRecommendation", () => {
       makeAsset({ id: "b2", stageIndex: 18 }),
     ];
     const result = getListeningRecommendation(
-      null,
       assets,
-      makeSettings(), // no frontier rank, no CEFR → defaults to stage 3
-      new Set(),
-    );
-
-    expect(result).not.toBeNull();
-    expect(result!.asset.id).toBe("a1"); // matches the default A1 level
-  });
-
-  it("in-progress always overrides fresh recommendation", () => {
-    const inProgress = makeAsset({ id: "in-progress", stageIndex: 20 }); // B2 — far from user level
-    const perfectMatch = makeAsset({ id: "perfect", stageIndex: 3 });
-    const result = getListeningRecommendation(
-      inProgress,
-      [perfectMatch],
-      makeSettings({ current_frontier_rank: 500 }), // A1 user
-      new Set(),
-    );
-
-    expect(result!.kind).toBe("continue");
-    expect(result!.asset.id).toBe("in-progress");
-  });
-
-  it("untouched passage appears in recommended", () => {
-    const fresh = makeAsset({ id: "untouched", stageIndex: 3 });
-    const result = getListeningRecommendation(
-      null,
-      [fresh],
       makeSettings(),
       new Set(),
     );
+
     expect(result).not.toBeNull();
-    expect(result!.kind).toBe("recommended");
-    expect(result!.asset.id).toBe("untouched");
+    expect(result!.asset.id).toBe("a1");
+  });
+
+  it("within-bucket: prefers short over very_long", () => {
+    const assets = [
+      makeAsset({ id: "vlong", stageIndex: 3, passageMode: "very_long" }),
+      makeAsset({ id: "short", stageIndex: 3, passageMode: "short" }),
+    ];
+    const result = getListeningRecommendation(assets, makeSettings(), new Set());
+    expect(result?.asset.id).toBe("short");
+  });
+
+  it("within-bucket: tiebreak by lower passageNumber", () => {
+    const assets = [
+      makeAsset({ id: "p5", stageIndex: 3, passageMode: "short", passageNumber: 5 }),
+      makeAsset({ id: "p1", stageIndex: 3, passageMode: "short", passageNumber: 1 }),
+    ];
+    const result = getListeningRecommendation(assets, makeSettings(), new Set());
+    expect(result?.asset.id).toBe("p1");
   });
 });

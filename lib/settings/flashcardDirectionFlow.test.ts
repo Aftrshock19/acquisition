@@ -262,6 +262,7 @@ function makeSettings(overrides: Partial<UserSettingsRow> = {}): UserSettingsRow
     scheduler_variant: "baseline",
     has_seen_intro: false,
     onboarding_completed_at: null,
+    timezone: "UTC",
     created_at: new Date(0).toISOString(),
     updated_at: new Date(0).toISOString(),
     ...overrides,

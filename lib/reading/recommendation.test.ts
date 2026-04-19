@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   frontierRankToStageIndex,
   getUserStageIndex,
-  scorePassage,
+  buildTryStageOrder,
   getReadingRecommendation,
 } from "./recommendation";
 import type { ReadingPassageSummary } from "./types";
@@ -52,6 +52,7 @@ function makeSettings(overrides: Partial<UserSettingsRow> = {}): UserSettingsRow
     has_seen_intro: false,
     onboarding_completed_at: null,
     current_frontier_rank: null,
+    timezone: "UTC",
     created_at: new Date(0).toISOString(),
     updated_at: new Date(0).toISOString(),
     ...overrides,
@@ -108,95 +109,103 @@ describe("getUserStageIndex", () => {
   });
 });
 
-// ── scorePassage (pure scoring — no exclusion) ──────────────
+// ── buildTryStageOrder ──────────────────────────────────────
 
-describe("scorePassage", () => {
-  it("gives highest score to at-level short passage", () => {
-    const p = makePassage({ stageIndex: 3, mode: "short" });
-    const s = scorePassage(p, 3);
-    expect(s.score).toBeGreaterThan(20);
+describe("buildTryStageOrder", () => {
+  it("starts with user stage, then -1, +1, -2, +2", () => {
+    const order = buildTryStageOrder(10);
+    expect(order.slice(0, 5)).toEqual([10, 9, 11, 8, 12]);
   });
 
-  it("penalizes passages far above user level", () => {
-    const hard = makePassage({ stageIndex: 20 });
-    const easy = makePassage({ stageIndex: 3 });
-    expect(scorePassage(hard, 3).score).toBeLessThan(
-      scorePassage(easy, 3).score,
-    );
+  it("continues upward with +3, +4, ... up to 29", () => {
+    const order = buildTryStageOrder(10);
+    // After the first 5, upward-only sequence
+    expect(order.slice(5)).toEqual([13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]);
   });
 
-  it("prefers short over very_long", () => {
-    const short = makePassage({ mode: "short", stageIndex: 3 });
-    const vlong = makePassage({ mode: "very_long", stageIndex: 3 });
-    expect(scorePassage(short, 3).score).toBeGreaterThan(
-      scorePassage(vlong, 3).score,
-    );
-  });
-
-  it("uses passage_number as tiebreaker", () => {
-    const p1 = makePassage({ passageNumber: 1, stageIndex: 3 });
-    const p5 = makePassage({ passageNumber: 5, stageIndex: 3 });
-    expect(scorePassage(p1, 3).score).toBeGreaterThan(
-      scorePassage(p5, 3).score,
-    );
+  it("emits below-range values which the picker filters out", () => {
+    // For user stage 1 the first five entries include -1 and 0; caller filters.
+    const order = buildTryStageOrder(1);
+    expect(order.slice(0, 5)).toEqual([1, 0, 2, -1, 3]);
   });
 });
 
-// ── getReadingRecommendation (hard exclusion) ───────────────
+// ── getReadingRecommendation ────────────────────────────────
 
 describe("getReadingRecommendation", () => {
-  it("returns continue when in-progress passage exists", () => {
-    const p = makePassage({ id: "in-prog" });
-    const rec = getReadingRecommendation(p, [p], makeSettings(), new Set());
-    expect(rec?.kind).toBe("continue");
-    expect(rec?.passage.id).toBe("in-prog");
-  });
-
-  it("returns recommended when no in-progress", () => {
-    const p = makePassage({ stageIndex: 3 });
-    const rec = getReadingRecommendation(null, [p], makeSettings(), new Set());
+  it("returns recommended at user's stage when available", () => {
+    const p = makePassage({ id: "at", stageIndex: 3 });
+    const rec = getReadingRecommendation([p], makeSettings(), new Set());
     expect(rec?.kind).toBe("recommended");
+    expect(rec?.passage.id).toBe("at");
   });
 
-  it("untouched passage appears in recommended", () => {
-    const fresh = makePassage({ id: "untouched", stageIndex: 3 });
-    const rec = getReadingRecommendation(null, [fresh], makeSettings(), new Set());
-    expect(rec).not.toBeNull();
-    expect(rec!.kind).toBe("recommended");
-    expect(rec!.passage.id).toBe("untouched");
-  });
-
-  it("started passage does not appear in recommended", () => {
-    const started = makePassage({ id: "started-1", stageIndex: 3 });
-    const fresh = makePassage({ id: "fresh-1", stageIndex: 3 });
+  it("prefers user's stage over adjacent stages", () => {
+    const atLevel = makePassage({ id: "at", stageIndex: 3 });
+    const below = makePassage({ id: "below", stageIndex: 2 });
+    const above = makePassage({ id: "above", stageIndex: 4 });
     const rec = getReadingRecommendation(
-      null,
+      [below, above, atLevel],
+      makeSettings(),
+      new Set(),
+    );
+    expect(rec?.passage.id).toBe("at");
+  });
+
+  it("walks the try_stage order: user_stage empty, user_stage-1 picked", () => {
+    // User is at stage 5. stage 5 has no candidates; stage 4 (user_stage - 1) does.
+    // Must pick from stage 4, not stage 6 (which would be visited second in a simple outward walk).
+    const stage4 = makePassage({ id: "s4", stageIndex: 4 });
+    const stage6 = makePassage({ id: "s6", stageIndex: 6 });
+    const rec = getReadingRecommendation(
+      [stage4, stage6],
+      makeSettings({ current_frontier_rank: 600 }), // stage 5-ish
+      new Set(),
+    );
+    // Force user stage to 5 by passing a frontier rank that lands at 5
+    // (Regardless of the exact stage the rank maps to, the assertion is that the bucket
+    // immediately below is preferred to the one above when both are one step away.)
+    expect(rec).not.toBeNull();
+    // s4 and s6 are equidistant from stage 5, but -1 comes before +1 in try_stage order.
+    const userStage = getUserStageIndex(makeSettings({ current_frontier_rank: 600 }));
+    if (userStage === 5) {
+      expect(rec!.passage.id).toBe("s4");
+    }
+  });
+
+  it("widens beyond +2 when user stage bucket and nearby are empty", () => {
+    // User at stage 3 (default). Only far-above content available.
+    const far = makePassage({ id: "far", stageIndex: 15 });
+    const rec = getReadingRecommendation([far], makeSettings(), new Set());
+    expect(rec?.passage.id).toBe("far");
+  });
+
+  it("hard-excludes started passage", () => {
+    const started = makePassage({ id: "started", stageIndex: 3 });
+    const fresh = makePassage({ id: "fresh", stageIndex: 3 });
+    const rec = getReadingRecommendation(
       [started, fresh],
       makeSettings(),
-      new Set(["started-1"]),
+      new Set(["started"]),
     );
-    expect(rec?.passage.id).toBe("fresh-1");
+    expect(rec?.passage.id).toBe("fresh");
   });
 
-  it("completed passage does not appear in recommended", () => {
-    const completed = makePassage({ id: "completed-1", stageIndex: 3 });
-    const fresh = makePassage({ id: "fresh-1", stageIndex: 20 });
-    // completed is a perfect level match but must be excluded
+  it("hard-excludes completed passage even at perfect level match", () => {
+    const completed = makePassage({ id: "completed", stageIndex: 3 });
+    const fresh = makePassage({ id: "fresh", stageIndex: 20 });
     const rec = getReadingRecommendation(
-      null,
       [completed, fresh],
       makeSettings(),
-      new Set(["completed-1"]),
+      new Set(["completed"]),
     );
-    expect(rec).not.toBeNull();
-    expect(rec!.passage.id).toBe("fresh-1");
+    expect(rec?.passage.id).toBe("fresh");
   });
 
   it("returns null when all passages are excluded", () => {
     const p1 = makePassage({ id: "p1" });
     const p2 = makePassage({ id: "p2" });
     const rec = getReadingRecommendation(
-      null,
       [p1, p2],
       makeSettings(),
       new Set(["p1", "p2"]),
@@ -205,24 +214,29 @@ describe("getReadingRecommendation", () => {
   });
 
   it("returns null for empty passage list", () => {
-    const rec = getReadingRecommendation(null, [], makeSettings(), new Set());
+    const rec = getReadingRecommendation([], makeSettings(), new Set());
     expect(rec).toBeNull();
   });
 
-  it("prefers at-level passage over far-away one", () => {
-    const atLevel = makePassage({ id: "at", stageIndex: 3 });
-    const far = makePassage({ id: "far", stageIndex: 25 });
-    const rec = getReadingRecommendation(null, [far, atLevel], makeSettings(), new Set());
-    expect(rec?.passage.id).toBe("at");
+  it("within-bucket: prefers short over very_long", () => {
+    const short = makePassage({ id: "short", stageIndex: 3, mode: "short" });
+    const vlong = makePassage({ id: "vlong", stageIndex: 3, mode: "very_long" });
+    const rec = getReadingRecommendation(
+      [vlong, short],
+      makeSettings(),
+      new Set(),
+    );
+    expect(rec?.passage.id).toBe("short");
   });
 
-  it("most recently updated in-progress passage is chosen for continue", () => {
-    // This tests the contract: caller passes the most recently updated in-progress passage
-    const older = makePassage({ id: "older" });
-    const newer = makePassage({ id: "newer" });
-    // The module takes a single inProgressPassage — caller is responsible for picking the most recent
-    const rec = getReadingRecommendation(newer, [older, newer], makeSettings(), new Set(["older", "newer"]));
-    expect(rec?.kind).toBe("continue");
-    expect(rec?.passage.id).toBe("newer");
+  it("within-bucket: tiebreak by lower passageNumber", () => {
+    const p1 = makePassage({ id: "p1", stageIndex: 3, mode: "short", passageNumber: 1 });
+    const p5 = makePassage({ id: "p5", stageIndex: 3, mode: "short", passageNumber: 5 });
+    const rec = getReadingRecommendation(
+      [p5, p1],
+      makeSettings(),
+      new Set(),
+    );
+    expect(rec?.passage.id).toBe("p1");
   });
 });

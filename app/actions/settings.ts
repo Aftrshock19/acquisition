@@ -196,3 +196,30 @@ function pickDebugSettings(settings: Partial<UserSettingsRow> | null | undefined
       .map((key) => [key, settings[key]]),
   );
 }
+
+export type UpdateTimezoneResult = { ok: true } | { ok: false; error: string };
+
+const TIMEZONE_PATTERN = /^[A-Za-z]+(?:\/[A-Za-z_+\-]+){1,2}$|^UTC$/;
+
+export async function updateUserTimezoneIfChangedAction(
+  tz: string,
+): Promise<UpdateTimezoneResult> {
+  if (typeof tz !== 'string' || tz.length === 0 || !TIMEZONE_PATTERN.test(tz)) {
+    return { ok: false, error: 'invalid_timezone' };
+  }
+
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return { ok: true };
+
+  const { user, error: authError } = await getSupabaseUser(supabase);
+  if (authError || !user) return { ok: true };
+
+  const { error } = await supabase
+    .from('user_settings')
+    .update({ timezone: tz, updated_at: new Date().toISOString() })
+    .eq('user_id', user.id)
+    .neq('timezone', tz);
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}

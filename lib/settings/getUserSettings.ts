@@ -27,6 +27,7 @@ const DEFAULT_SETTINGS: UserSettingsRow = {
   onboarding_completed_at: null,
   placement_status: "unknown",
   current_frontier_rank: null,
+  timezone: "UTC",
   created_at: new Date(0).toISOString(),
   updated_at: new Date(0).toISOString(),
 };
