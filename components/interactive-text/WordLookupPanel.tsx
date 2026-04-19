@@ -14,7 +14,6 @@ type WordLookupPanelProps = {
   savePending: boolean;
   saveError: string | null;
   onClose: () => void;
-  onSave: () => void;
 };
 
 export function WordLookupPanel({
@@ -22,10 +21,8 @@ export function WordLookupPanel({
   selectedToken,
   lookupState,
   currentEntrySaved,
-  savePending,
   saveError,
   onClose,
-  onSave,
 }: WordLookupPanelProps) {
   if (!selectedToken) {
     return null;
@@ -37,12 +34,12 @@ export function WordLookupPanel({
       data-interaction-context={interactionContext}
       onClick={onClose}
     >
-      <div className="fixed inset-x-0 bottom-0 z-50 mx-auto w-full max-w-2xl px-3 pb-3 md:inset-x-auto md:bottom-6 md:left-1/2 md:w-[min(32rem,calc(100vw-2rem))] md:-translate-x-1/2 md:px-0 md:pb-0">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3">
         <section
           role="dialog"
           aria-modal="true"
           aria-labelledby="interactive-text-word-panel-title"
-          className="app-card-strong flex max-h-[80vh] flex-col gap-4 rounded-[1.75rem] p-5 sm:p-6"
+          className="app-card-strong flex max-h-[80vh] w-full max-w-md flex-col gap-4 rounded-[1.75rem] p-5 sm:p-6"
           onClick={(event) => event.stopPropagation()}
         >
           <div className="flex items-start justify-between gap-4">
@@ -123,21 +120,6 @@ export function WordLookupPanel({
                   {saveError}
                 </p>
               ) : null}
-
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                  Saving adds this word to your manual saved deck and
-                  ensures an SRS row exists.
-                </p>
-                <button
-                  type="button"
-                  onClick={onSave}
-                  disabled={currentEntrySaved || savePending}
-                  className={currentEntrySaved ? "app-button-secondary" : "app-button"}
-                >
-                  {currentEntrySaved ? "Saved" : savePending ? "Saving..." : "Save"}
-                </button>
-              </div>
             </div>
           ) : null}
         </section>

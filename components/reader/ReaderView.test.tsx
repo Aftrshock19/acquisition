@@ -27,7 +27,6 @@ describe("ReaderView", () => {
       />,
     );
 
-    expect(html).toContain("Saved words stay highlighted in this text.");
     expect(html.match(/<button/g)?.length ?? 0).toBe(4);
     expect(html).toContain("emerald");
   });

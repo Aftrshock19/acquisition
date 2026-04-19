@@ -43,7 +43,7 @@ export function RecommendedReadingCard({ recommendation }: Props) {
 
       <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
         {isContinue
-          ? "You started this passage — pick up where you left off."
+          ? "You started this passage pick up where you left off."
           : `A ${reason.toLowerCase()} matched to your current level.`}
       </p>
 

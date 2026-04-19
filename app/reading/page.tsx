@@ -25,7 +25,7 @@ export default async function ReadingPage() {
             <h1 className="app-title">Reading</h1>
           </div>
           <p className="app-subtitle">
-            Graded passages from A1 to C2, organised by stage and length.
+            Graded texts from A1 to C2, organised by stage and length.
           </p>
         </section>
 
@@ -57,7 +57,7 @@ export default async function ReadingPage() {
             <h1 className="app-title">Reading</h1>
           </div>
           <p className="app-subtitle">
-            Graded passages from A1 to C2, organised by stage and length.
+            Graded texts from A1 to C2, organised by stage and length.
           </p>
         </section>
 
@@ -90,13 +90,13 @@ export default async function ReadingPage() {
             <h1 className="app-title">Reading</h1>
           </div>
           <p className="app-subtitle">
-            Something went wrong while loading reading passages.
+            Something went wrong while loading reading texts.
           </p>
         </section>
 
         <div className="app-card-strong flex flex-col gap-4 border-red-200 bg-red-50/90 p-8 dark:border-red-900/50 dark:bg-red-950/30">
           <h2 className="text-xl font-semibold tracking-tight text-red-900 dark:text-red-100">
-            Error loading passages
+            Error loading texts
           </h2>
           <p className="text-red-800 dark:text-red-200">
             {loadError instanceof Error ? loadError.message : "Unknown error"}
@@ -195,15 +195,15 @@ export default async function ReadingPage() {
             <h1 className="app-title">Reading</h1>
           </div>
         <p className="app-subtitle">
-          {stages.length} stages &middot; {totalPassages} passages &middot; A1 to C2
+          {stages.length} stages &middot; {totalPassages} texts &middot; A1 to C2
         </p>
       </section>
 
       {stages.length === 0 ? (
         <section className="app-card flex flex-col gap-3 p-8">
-          <h2 className="text-xl font-semibold tracking-tight">No passages yet</h2>
+          <h2 className="text-xl font-semibold tracking-tight">No texts yet</h2>
           <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Run the import script to load reading passages.
+            Run the import script to load reading texts.
           </p>
         </section>
       ) : (
@@ -226,7 +226,7 @@ export default async function ReadingPage() {
                   key={band.label}
                   bandLabel={band.label}
                   colorClass={CEFR_COLORS[band.label] ?? ""}
-                  statsText={`${band.stages.length} ${band.stages.length === 1 ? "stage" : "stages"} · ${passageCount} passages`}
+                  statsText={`${band.stages.length} ${band.stages.length === 1 ? "stage" : "stages"} · ${passageCount} texts`}
                 >
                   {band.stages.map((stage) => (
                     <StageRow key={stage.stage} stage={stage} />
@@ -277,6 +277,13 @@ const MODE_LABELS: Record<string, string> = {
   very_long: "Very Long",
 };
 
+const MODE_PILL_LABELS: Record<string, string> = {
+  short: "S",
+  medium: "M",
+  long: "L",
+  very_long: "XL",
+};
+
 const CEFR_COLORS: Record<string, string> = {
   A1: "border-emerald-200 bg-emerald-50/80 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200",
   A2: "border-sky-200 bg-sky-50/80 text-sky-800 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-200",
@@ -293,6 +300,9 @@ function StageRow({ stage }: { stage: ReadingStageGroup }) {
     (sum, m) => sum + m.passages.length,
     0,
   );
+  const modesLabel = stage.modes
+    .map((m) => MODE_PILL_LABELS[m.mode] ?? m.mode)
+    .join(" · ");
 
   return (
     <details className="group rounded-lg border border-zinc-200 dark:border-zinc-800">
@@ -300,22 +310,15 @@ function StageRow({ stage }: { stage: ReadingStageGroup }) {
         <span className="text-zinc-400 transition group-open:rotate-90 dark:text-zinc-500">
           &#9654;
         </span>
-        <span className="font-medium text-zinc-900 dark:text-zinc-100">
+        <span className="inline-block min-w-[3.25rem] whitespace-nowrap font-medium text-zinc-900 dark:text-zinc-100">
           {stage.displayLabel}
         </span>
-        <span className="text-xs text-zinc-500 dark:text-zinc-400">
-          {passageCount} passages
+        <span className="whitespace-nowrap text-xs text-zinc-500 dark:text-zinc-400">
+          {passageCount} texts
         </span>
-        <div className="ml-auto flex gap-1.5">
-          {stage.modes.map((m) => (
-            <span
-              key={m.mode}
-              className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
-            >
-              {MODE_LABELS[m.mode] ?? m.mode}
-            </span>
-          ))}
-        </div>
+        <span className="ml-auto whitespace-nowrap rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+          {modesLabel}
+        </span>
       </summary>
 
       <div className="border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">

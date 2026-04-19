@@ -148,7 +148,8 @@ export default async function SrsSanityPage() {
     .from("user_words")
     .select("word_id", { count: "exact", head: true })
     .eq("user_id", researcherUserId)
-    .lte("next_due", new Date().toISOString());
+    .lte("next_due", new Date().toISOString())
+    .not("last_review_at", "is", null);
 
   const workloadPolicy = computeWorkloadPolicy({
     p50ReviewMs,

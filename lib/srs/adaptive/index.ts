@@ -189,7 +189,9 @@ export async function computeAdaptiveContext(
         opts: { count: "exact"; head: true },
       ) => {
         eq: (c: string, v: string) => {
-          lte: (c: string, v: string) => Promise<{ count: number | null }>;
+          lte: (c: string, v: string) => {
+            not: (c: string, op: string, v: null) => Promise<{ count: number | null }>;
+          };
         };
       };
     };
@@ -197,7 +199,8 @@ export async function computeAdaptiveContext(
     .from("user_words")
     .select("word_id", { count: "exact", head: true })
     .eq("user_id", userId)
-    .lte("next_due", new Date().toISOString());
+    .lte("next_due", new Date().toISOString())
+    .not("last_review_at", "is", null);
 
   const overdueCount = overdueResult.count ?? 0;
 

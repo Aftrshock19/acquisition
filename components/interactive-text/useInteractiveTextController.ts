@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState, useTransition } from "react";
-import { lookupReaderWordAction, saveReaderWordAction } from "@/app/reader/actions";
-import { recordExposure } from "@/app/actions/srs";
+import { lookupReaderWordAction } from "@/app/reader/actions";
 import type { ReaderLookupEntry, ReaderToken } from "@/lib/reader/types";
 
 export type SelectedWordToken = {
@@ -39,7 +38,6 @@ type UseInteractiveTextControllerOptions = {
   initialSavedLemmas: string[];
   textId?: string | null;
   saveSource?: "reader" | "flashcard";
-  trackReaderTapExposure?: boolean;
   onWordTapped?: (wordId: string) => void;
   onWordSaved?: (wordId: string) => void;
 };
@@ -48,26 +46,22 @@ export function useInteractiveTextController({
   lang,
   initialSavedWordIds,
   initialSavedLemmas,
-  textId,
-  saveSource = "reader",
-  trackReaderTapExposure = false,
   onWordTapped,
-  onWordSaved,
 }: UseInteractiveTextControllerOptions) {
   const [selectedToken, setSelectedToken] = useState<SelectedWordToken | null>(null);
   const [lookupState, setLookupState] = useState<InteractiveTextLookupState>(
     INITIAL_LOOKUP_STATE,
   );
-  const [savedWordIds, setSavedWordIds] = useState(
+  const [savedWordIds] = useState(
     () => new Set(initialSavedWordIds),
   );
-  const [savedNormalized, setSavedNormalized] = useState(
+  const [savedNormalized] = useState(
     () => new Set(initialSavedLemmas.map((lemma) => lemma.toLocaleLowerCase("es"))),
   );
   const [resolvedWordIds, setResolvedWordIds] = useState<Record<string, string>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
   const [, startLookupTransition] = useTransition();
-  const [savePending, startSaveTransition] = useTransition();
+  const [savePending] = useTransition();
   const lookupRequestRef = useRef(0);
 
   const openToken = useCallback((token: ReaderToken) => {
@@ -123,12 +117,6 @@ export function useInteractiveTextController({
           [token.normalized]: entry.id,
         }));
         onWordTapped?.(entry.id);
-        if (trackReaderTapExposure) {
-          void recordExposure({
-            wordId: entry.id,
-            kind: "reader_tap",
-          });
-        }
         setLookupState({
           status: "success",
           entry,
@@ -136,7 +124,7 @@ export function useInteractiveTextController({
         });
       });
     });
-  }, [lang, onWordTapped, startLookupTransition, trackReaderTapExposure]);
+  }, [lang, onWordTapped, startLookupTransition]);
 
   const closePanel = useCallback(() => {
     lookupRequestRef.current += 1;
@@ -144,57 +132,6 @@ export function useInteractiveTextController({
     setLookupState(INITIAL_LOOKUP_STATE);
     setSaveError(null);
   }, []);
-
-  const saveSelectedWord = useCallback(() => {
-    if (!selectedToken || lookupState.status !== "success") {
-      return;
-    }
-
-    const entry = lookupState.entry;
-    const previousSavedWordIds = new Set(savedWordIds);
-    const previousSavedNormalized = new Set(savedNormalized);
-
-    setSaveError(null);
-    setSavedWordIds((current) => new Set(current).add(entry.id));
-    setSavedNormalized((current) => {
-      const next = new Set(current);
-      next.add(selectedToken.normalized);
-      next.add(entry.lemma.toLocaleLowerCase("es"));
-      return next;
-    });
-    setResolvedWordIds((current) => ({
-      ...current,
-      [selectedToken.normalized]: entry.id,
-    }));
-
-    startSaveTransition(() => {
-      void saveReaderWordAction({
-        lang,
-        wordId: entry.id,
-        textId,
-        saveSource,
-      }).then((result) => {
-        if (result.ok) {
-          onWordSaved?.(entry.id);
-          return;
-        }
-
-        setSavedWordIds(previousSavedWordIds);
-        setSavedNormalized(previousSavedNormalized);
-        setSaveError(result.error);
-      });
-    });
-  }, [
-    lang,
-    lookupState,
-    savedNormalized,
-    savedWordIds,
-    saveSource,
-    selectedToken,
-    textId,
-    onWordSaved,
-    startSaveTransition,
-  ]);
 
   const isTokenSaved = useCallback((token: ReaderToken) => {
     if (savedNormalized.has(token.normalized)) {
@@ -219,6 +156,5 @@ export function useInteractiveTextController({
     closePanel,
     isTokenSaved,
     openToken,
-    saveSelectedWord,
   };
 }

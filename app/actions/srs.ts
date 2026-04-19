@@ -571,7 +571,8 @@ async function getOverdueCount(): Promise<number> {
     .from("user_words")
     .select("word_id", { count: "exact", head: true })
     .eq("user_id", user.id)
-    .lte("next_due", new Date().toISOString());
+    .lte("next_due", new Date().toISOString())
+    .not("last_review_at", "is", null);
 
   const value = count ?? 0;
   overdueCountCache.set(user.id, { value, expiresAt: now + OVERDUE_COUNT_CACHE_TTL_MS });

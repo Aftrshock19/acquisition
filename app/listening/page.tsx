@@ -88,7 +88,7 @@ export default async function ListeningPage() {
             <h1 className="app-title">Listening</h1>
           </div>
           <p className="app-subtitle">
-            Something went wrong while loading listening passages.
+            Something went wrong while loading listening tracks.
           </p>
         </section>
 
@@ -333,6 +333,13 @@ const MODE_LABELS: Record<string, string> = {
   very_long: "Very Long",
 };
 
+const MODE_PILL_LABELS: Record<string, string> = {
+  short: "S",
+  medium: "M",
+  long: "L",
+  very_long: "XL",
+};
+
 const CEFR_COLORS: Record<string, string> = {
   A1: "border-emerald-200 bg-emerald-50/80 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200",
   A2: "border-sky-200 bg-sky-50/80 text-sky-800 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-200",
@@ -383,6 +390,9 @@ function StageRow({ stage, assetProgressMap }: { stage: ListeningStageGroup; ass
     (sum, m) => sum + m.assets.length,
     0,
   );
+  const modesLabel = stage.modes
+    .map((m) => MODE_PILL_LABELS[m.mode] ?? m.mode)
+    .join(" · ");
 
   return (
     <details className="group rounded-lg border border-zinc-200 dark:border-zinc-800">
@@ -390,22 +400,15 @@ function StageRow({ stage, assetProgressMap }: { stage: ListeningStageGroup; ass
         <span className="text-zinc-400 transition group-open:rotate-90 dark:text-zinc-500">
           &#9654;
         </span>
-        <span className="font-medium text-zinc-900 dark:text-zinc-100">
+        <span className="inline-block min-w-[3.25rem] whitespace-nowrap font-medium text-zinc-900 dark:text-zinc-100">
           {stage.displayLabel}
         </span>
-        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+        <span className="whitespace-nowrap text-xs text-zinc-500 dark:text-zinc-400">
           {trackCount} tracks
         </span>
-        <div className="ml-auto flex gap-1.5">
-          {stage.modes.map((m) => (
-            <span
-              key={m.mode}
-              className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
-            >
-              {MODE_LABELS[m.mode] ?? m.mode}
-            </span>
-          ))}
-        </div>
+        <span className="ml-auto whitespace-nowrap rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+          {modesLabel}
+        </span>
       </summary>
 
       <div className="border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">

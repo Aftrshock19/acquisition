@@ -29,7 +29,6 @@ type InteractiveTextProviderProps = {
   closeSignal?: string | number | null;
   textId?: string | null;
   saveSource?: "reader" | "flashcard";
-  trackReaderTapExposure?: boolean;
   onWordTapped?: (wordId: string) => void;
   onWordSaved?: (wordId: string) => void;
 };
@@ -41,21 +40,13 @@ export function InteractiveTextProvider({
   initialSavedLemmas,
   interactionContext,
   closeSignal,
-  textId,
-  saveSource,
-  trackReaderTapExposure,
   onWordTapped,
-  onWordSaved,
 }: InteractiveTextProviderProps) {
   const controller = useInteractiveTextController({
     lang,
     initialSavedWordIds,
     initialSavedLemmas,
-    textId,
-    saveSource,
-    trackReaderTapExposure,
     onWordTapped,
-    onWordSaved,
   });
   const {
     closePanel,
@@ -65,7 +56,6 @@ export function InteractiveTextProvider({
     openToken,
     saveError,
     savePending,
-    saveSelectedWord,
     selectedToken,
   } = controller;
   const previousCloseSignalRef = useRef(closeSignal);
@@ -99,7 +89,6 @@ export function InteractiveTextProvider({
         savePending={savePending}
         saveError={saveError}
         onClose={closePanel}
-        onSave={saveSelectedWord}
       />
     </InteractiveTextContext.Provider>
   );

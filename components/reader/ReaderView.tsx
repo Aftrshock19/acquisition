@@ -31,13 +31,6 @@ export function ReaderView({
       interactionContext="reader"
     >
       <section className="app-card-strong flex flex-col gap-6 p-5 sm:p-7">
-        <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
-          <span className="rounded-full border border-zinc-200 px-3 py-1 dark:border-zinc-800">
-            {text.lang.toUpperCase()}
-          </span>
-          <span>Saved words stay highlighted in this text.</span>
-        </div>
-
         <div className="flex flex-col gap-5 text-lg leading-9 text-zinc-900 dark:text-zinc-100 sm:text-xl sm:leading-10">
           {blocks.map((block, blockIndex) => (
             <p
