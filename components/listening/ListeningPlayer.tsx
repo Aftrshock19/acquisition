@@ -9,6 +9,7 @@ import {
   markListeningPlaybackStarted,
   uncompleteListeningStep,
 } from "@/app/actions/srs";
+import { CheckIcon } from "@/components/icons/CheckIcon";
 import { InteractiveText } from "@/components/interactive-text/InteractiveText";
 import { InteractiveTextProvider } from "@/components/interactive-text/InteractiveTextProvider";
 import { toReadingBlocks } from "@/lib/loop/reader";
@@ -414,17 +415,36 @@ export function ListeningPlayer({
             Listening
           </p>
         </div>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={localCompleted ? handleUncomplete : handleMarkComplete}
-          className={localCompleted
-            ? "rounded-full border border-emerald-200 bg-emerald-500 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-700"
-            : "rounded-full border border-zinc-200 px-4 py-1.5 text-sm font-medium text-zinc-500 transition hover:border-zinc-400 hover:text-zinc-800 disabled:opacity-30 disabled:hover:border-zinc-200 disabled:hover:text-zinc-500 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-500 dark:hover:text-zinc-200 dark:disabled:hover:border-zinc-700 dark:disabled:hover:text-zinc-400"}
-          data-testid={localCompleted ? "complete-pill" : "mark-complete-button"}
-        >
-          {localCompleted ? "Complete" : "Mark complete"}
-        </button>
+        {localCompleted ? (
+          <div className="flex items-center gap-3">
+            <span
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600 dark:text-emerald-400"
+              data-testid="complete-indicator"
+            >
+              <CheckIcon />
+              Listening logged
+            </span>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={handleUncomplete}
+              className="text-sm font-medium text-zinc-500 underline-offset-2 transition hover:text-zinc-800 hover:underline disabled:opacity-30 dark:text-zinc-400 dark:hover:text-zinc-200"
+              data-testid="undo-complete-button"
+            >
+              Undo
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={handleMarkComplete}
+            className="rounded-full border border-zinc-200 px-4 py-1.5 text-sm font-medium text-zinc-500 transition hover:border-zinc-400 hover:text-zinc-800 disabled:opacity-30 disabled:hover:border-zinc-200 disabled:hover:text-zinc-500 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-500 dark:hover:text-zinc-200 dark:disabled:hover:border-zinc-700 dark:disabled:hover:text-zinc-400"
+            data-testid="mark-complete-button"
+          >
+            Mark complete
+          </button>
+        )}
       </div>
 
       {/* ── Title ──────────────────────────────────────────── */}

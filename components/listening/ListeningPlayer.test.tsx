@@ -357,23 +357,22 @@ describe("ListeningPlayer", () => {
 
   // ── Completed state ─────────────────────────────────────────
 
-  it("shows Complete button with green background when completed", () => {
+  it("shows 'Listening logged' state indicator when completed", () => {
     const html = render({
       completedForToday: true,
       initialCompletion: { ...defaultCompletion, completed: true },
     });
-    const match = html.match(/<button[^>]*data-testid="complete-pill"[^>]*>/);
-    expect(match).not.toBeNull();
-    expect(match![0]).toContain("bg-emerald-500");
-    expect(html).toContain(">Complete<");
+    expect(html).toContain('data-testid="complete-indicator"');
+    expect(html).toContain("Listening logged");
+    expect(html).not.toMatch(/<button[^>]*bg-emerald-500/);
   });
 
-  it("Complete button is clickable to undo completion", () => {
+  it("shows Undo button when completed", () => {
     const html = render({
       completedForToday: true,
       initialCompletion: { ...defaultCompletion, completed: true },
     });
-    const match = html.match(/<button[^>]*data-testid="complete-pill"[^>]*>/);
+    const match = html.match(/<button[^>]*data-testid="undo-complete-button"[^>]*>/);
     expect(match).not.toBeNull();
     expect(match![0]).not.toMatch(/disabled=""/);
   });
@@ -402,14 +401,15 @@ describe("ListeningPlayer", () => {
     expect(match![0]).not.toMatch(/disabled=""/);
   });
 
-  it("Mark complete becomes Complete when already completed", () => {
+  it("Mark complete becomes state indicator when already completed", () => {
     const html = render({
       completedForToday: true,
       initialCompletion: { ...defaultCompletion, completed: true },
     });
     expect(html).not.toContain('data-testid="mark-complete-button"');
-    expect(html).toContain('data-testid="complete-pill"');
-    expect(html).toContain(">Complete<");
+    expect(html).toContain('data-testid="complete-indicator"');
+    expect(html).toContain("Listening logged");
+    expect(html).toContain('data-testid="undo-complete-button"');
   });
 
   // ── Transcript ──────────────────────────────────────────────

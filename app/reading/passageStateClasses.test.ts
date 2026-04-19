@@ -1,28 +1,28 @@
 import { describe, it, expect } from "vitest";
-import { getAssetStateClasses } from "./page";
+import { getPassageStateClasses } from "./page";
 
-describe("getAssetStateClasses", () => {
-  it("returns emerald (green) classes for completed asset", () => {
+describe("getPassageStateClasses", () => {
+  it("returns emerald (green) classes for completed passage", () => {
     const map = new Map<string, "in_progress" | "completed">([
-      ["asset-1", "completed"],
+      ["passage-1", "completed"],
     ]);
-    const classes = getAssetStateClasses("asset-1", map);
+    const classes = getPassageStateClasses("passage-1", map);
     expect(classes).toContain("border-emerald");
     expect(classes).toContain("bg-emerald");
   });
 
-  it("returns blue classes for in_progress asset", () => {
+  it("returns blue classes for in_progress passage", () => {
     const map = new Map<string, "in_progress" | "completed">([
-      ["asset-2", "in_progress"],
+      ["passage-2", "in_progress"],
     ]);
-    const classes = getAssetStateClasses("asset-2", map);
+    const classes = getPassageStateClasses("passage-2", map);
     expect(classes).toContain("border-blue");
     expect(classes).toContain("bg-blue");
   });
 
-  it("returns neutral zinc classes for untouched asset", () => {
+  it("returns neutral zinc classes for untouched passage", () => {
     const map = new Map<string, "in_progress" | "completed">();
-    const classes = getAssetStateClasses("asset-3", map);
+    const classes = getPassageStateClasses("passage-3", map);
     expect(classes).toContain("border-zinc");
     expect(classes).not.toContain("emerald");
     expect(classes).not.toContain("blue");
@@ -32,7 +32,7 @@ describe("getAssetStateClasses", () => {
     const map = new Map<string, "in_progress" | "completed">([
       ["a", "completed"],
     ]);
-    const classes = getAssetStateClasses("a", map);
+    const classes = getPassageStateClasses("a", map);
     expect(classes).toMatch(/emerald/);
     expect(classes).not.toMatch(/rose|red|blue/);
   });
@@ -41,7 +41,7 @@ describe("getAssetStateClasses", () => {
     const map = new Map<string, "in_progress" | "completed">([
       ["a", "in_progress"],
     ]);
-    const classes = getAssetStateClasses("a", map);
+    const classes = getPassageStateClasses("a", map);
     expect(classes).toMatch(/blue/);
     expect(classes).not.toMatch(/emerald|green|rose/);
   });

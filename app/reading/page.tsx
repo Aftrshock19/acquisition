@@ -134,6 +134,11 @@ export default async function ReadingPage() {
 
   const progressList = progressRows ?? [];
 
+  const passageProgressMap = new Map<string, "in_progress" | "completed">();
+  for (const row of progressList) {
+    passageProgressMap.set(row.text_id, row.status as "in_progress" | "completed");
+  }
+
   const dailyRec = await getOrCreateDailyRecommendation(
     supabase,
     user.id,
@@ -222,7 +227,11 @@ export default async function ReadingPage() {
                   statsText={`${band.stages.length} ${band.stages.length === 1 ? "stage" : "stages"} · ${passageCount} texts`}
                 >
                   {band.stages.map((stage) => (
-                    <StageRow key={stage.stage} stage={stage} />
+                    <StageRow
+                      key={stage.stage}
+                      stage={stage}
+                      passageProgressMap={passageProgressMap}
+                    />
                   ))}
                 </CefrBandAccordionItem>
               );
@@ -286,9 +295,42 @@ const CEFR_COLORS: Record<string, string> = {
   C2: "border-fuchsia-200 bg-fuchsia-50/80 text-fuchsia-800 dark:border-fuchsia-800 dark:bg-fuchsia-950/30 dark:text-fuchsia-200",
 };
 
+// ── Progress-driven styling ─────────────────────────────────
+
+type PassageProgressMap = Map<string, "in_progress" | "completed">;
+
+/**
+ * Returns Tailwind classes for a reading passage item based on user progress.
+ */
+export function getPassageStateClasses(textId: string, progressMap: PassageProgressMap): string {
+  const status = progressMap.get(textId);
+  switch (status) {
+    case "completed":
+      return "border-emerald-300 bg-emerald-50/50 hover:bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/20 dark:hover:bg-emerald-950/40";
+    case "in_progress":
+      return "border-blue-400 bg-blue-50/40 hover:bg-blue-50 dark:border-blue-700 dark:bg-blue-900/20 dark:hover:bg-blue-900/30";
+    default:
+      return "border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50";
+  }
+}
+
+function getPassageStatusLabel(textId: string, progressMap: PassageProgressMap): { text: string; className: string } | null {
+  const status = progressMap.get(textId);
+  if (status === "completed") {
+    return { text: "Done", className: "text-emerald-600 dark:text-emerald-400" };
+  }
+  return null;
+}
+
 // ── Components ───────────────────────────────────────────────
 
-function StageRow({ stage }: { stage: ReadingStageGroup }) {
+function StageRow({
+  stage,
+  passageProgressMap,
+}: {
+  stage: ReadingStageGroup;
+  passageProgressMap: PassageProgressMap;
+}) {
   const passageCount = stage.modes.reduce(
     (sum, m) => sum + m.passages.length,
     0,
@@ -320,25 +362,35 @@ function StageRow({ stage }: { stage: ReadingStageGroup }) {
                 {MODE_LABELS[modeGroup.mode] ?? modeGroup.mode}
               </p>
               <div className="grid gap-1.5 sm:grid-cols-2">
-                {modeGroup.passages.map((passage) => (
-                  <Link
-                    key={passage.id}
-                    href={`/reader/${passage.id}`}
-                    className="flex items-center justify-between rounded-md border border-zinc-200 px-3 py-2 text-sm transition hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50"
-                  >
-                    <span className="truncate text-zinc-900 dark:text-zinc-100">
-                      {passage.title}
-                    </span>
-                    <span className="ml-2 shrink-0 text-xs text-zinc-500 dark:text-zinc-400">
-                      {passage.wordCount != null
-                        ? `${passage.wordCount} w`
-                        : null}
-                      {passage.estimatedMinutes != null
-                        ? ` · ${passage.estimatedMinutes}m`
-                        : null}
-                    </span>
-                  </Link>
-                ))}
+                {modeGroup.passages.map((passage) => {
+                  const statusLabel = getPassageStatusLabel(passage.id, passageProgressMap);
+                  return (
+                    <Link
+                      key={passage.id}
+                      href={`/reader/${passage.id}`}
+                      className={`flex items-center justify-between rounded-md border px-3 py-2 text-sm transition ${getPassageStateClasses(passage.id, passageProgressMap)}`}
+                    >
+                      <span className="truncate text-zinc-900 dark:text-zinc-100">
+                        {passage.title}
+                      </span>
+                      <span className="ml-2 flex shrink-0 items-center gap-2">
+                        {statusLabel ? (
+                          <span className={`text-[11px] font-medium ${statusLabel.className}`}>
+                            {statusLabel.text}
+                          </span>
+                        ) : null}
+                        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                          {passage.wordCount != null
+                            ? `${passage.wordCount} w`
+                            : null}
+                          {passage.estimatedMinutes != null
+                            ? ` · ${passage.estimatedMinutes}m`
+                            : null}
+                        </span>
+                      </span>
+                    </Link>
+                  );
+                })}
               </div>
             </div>
           ))}

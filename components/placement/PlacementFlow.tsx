@@ -11,6 +11,7 @@ import {
   startPlacementRun,
   submitPlacementAnswer,
 } from "@/app/actions/placement";
+import { CheckIcon } from "@/components/icons/CheckIcon";
 import type { PlacementState } from "@/lib/placement/state";
 import type { AdaptivePlacementEstimate } from "@/lib/placement/types";
 
@@ -462,26 +463,9 @@ function IntroScreen({
 function ReassuranceRow({ children }: { children: React.ReactNode }) {
   return (
     <li className="flex items-start gap-3">
-      <CheckIcon />
+      <CheckIcon className="mt-0.5 h-4 w-4 flex-shrink-0 text-zinc-500 dark:text-zinc-500" />
       <span>{children}</span>
     </li>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg
-      className="mt-0.5 h-4 w-4 flex-shrink-0 text-zinc-500 dark:text-zinc-500"
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <polyline points="4 10.5 8.5 15 16 6" />
-    </svg>
   );
 }
 
