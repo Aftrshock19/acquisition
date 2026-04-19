@@ -2,12 +2,15 @@ import { Home as HomeIcon } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CefrBandAccordion, CefrBandAccordionItem } from "@/components/CefrBandAccordion";
+import { EmptyRecommendationCard } from "@/components/EmptyRecommendationCard";
 import { RecommendedReadingCard } from "@/components/reading/RecommendedReadingCard";
 import { RightIcon } from "@/components/RightIcon";
+import { StartedList, type StartedItem } from "@/components/StartedList";
 import { getUserStageIndex, stageIndexToCefrLabel } from "@/lib/listening/recommendation";
 import { getPassageIndex } from "@/lib/reading/passages";
-import { getReadingRecommendation } from "@/lib/reading/recommendation";
+import { buildReason } from "@/lib/reading/recommendation";
 import type { ReadingPassageSummary, ReadingStageGroup } from "@/lib/reading/types";
+import { getOrCreateDailyRecommendation } from "@/lib/recommendation/daily";
 import type { UserSettingsRow } from "@/lib/settings/types";
 import { getSupabaseUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -107,12 +110,10 @@ export default async function ReadingPage() {
     );
   }
 
-  // ── Recommendation data ──────────────────────────────────
   const allPassages: ReadingPassageSummary[] = stages.flatMap((s) =>
     s.modes.flatMap((m) => m.passages),
   );
 
-  // Fetch user settings + reading_progress in parallel
   const [settingsRow, progressRows] = await Promise.all([
     supabase
       .from("user_settings")
@@ -127,64 +128,46 @@ export default async function ReadingPage() {
       .then((r) => r.data as { text_id: string; status: string; updated_at: string }[] | null),
   ]);
 
+  if (!settingsRow) {
+    throw new Error("user_settings missing for authenticated user");
+  }
+
   const progressList = progressRows ?? [];
-  const excludedTextIds = new Set(progressList.map((r) => r.text_id));
 
-  // Find the most recently updated in-progress passage
-  const inProgressRows = progressList
-    .filter((r) => r.status === "in_progress")
-    .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-
-  const inProgressPassage = inProgressRows.length > 0
-    ? allPassages.find((p) => p.id === inProgressRows[0]!.text_id) ?? null
-    : null;
-
-  const DEFAULT_SETTINGS: UserSettingsRow = {
-    user_id: user.id,
-    learning_lang: "es",
-    daily_plan_mode: "recommended",
-    manual_daily_card_limit: 200,
-    flashcard_selection_mode: "recommended",
-    include_cloze: true,
-    include_normal: true,
-    include_audio: false,
-    include_mcq: false,
-    include_sentences: false,
-    include_cloze_en_to_es: true,
-    include_cloze_es_to_en: false,
-    include_normal_en_to_es: true,
-    include_normal_es_to_en: false,
-    retry_delay_seconds: 90,
-    auto_advance_correct: true,
-    show_pos_hint: true,
-    show_definition_first: true,
-    hide_translation_sentences: false,
-    remove_daily_limit: false,
-    scheduler_variant: "baseline",
-    has_seen_intro: false,
-    onboarding_completed_at: null,
-    placement_status: "unknown",
-    current_frontier_rank: null,
-    created_at: new Date(0).toISOString(),
-    updated_at: new Date(0).toISOString(),
-  };
-
-  const recommendation = getReadingRecommendation(
-    inProgressPassage,
-    allPassages,
-    settingsRow ?? DEFAULT_SETTINGS,
-    excludedTextIds,
+  const dailyRec = await getOrCreateDailyRecommendation(
+    supabase,
+    user.id,
+    "reading",
+    settingsRow,
   );
 
-  // Group stages by broad CEFR band (A1, A2, B1, B2, C1, C2)
+  const recommendedPassage = dailyRec
+    ? allPassages.find((p) => p.id === dailyRec.assetId) ?? null
+    : null;
+
+  const startedPassages: StartedItem[] = progressList
+    .filter((r) => r.status === "in_progress")
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    .map((r) => {
+      const passage = allPassages.find((p) => p.id === r.text_id);
+      if (!passage) return null;
+      const metaParts: string[] = [passage.displayLabel];
+      if (passage.estimatedMinutes) metaParts.push(`${passage.estimatedMinutes}m`);
+      return {
+        id: passage.id,
+        title: passage.title,
+        href: `/reader/${passage.id}`,
+        meta: metaParts.join(" · "),
+      } satisfies StartedItem;
+    })
+    .filter((item): item is StartedItem => item !== null);
+
   const cefrBands = groupByCefr(stages);
   const totalPassages = stages.reduce(
     (sum, s) => sum + s.modes.reduce((ms, m) => ms + m.passages.length, 0),
     0,
   );
-  const userBand = stageIndexToCefrLabel(
-    getUserStageIndex(settingsRow ?? DEFAULT_SETTINGS),
-  );
+  const userBand = stageIndexToCefrLabel(getUserStageIndex(settingsRow));
 
   return (
     <main className="app-shell">
@@ -209,9 +192,18 @@ export default async function ReadingPage() {
         </section>
       ) : (
         <div className="flex flex-col gap-6">
-          {recommendation ? (
-            <RecommendedReadingCard recommendation={recommendation} />
+          {dailyRec === null ? (
+            <EmptyRecommendationCard kind="reading" />
+          ) : recommendedPassage ? (
+            <RecommendedReadingCard
+              passage={recommendedPassage}
+              status={dailyRec.status}
+              reason={buildReason(recommendedPassage)}
+            />
           ) : null}
+
+          <StartedList kind="reading" items={startedPassages} />
+
           <CefrBandAccordion
             bandLabels={cefrBands.map((b) => b.label)}
             defaultOpenBand={userBand}

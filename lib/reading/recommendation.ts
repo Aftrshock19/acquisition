@@ -5,7 +5,6 @@ import { CEFR_OPTIONS } from "@/lib/onboarding/cefr";
 // ── Types ────────────────────────────────────────────────────
 
 export type ReadingRecommendation = {
-  kind: "continue" | "recommended";
   passage: ReadingPassageSummary;
   reason: string;
 };
@@ -85,7 +84,7 @@ function withinBucketScore(passage: ReadingPassageSummary): number {
   return modeBonus - passage.passageNumber * 0.01;
 }
 
-function buildReason(passage: ReadingPassageSummary): string {
+export function buildReason(passage: ReadingPassageSummary): string {
   const parts = [stageIndexToCefrLabel(passage.stageIndex)];
   if (passage.estimatedMinutes) parts.push(`${passage.estimatedMinutes} min`);
   if (passage.mode === "short") parts.push("short passage");
@@ -123,7 +122,6 @@ export function getReadingRecommendation(
     );
 
     return {
-      kind: "recommended",
       passage: best,
       reason: buildReason(best),
     };

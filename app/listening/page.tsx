@@ -2,10 +2,13 @@ import { Home as HomeIcon } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CefrBandAccordion, CefrBandAccordionItem } from "@/components/CefrBandAccordion";
+import { ContinueListeningRow } from "@/components/ContinueListeningRow";
+import { EmptyRecommendationCard } from "@/components/EmptyRecommendationCard";
 import { RecommendedListeningCard } from "@/components/listening/RecommendedListeningCard";
 import { RightIcon } from "@/components/RightIcon";
-import { getListeningRecommendation, getUserStageIndex, stageIndexToCefrLabel } from "@/lib/listening/recommendation";
+import { buildReason, getUserStageIndex, stageIndexToCefrLabel } from "@/lib/listening/recommendation";
 import { getListeningIndexData, type ListeningIndexAsset } from "@/lib/loop/listening";
+import { getOrCreateDailyRecommendation } from "@/lib/recommendation/daily";
 import { getSupabaseUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { UserSettingsRow } from "@/lib/settings/types";
@@ -105,7 +108,6 @@ export default async function ListeningPage() {
     );
   }
 
-  // ── Progress & recommendation data ──────────────────────────
   const [settingsRow, progressRows] = await Promise.all([
     supabase
       .from("user_settings")
@@ -120,69 +122,58 @@ export default async function ListeningPage() {
       .then((r) => r.data as { asset_id: string; status: string; updated_at: string }[] | null),
   ]);
 
+  if (!settingsRow) {
+    throw new Error("user_settings missing for authenticated user");
+  }
+
   const progressList = progressRows ?? [];
 
-  // Build a map of asset_id → status for visual state on passage items
   const assetProgressMap = new Map<string, "in_progress" | "completed">();
   for (const row of progressList) {
     assetProgressMap.set(row.asset_id, row.status as "in_progress" | "completed");
   }
 
-  // All asset IDs with any progress — hard-excluded from Recommended
-  const excludedAssetIds = new Set(progressList.map((r) => r.asset_id));
-
-  // Find the most recently updated in-progress asset for Continue
-  const inProgressRows = progressList
-    .filter((r) => r.status === "in_progress")
-    .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-
-  let inProgressAsset: ListeningIndexAsset | null = null;
-  if (inProgressRows.length > 0) {
-    inProgressAsset = assets.find((a) => a.id === inProgressRows[0]!.asset_id) ?? null;
-  }
-
-  const DEFAULT_SETTINGS: UserSettingsRow = {
-    user_id: user.id,
-    learning_lang: "es",
-    daily_plan_mode: "recommended",
-    manual_daily_card_limit: 200,
-    flashcard_selection_mode: "recommended",
-    include_cloze: true,
-    include_normal: true,
-    include_audio: false,
-    include_mcq: false,
-    include_sentences: false,
-    include_cloze_en_to_es: true,
-    include_cloze_es_to_en: false,
-    include_normal_en_to_es: true,
-    include_normal_es_to_en: false,
-    retry_delay_seconds: 90,
-    auto_advance_correct: true,
-    show_pos_hint: true,
-    show_definition_first: true,
-    hide_translation_sentences: false,
-    remove_daily_limit: false,
-    scheduler_variant: "baseline",
-    has_seen_intro: false,
-    onboarding_completed_at: null,
-    placement_status: "unknown",
-    current_frontier_rank: null,
-    created_at: new Date(0).toISOString(),
-    updated_at: new Date(0).toISOString(),
-  };
-
-  const recommendation = getListeningRecommendation(
-    inProgressAsset,
-    assets,
-    settingsRow ?? DEFAULT_SETTINGS,
-    excludedAssetIds,
+  const dailyRec = await getOrCreateDailyRecommendation(
+    supabase,
+    user.id,
+    "listening",
+    settingsRow,
   );
+
+  const recommendedAsset = dailyRec
+    ? assets.find((a) => a.id === dailyRec.assetId) ?? null
+    : null;
+
+  const mostRecentInProgressRow = progressList
+    .filter(
+      (r) =>
+        r.status === "in_progress" &&
+        (!dailyRec || r.asset_id !== dailyRec.assetId),
+    )
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+
+  const continueAsset = mostRecentInProgressRow
+    ? assets.find((a) => a.id === mostRecentInProgressRow.asset_id) ?? null
+    : null;
+
+  let continueRow: { title: string; href: string; meta: string } | null = null;
+  if (continueAsset) {
+    const metaParts: string[] = [];
+    if (continueAsset.text?.displayLabel) metaParts.push(continueAsset.text.displayLabel);
+    if (continueAsset.durationSeconds) {
+      const d = continueAsset.durationSeconds;
+      metaParts.push(d < 60 ? `${Math.round(d)}s` : `${Math.round(d / 60)}m`);
+    }
+    continueRow = {
+      title: continueAsset.text?.title ?? continueAsset.title,
+      href: `/listening/${continueAsset.id}`,
+      meta: metaParts.join(" · "),
+    };
+  }
 
   const cefrBands = groupByCefr(assets);
   const stageCount = new Set(assets.map((a) => a.text?.stage).filter(Boolean)).size;
-  const userBand = stageIndexToCefrLabel(
-    getUserStageIndex(settingsRow ?? DEFAULT_SETTINGS),
-  );
+  const userBand = stageIndexToCefrLabel(getUserStageIndex(settingsRow));
 
   return (
     <main className="app-shell">
@@ -198,8 +189,22 @@ export default async function ListeningPage() {
         </p>
       </section>
 
-      {recommendation ? (
-        <RecommendedListeningCard recommendation={recommendation} />
+      {dailyRec === null ? (
+        <EmptyRecommendationCard kind="listening" />
+      ) : recommendedAsset ? (
+        <RecommendedListeningCard
+          asset={recommendedAsset}
+          status={dailyRec.status}
+          reason={buildReason(recommendedAsset)}
+        />
+      ) : null}
+
+      {continueRow ? (
+        <ContinueListeningRow
+          title={continueRow.title}
+          href={continueRow.href}
+          meta={continueRow.meta}
+        />
       ) : null}
 
       {assets.length === 0 ? (
@@ -269,7 +274,6 @@ function broadCefr(displayLabel: string): string {
 }
 
 function groupByCefr(assets: ListeningIndexAsset[]): CefrBand[] {
-  // Group assets by stage first (using stageIndex for ordering)
   const stageMap = new Map<string, { stageIndex: number; displayLabel: string; assets: ListeningIndexAsset[] }>();
 
   for (const asset of assets) {
@@ -286,7 +290,6 @@ function groupByCefr(assets: ListeningIndexAsset[]): CefrBand[] {
     stageMap.get(stage)!.assets.push(asset);
   }
 
-  // Build stage groups sorted by stageIndex
   const stageGroups: ListeningStageGroup[] = Array.from(stageMap.entries())
     .sort(([, a], [, b]) => a.stageIndex - b.stageIndex)
     .map(([stage, { stageIndex, displayLabel, assets: stageAssets }]) => {
@@ -314,7 +317,6 @@ function groupByCefr(assets: ListeningIndexAsset[]): CefrBand[] {
       return { stage, stageIndex, displayLabel, modes };
     });
 
-  // Group stages into CEFR bands (strip +/- to get broad band)
   const bands = new Map<string, CefrBand>();
   for (const stageGroup of stageGroups) {
     const label = broadCefr(stageGroup.displayLabel);
@@ -356,9 +358,6 @@ type AssetProgressMap = Map<string, "in_progress" | "completed">;
 
 /**
  * Returns Tailwind classes for a listening passage item based on user progress.
- *   completed   → emerald/green
- *   in_progress → sky/blue
- *   untouched   → neutral zinc
  */
 export function getAssetStateClasses(assetId: string, progressMap: AssetProgressMap): string {
   const status = progressMap.get(assetId);
@@ -366,7 +365,7 @@ export function getAssetStateClasses(assetId: string, progressMap: AssetProgress
     case "completed":
       return "border-emerald-300 bg-emerald-50/50 hover:bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/20 dark:hover:bg-emerald-950/40";
     case "in_progress":
-      return "border-sky-300 bg-sky-50/50 hover:bg-sky-50 dark:border-sky-800 dark:bg-sky-950/20 dark:hover:bg-sky-950/40";
+      return "border-blue-400 bg-blue-50/40 hover:bg-blue-50 dark:border-blue-700 dark:bg-blue-900/20 dark:hover:bg-blue-900/30";
     default:
       return "border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50";
   }
@@ -374,14 +373,10 @@ export function getAssetStateClasses(assetId: string, progressMap: AssetProgress
 
 function getAssetStatusLabel(assetId: string, progressMap: AssetProgressMap): { text: string; className: string } | null {
   const status = progressMap.get(assetId);
-  switch (status) {
-    case "completed":
-      return { text: "Done", className: "text-emerald-600 dark:text-emerald-400" };
-    case "in_progress":
-      return { text: "Started", className: "text-sky-600 dark:text-sky-400" };
-    default:
-      return null;
+  if (status === "completed") {
+    return { text: "Done", className: "text-emerald-600 dark:text-emerald-400" };
   }
+  return null;
 }
 
 // ── Components ───────────────────────────────────────────────

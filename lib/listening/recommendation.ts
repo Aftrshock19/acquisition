@@ -5,7 +5,6 @@ import { CEFR_OPTIONS } from "@/lib/onboarding/cefr";
 // ── Types ────────────────────────────────────────────────────
 
 export type ListeningRecommendation = {
-  kind: "continue" | "recommended";
   asset: ListeningIndexAsset;
   reason: string;
 };
@@ -93,7 +92,7 @@ function withinBucketScore(asset: ListeningIndexAsset): number {
   return modeBonus - passageNumber * 0.01;
 }
 
-function buildReason(asset: ListeningIndexAsset): string {
+export function buildReason(asset: ListeningIndexAsset): string {
   const stageIndex = asset.text?.stageIndex ?? 3;
   const passageMode = asset.text?.passageMode ?? "medium";
   const duration = asset.durationSeconds
@@ -143,7 +142,6 @@ export function getListeningRecommendation(
     );
 
     return {
-      kind: "recommended",
       asset: best,
       reason: buildReason(best),
     };

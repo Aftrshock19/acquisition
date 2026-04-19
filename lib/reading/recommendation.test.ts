@@ -136,7 +136,6 @@ describe("getReadingRecommendation", () => {
   it("returns recommended at user's stage when available", () => {
     const p = makePassage({ id: "at", stageIndex: 3 });
     const rec = getReadingRecommendation([p], makeSettings(), new Set());
-    expect(rec?.kind).toBe("recommended");
     expect(rec?.passage.id).toBe("at");
   });
 

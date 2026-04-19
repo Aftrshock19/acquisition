@@ -177,7 +177,6 @@ describe("getListeningRecommendation", () => {
     );
 
     expect(result).not.toBeNull();
-    expect(result!.kind).toBe("recommended");
     expect(result!.asset.id).toBe("a1");
   });
 

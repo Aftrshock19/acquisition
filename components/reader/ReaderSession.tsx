@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   markReadingOpened,
@@ -36,6 +37,7 @@ export function ReaderSession({
   questions = [],
   initialCompleted = false,
 }: ReaderSessionProps) {
+  const router = useRouter();
   const blocks = useMemo(
     () => toReadingBlocks(text.content).map((block) => tokenize(block)),
     [text.content],
@@ -110,6 +112,7 @@ export function ReaderSession({
         return;
       }
       setLocalCompleted(true);
+      router.refresh();
     });
   }
 
@@ -123,6 +126,7 @@ export function ReaderSession({
         return;
       }
       setLocalCompleted(false);
+      router.refresh();
     });
   }
 
