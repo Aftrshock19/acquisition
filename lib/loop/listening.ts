@@ -89,6 +89,46 @@ const ASSET_SELECT = `
   )
 `;
 
+/**
+ * Lean projection used by the listening index page. Omits the heavy
+ * fields (`audio.transcript`, `texts.content`) because the index only
+ * renders titles + stage metadata. The by-id fetchers still use
+ * ASSET_SELECT so the player page has the full transcript fallback.
+ */
+const INDEX_ASSET_SELECT = `
+  id,
+  text_id,
+  title,
+  url,
+  duration_seconds,
+  variant_type,
+  storage_path,
+  status,
+  created_at,
+  texts (
+    id,
+    title,
+    lang,
+    stage,
+    stage_index,
+    display_label,
+    passage_mode,
+    passage_number,
+    difficulty_cefr,
+    word_count,
+    estimated_minutes
+  )
+`;
+
+type ListeningIndexTextRow = Omit<ListeningTextRow, "content">;
+type ListeningIndexAssetRow = Omit<ListeningAssetRow, "transcript" | "texts"> & {
+  texts: ListeningIndexTextRow | ListeningIndexTextRow[] | null;
+};
+
+export type ListeningIndexAsset = Omit<ListeningAsset, "transcript" | "text"> & {
+  text: Omit<NonNullable<ListeningAsset["text"]>, "content"> | null;
+};
+
 export async function getListeningAssetById(
   supabase: SupabaseServerClient,
   id: string,
@@ -142,10 +182,10 @@ export async function getListeningAssetForTextId(
 
 export async function getListeningIndexData(
   supabase: SupabaseServerClient,
-): Promise<ListeningAsset[]> {
+): Promise<ListeningIndexAsset[]> {
   const { data, error } = await supabase
     .from("audio")
-    .select(ASSET_SELECT)
+    .select(INDEX_ASSET_SELECT)
     .eq("status", "ready")
     .order("created_at", { ascending: true });
 
@@ -153,9 +193,58 @@ export async function getListeningIndexData(
     throw new Error(error.message);
   }
 
-  return ((data ?? []) as ListeningAssetRow[])
-    .map(toListeningAsset)
-    .sort(compareListeningAssets);
+  return ((data ?? []) as ListeningIndexAssetRow[])
+    .map(toListeningIndexAsset)
+    .sort(compareListeningIndexAssets);
+}
+
+function toListeningIndexAsset(row: ListeningIndexAssetRow): ListeningIndexAsset {
+  const text = normalizeIndexText(row.texts);
+
+  return {
+    id: row.id,
+    textId: row.text_id,
+    title: row.title,
+    audioUrl: row.url,
+    durationSeconds: row.duration_seconds ?? null,
+    variantType: row.variant_type ?? "support",
+    storagePath: row.storage_path ?? null,
+    createdAt: row.created_at,
+    text: text
+      ? {
+          id: text.id,
+          title: text.title,
+          lang: text.lang,
+          stage: text.stage,
+          stageIndex: text.stage_index ?? null,
+          displayLabel: text.display_label ?? null,
+          passageMode: text.passage_mode,
+          passageNumber: text.passage_number,
+          difficultyCefr: text.difficulty_cefr,
+          wordCount: text.word_count ?? null,
+          estimatedMinutes: text.estimated_minutes ?? null,
+        }
+      : null,
+  };
+}
+
+function normalizeIndexText(text: ListeningIndexAssetRow["texts"]) {
+  if (!text) return null;
+  return Array.isArray(text) ? text[0] ?? null : text;
+}
+
+function compareListeningIndexAssets(a: ListeningIndexAsset, b: ListeningIndexAsset) {
+  const byTextTitle = (a.text?.title ?? "").localeCompare(
+    b.text?.title ?? "",
+    "es",
+    { sensitivity: "base" },
+  );
+  if (byTextTitle !== 0) return byTextTitle;
+
+  const byTitle = a.title.localeCompare(b.title, "es", { sensitivity: "base" });
+  if (byTitle !== 0) return byTitle;
+
+  return a.id.localeCompare(b.id);
 }
 
 function toListeningAsset(row: ListeningAssetRow): ListeningAsset {
@@ -198,29 +287,11 @@ function normalizeText(text: ListeningAssetRow["texts"]) {
   return Array.isArray(text) ? text[0] ?? null : text;
 }
 
-function compareListeningAssets(a: ListeningAsset, b: ListeningAsset) {
-  const byTextTitle = (a.text?.title ?? "").localeCompare(
-    b.text?.title ?? "",
-    "es",
-    { sensitivity: "base" },
-  );
-  if (byTextTitle !== 0) {
-    return byTextTitle;
-  }
-
-  const byTitle = a.title.localeCompare(b.title, "es", { sensitivity: "base" });
-  if (byTitle !== 0) {
-    return byTitle;
-  }
-
-  return a.id.localeCompare(b.id);
-}
-
 // Navigation order matches the visual grouping on the listening index page:
 // stageIndex → mode → passageNumber → title → id
 const NAV_MODE_ORDER = ["short", "medium", "long", "very_long"];
 
-function compareForNav(a: ListeningAsset, b: ListeningAsset): number {
+function compareForNav(a: ListeningIndexAsset, b: ListeningIndexAsset): number {
   const aStage = a.text?.stageIndex ?? 0;
   const bStage = b.text?.stageIndex ?? 0;
   if (aStage !== bStage) return aStage - bStage;

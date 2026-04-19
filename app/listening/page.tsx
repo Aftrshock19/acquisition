@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { CefrBandAccordion, CefrBandAccordionItem } from "@/components/CefrBandAccordion";
 import { RecommendedListeningCard } from "@/components/listening/RecommendedListeningCard";
 import { getListeningRecommendation, getUserStageIndex, stageIndexToCefrLabel } from "@/lib/listening/recommendation";
-import { getListeningIndexData, type ListeningAsset } from "@/lib/loop/listening";
+import { getListeningIndexData, type ListeningIndexAsset } from "@/lib/loop/listening";
 import { getSupabaseUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { UserSettingsRow } from "@/lib/settings/types";
@@ -73,7 +73,7 @@ export default async function ListeningPage() {
     redirect("/login");
   }
 
-  let assets: ListeningAsset[] = [];
+  let assets: ListeningIndexAsset[] = [];
 
   try {
     assets = await getListeningIndexData(supabase);
@@ -135,7 +135,7 @@ export default async function ListeningPage() {
     .filter((r) => r.status === "in_progress")
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
 
-  let inProgressAsset: ListeningAsset | null = null;
+  let inProgressAsset: ListeningIndexAsset | null = null;
   if (inProgressRows.length > 0) {
     inProgressAsset = assets.find((a) => a.id === inProgressRows[0]!.asset_id) ?? null;
   }
@@ -256,7 +256,7 @@ type ListeningStageGroup = {
 
 type ListeningModeGroup = {
   mode: string;
-  assets: ListeningAsset[];
+  assets: ListeningIndexAsset[];
 };
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -267,9 +267,9 @@ function broadCefr(displayLabel: string): string {
   return displayLabel.replace(/[-+]+$/, "");
 }
 
-function groupByCefr(assets: ListeningAsset[]): CefrBand[] {
+function groupByCefr(assets: ListeningIndexAsset[]): CefrBand[] {
   // Group assets by stage first (using stageIndex for ordering)
-  const stageMap = new Map<string, { stageIndex: number; displayLabel: string; assets: ListeningAsset[] }>();
+  const stageMap = new Map<string, { stageIndex: number; displayLabel: string; assets: ListeningIndexAsset[] }>();
 
   for (const asset of assets) {
     if (!asset.text) continue;
@@ -289,7 +289,7 @@ function groupByCefr(assets: ListeningAsset[]): CefrBand[] {
   const stageGroups: ListeningStageGroup[] = Array.from(stageMap.entries())
     .sort(([, a], [, b]) => a.stageIndex - b.stageIndex)
     .map(([stage, { stageIndex, displayLabel, assets: stageAssets }]) => {
-      const modeMap = new Map<string, ListeningAsset[]>();
+      const modeMap = new Map<string, ListeningIndexAsset[]>();
       for (const a of stageAssets) {
         const mode = a.text?.passageMode ?? "unknown";
         if (!modeMap.has(mode)) modeMap.set(mode, []);

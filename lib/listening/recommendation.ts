@@ -1,4 +1,4 @@
-import type { ListeningAsset } from "@/lib/loop/listening";
+import type { ListeningIndexAsset } from "@/lib/loop/listening";
 import type { UserSettingsRow } from "@/lib/settings/types";
 import { CEFR_OPTIONS } from "@/lib/onboarding/cefr";
 
@@ -6,7 +6,7 @@ import { CEFR_OPTIONS } from "@/lib/onboarding/cefr";
 
 export type ListeningRecommendation = {
   kind: "continue" | "recommended";
-  asset: ListeningAsset;
+  asset: ListeningIndexAsset;
   reason: string;
 };
 
@@ -100,7 +100,7 @@ const MODE_DURATION_BONUS: Record<string, number> = {
 // ── Scoring ─────────────────────────────────────────────────
 
 export type ScoredAsset = {
-  asset: ListeningAsset;
+  asset: ListeningIndexAsset;
   score: number;
   reason: string;
 };
@@ -112,7 +112,7 @@ export type ScoredAsset = {
  * started/completed assets out before calling this.
  */
 export function scoreAsset(
-  asset: ListeningAsset,
+  asset: ListeningIndexAsset,
   userStageIndex: number,
 ): ScoredAsset {
   const textStageIndex = asset.text?.stageIndex ?? 3;
@@ -175,8 +175,8 @@ export function scoreAsset(
  *        These are hard-excluded before scoring — they can never appear in Recommended.
  */
 export function getListeningRecommendation(
-  inProgressAsset: ListeningAsset | null,
-  allAssets: ListeningAsset[],
+  inProgressAsset: ListeningIndexAsset | null,
+  allAssets: ListeningIndexAsset[],
   settings: UserSettingsRow,
   excludedAssetIds: Set<string>,
 ): ListeningRecommendation | null {

@@ -32,6 +32,7 @@ function makeAsset(overrides: Partial<ListeningAsset> & { stageIndex?: number; p
     text: {
       id: "text-1",
       title: "Test Passage",
+      content: "",
       lang: "es",
       stage: `listening_stage_${stageIndex}`,
       stageIndex,
