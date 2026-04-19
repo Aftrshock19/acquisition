@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, type ReactNode } from "react";
+import { RightIcon } from "@/components/RightIcon";
 import { useBandAccordion } from "@/lib/ui/useBandAccordion";
 
 // ── Context ─────────────────────────────────────────────────
@@ -70,11 +71,9 @@ export function CefrBandAccordionItem({
             {statsText}
           </span>
         </div>
-        <span
-          className={`text-zinc-400 transition-transform dark:text-zinc-500 ${open ? "rotate-90" : ""}`}
-        >
-          &#9654;
-        </span>
+        <RightIcon
+          className={`h-4 w-4 text-zinc-400 transition-transform dark:text-zinc-500 ${open ? "rotate-90" : ""}`}
+        />
       </button>
 
       {open ? (

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CefrBandAccordion, CefrBandAccordionItem } from "@/components/CefrBandAccordion";
 import { RecommendedListeningCard } from "@/components/listening/RecommendedListeningCard";
+import { RightIcon } from "@/components/RightIcon";
 import { getListeningRecommendation, getUserStageIndex, stageIndexToCefrLabel } from "@/lib/listening/recommendation";
 import { getListeningIndexData, type ListeningIndexAsset } from "@/lib/loop/listening";
 import { getSupabaseUser } from "@/lib/supabase/auth";
@@ -397,9 +398,7 @@ function StageRow({ stage, assetProgressMap }: { stage: ListeningStageGroup; ass
   return (
     <details className="group rounded-lg border border-zinc-200 dark:border-zinc-800">
       <summary className="flex cursor-pointer items-center gap-3 px-4 py-3 text-sm select-none hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
-        <span className="text-zinc-400 transition group-open:rotate-90 dark:text-zinc-500">
-          &#9654;
-        </span>
+        <RightIcon className="h-4 w-4 text-zinc-400 transition group-open:rotate-90 dark:text-zinc-500" />
         <span className="inline-block min-w-[3.25rem] whitespace-nowrap font-medium text-zinc-900 dark:text-zinc-100">
           {stage.displayLabel}
         </span>
