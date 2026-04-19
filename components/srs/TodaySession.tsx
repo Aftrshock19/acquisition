@@ -1013,6 +1013,10 @@ export function TodaySession({
   }
   const progressPercent =
     progressTotal > 0 ? (100 * completedCount) / progressTotal : 0;
+  const displayPosition = Math.min(
+    progressTotal,
+    completedCount + (phase === "prompt" ? 1 : 0),
+  );
   const interactiveTextCloseSignal = current
     ? `${current.id}:${phase}:${historyIndex ?? "live"}`
     : `${phase}:${historyIndex ?? "live"}`;
@@ -1140,6 +1144,7 @@ export function TodaySession({
         <div className="mx-auto flex w-full min-w-0 max-w-2xl flex-col gap-6">
           <SessionProgressBar
             completedCount={completedCount}
+            displayPosition={displayPosition}
             progressPercent={progressPercent}
             progressTotal={progressTotal}
             hideTarget={unlimitedMode}
@@ -1659,11 +1664,13 @@ function ReviewedFeedback({
 
 function SessionProgressBar({
   completedCount,
+  displayPosition,
   progressPercent,
   progressTotal,
   hideTarget,
 }: {
   completedCount: number;
+  displayPosition: number;
   progressPercent: number;
   progressTotal: number;
   hideTarget?: boolean;
@@ -1674,8 +1681,8 @@ function SessionProgressBar({
         <div className="flex justify-between text-sm text-zinc-500 dark:text-zinc-400">
           <span>
             {hideTarget
-              ? `Card ${completedCount}`
-              : `Card ${completedCount} of ${progressTotal}`}
+              ? `Card ${displayPosition}`
+              : `Card ${displayPosition} of ${progressTotal}`}
           </span>
           {hideTarget ? null : <span>{Math.round(progressPercent)}%</span>}
         </div>
