@@ -108,18 +108,30 @@ export async function getOrCreateDailyRecommendation(
   userId: string,
   kind: RecommendationKind,
   settings: UserSettingsRow,
-): Promise<DailyRecommendationResult | null> {
+): Promise<DailyRecommendationResult> {
   const localDate = getLocalDate(settings.timezone);
+  const userTag = userId.slice(0, 8);
 
   const existing = await selectDailyRow(supabase, userId, kind, localDate);
   if (existing) {
+    console.log(`[daily-rec] user=${userTag} kind=${kind} branch=hot`);
     const status = await fetchProgressStatus(supabase, userId, kind, existing.asset_id);
     return { assetId: existing.asset_id, status };
   }
 
   const excluded = await fetchExcludedIds(supabase, userId, kind);
   const pickedId = await pickRecommendation(supabase, kind, settings, excluded);
-  if (!pickedId) return null;
+  if (!pickedId) {
+    throw new Error(
+      `No eligible ${kind} content for user=${userId} at stage=${String(
+        settings.current_frontier_rank ?? settings.self_certified_cefr_level ?? "?",
+      )}. Pool size check needed.`,
+    );
+  }
+
+  console.log(
+    `[daily-rec] user=${userTag} kind=${kind} branch=cold pickedId=${pickedId.slice(0, 8)}`,
+  );
 
   const { error: insertError } = await supabase
     .from("daily_recommendation")
@@ -136,8 +148,18 @@ export async function getOrCreateDailyRecommendation(
     throw new Error(insertError.message);
   }
 
-  const row = await selectDailyRow(supabase, userId, kind, localDate);
-  if (!row) return null;
+  let row = await selectDailyRow(supabase, userId, kind, localDate);
+  if (!row) {
+    console.log(
+      `[daily-rec] user=${userTag} kind=${kind} post-insert row=null, retrying once`,
+    );
+    row = await selectDailyRow(supabase, userId, kind, localDate);
+  }
+  if (!row) {
+    throw new Error(
+      `daily_recommendation insert succeeded but re-select returned null for user=${userId} kind=${kind}. Possible transient stall.`,
+    );
+  }
 
   const status = await fetchProgressStatus(supabase, userId, kind, row.asset_id);
   return { assetId: row.asset_id, status };

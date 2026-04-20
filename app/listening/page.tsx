@@ -3,7 +3,6 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CefrBandAccordion, CefrBandAccordionItem } from "@/components/CefrBandAccordion";
 import { ContinueListeningRow } from "@/components/ContinueListeningRow";
-import { EmptyRecommendationCard } from "@/components/EmptyRecommendationCard";
 import { RecommendedListeningCard } from "@/components/listening/RecommendedListeningCard";
 import { RightIcon } from "@/components/RightIcon";
 import { buildReason, getUserStageIndex, stageIndexToCefrLabel } from "@/lib/listening/recommendation";
@@ -14,6 +13,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { UserSettingsRow } from "@/lib/settings/types";
 
 export default async function ListeningPage() {
+  const __perfPageStart = performance.now();
+  const __perfAuthStart = performance.now();
   const supabase = await createSupabaseServerClient();
 
   if (!supabase) {
@@ -47,6 +48,9 @@ export default async function ListeningPage() {
   }
 
   const { user, error } = await getSupabaseUser(supabase);
+  console.log(
+    `[perf] /listening auth total=${Math.round(performance.now() - __perfAuthStart)}ms`,
+  );
 
   if (error) {
     return (
@@ -79,8 +83,12 @@ export default async function ListeningPage() {
 
   let assets: ListeningIndexAsset[] = [];
 
+  const __perfAssetsStart = performance.now();
   try {
     assets = await getListeningIndexData(supabase);
+    console.log(
+      `[perf] /listening assets total=${Math.round(performance.now() - __perfAssetsStart)}ms rows=${assets.length}`,
+    );
   } catch (loadError) {
     return (
       <main className="app-shell">
@@ -108,6 +116,7 @@ export default async function ListeningPage() {
     );
   }
 
+  const __perfSettingsProgressStart = performance.now();
   const [settingsRow, progressRows] = await Promise.all([
     supabase
       .from("user_settings")
@@ -121,6 +130,9 @@ export default async function ListeningPage() {
       .eq("user_id", user.id)
       .then((r) => r.data as { asset_id: string; status: string; updated_at: string }[] | null),
   ]);
+  console.log(
+    `[perf] /listening settings+progress total=${Math.round(performance.now() - __perfSettingsProgressStart)}ms`,
+  );
 
   if (!settingsRow) {
     throw new Error("user_settings missing for authenticated user");
@@ -133,11 +145,25 @@ export default async function ListeningPage() {
     assetProgressMap.set(row.asset_id, row.status as "in_progress" | "completed");
   }
 
-  const dailyRec = await getOrCreateDailyRecommendation(
-    supabase,
-    user.id,
-    "listening",
-    settingsRow,
+  let dailyRec: Awaited<ReturnType<typeof getOrCreateDailyRecommendation>> | null = null;
+  let dailyRecError = false;
+  const __perfDailyRecStart = performance.now();
+  try {
+    dailyRec = await getOrCreateDailyRecommendation(
+      supabase,
+      user.id,
+      "listening",
+      settingsRow,
+    );
+  } catch (err) {
+    dailyRecError = true;
+    console.error("[listening] getOrCreateDailyRecommendation failed", err);
+  }
+  console.log(
+    `[perf] /listening dailyRec total=${Math.round(performance.now() - __perfDailyRecStart)}ms`,
+  );
+  console.log(
+    `[perf] /listening page total=${Math.round(performance.now() - __perfPageStart)}ms user=${user.id.slice(0, 8)}`,
   );
 
   const recommendedAsset = dailyRec
@@ -189,9 +215,16 @@ export default async function ListeningPage() {
         </p>
       </section>
 
-      {dailyRec === null ? (
-        <EmptyRecommendationCard kind="listening" />
-      ) : recommendedAsset ? (
+      {dailyRecError ? (
+        <div className="app-card flex flex-col gap-2 p-5 sm:p-6">
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
+            Recommendation
+          </p>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            Couldn&apos;t load today&apos;s recommendation. Refresh to try again.
+          </p>
+        </div>
+      ) : dailyRec && recommendedAsset ? (
         <RecommendedListeningCard
           asset={recommendedAsset}
           status={dailyRec.status}

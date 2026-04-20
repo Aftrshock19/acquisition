@@ -2,7 +2,6 @@ import { Home as HomeIcon } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CefrBandAccordion, CefrBandAccordionItem } from "@/components/CefrBandAccordion";
-import { EmptyRecommendationCard } from "@/components/EmptyRecommendationCard";
 import { RecommendedReadingCard } from "@/components/reading/RecommendedReadingCard";
 import { RightIcon } from "@/components/RightIcon";
 import { StartedList, type StartedItem } from "@/components/StartedList";
@@ -15,7 +14,12 @@ import type { UserSettingsRow } from "@/lib/settings/types";
 import { getSupabaseServerContextFast } from "@/lib/supabase/server";
 
 export default async function ReadingPage() {
+  const __perfPageStart = performance.now();
+  const __perfAuthStart = performance.now();
   const { supabase, user, error } = await getSupabaseServerContextFast();
+  console.log(
+    `[perf] /reading auth total=${Math.round(performance.now() - __perfAuthStart)}ms`,
+  );
 
   if (!supabase) {
     return (
@@ -78,8 +82,12 @@ export default async function ReadingPage() {
 
   let stages: ReadingStageGroup[] = [];
 
+  const __perfPassagesStart = performance.now();
   try {
     stages = await getPassageIndex(supabase);
+    console.log(
+      `[perf] /reading passages total=${Math.round(performance.now() - __perfPassagesStart)}ms rows=${stages.reduce((n, s) => n + s.modes.reduce((m, mg) => m + mg.passages.length, 0), 0)}`,
+    );
   } catch (loadError) {
     return (
       <main className="app-shell">
@@ -111,6 +119,7 @@ export default async function ReadingPage() {
     s.modes.flatMap((m) => m.passages),
   );
 
+  const __perfSettingsProgressStart = performance.now();
   const [settingsRow, progressRows] = await Promise.all([
     supabase
       .from("user_settings")
@@ -124,6 +133,9 @@ export default async function ReadingPage() {
       .eq("user_id", user.id)
       .then((r) => r.data as { text_id: string; status: string; updated_at: string }[] | null),
   ]);
+  console.log(
+    `[perf] /reading settings+progress total=${Math.round(performance.now() - __perfSettingsProgressStart)}ms`,
+  );
 
   if (!settingsRow) {
     throw new Error("user_settings missing for authenticated user");
@@ -136,11 +148,25 @@ export default async function ReadingPage() {
     passageProgressMap.set(row.text_id, row.status as "in_progress" | "completed");
   }
 
-  const dailyRec = await getOrCreateDailyRecommendation(
-    supabase,
-    user.id,
-    "reading",
-    settingsRow,
+  let dailyRec: Awaited<ReturnType<typeof getOrCreateDailyRecommendation>> | null = null;
+  let dailyRecError = false;
+  const __perfDailyRecStart = performance.now();
+  try {
+    dailyRec = await getOrCreateDailyRecommendation(
+      supabase,
+      user.id,
+      "reading",
+      settingsRow,
+    );
+  } catch (err) {
+    dailyRecError = true;
+    console.error("[reading] getOrCreateDailyRecommendation failed", err);
+  }
+  console.log(
+    `[perf] /reading dailyRec total=${Math.round(performance.now() - __perfDailyRecStart)}ms`,
+  );
+  console.log(
+    `[perf] /reading page total=${Math.round(performance.now() - __perfPageStart)}ms user=${user.id.slice(0, 8)}`,
   );
 
   const recommendedPassage = dailyRec
@@ -194,9 +220,16 @@ export default async function ReadingPage() {
         </section>
       ) : (
         <div className="flex flex-col gap-6">
-          {dailyRec === null ? (
-            <EmptyRecommendationCard kind="reading" />
-          ) : recommendedPassage ? (
+          {dailyRecError ? (
+            <div className="app-card flex flex-col gap-2 p-5 sm:p-6">
+              <p className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
+                Recommendation
+              </p>
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                Couldn&apos;t load today&apos;s recommendation. Refresh to try again.
+              </p>
+            </div>
+          ) : dailyRec && recommendedPassage ? (
             <RecommendedReadingCard
               passage={recommendedPassage}
               status={dailyRec.status}
