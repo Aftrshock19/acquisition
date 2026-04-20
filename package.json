@@ -11,6 +11,7 @@
     "seed": "python3 scripts/generate_words_import_sql.py supabase/seed/new_spa.csv supabase/.temp/import_words.sql && /usr/local/bin/supabase db query --linked -f supabase/.temp/import_words.sql",
     "import:passages": "tsx scripts/import_reading_passages.ts",
     "generate:audio": "tsx scripts/generate-chirp-audio.ts",
+    "backfill:duration": "tsx scripts/backfill-audio-duration.ts",
     "perf:check": "node scripts/check-performance-guardrails.mjs"
   },
   "dependencies": {
@@ -31,6 +32,7 @@
     "dotenv": "^16.4.5",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "music-metadata": "^11.12.3",
     "tailwindcss": "^4",
     "tsx": "^4.19.2",
     "typescript": "^5",

@@ -261,6 +261,17 @@ async function processOne(task: Task, dryRun: boolean): Promise<void> {
     return;
   }
 
+  // Parse duration from the mp3 bytes we already have in memory.
+  // Dynamic import: music-metadata v11 is ESM-only.
+  let durationSeconds: number | null = null;
+  try {
+    const { parseBuffer } = await import("music-metadata");
+    const meta = await parseBuffer(mp3Bytes, "audio/mpeg", { skipCovers: true });
+    if (meta.format.duration) durationSeconds = Math.round(meta.format.duration);
+  } catch {
+    // Duration is best-effort; row still inserts with null and can be backfilled later.
+  }
+
   // 7. Insert audio row
   const { error: audioInsErr } = await supabase.from("audio").insert({
     text_id: textId,
@@ -272,6 +283,7 @@ async function processOne(task: Task, dryRun: boolean): Promise<void> {
     language_code: "es-ES",
     voice_name: "es-ES-Chirp3-HD-Leda",
     mime_type: "audio/mpeg",
+    duration_seconds: durationSeconds,
     title: `Listening: ${task.base}`,
   });
   if (audioInsErr) {

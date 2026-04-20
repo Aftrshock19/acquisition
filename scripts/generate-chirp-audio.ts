@@ -353,6 +353,17 @@ async function processText(
       throw new Error(`Upload failed: ${uploadError.message}`);
     }
 
+    // Parse duration from the mp3 bytes we already have in memory.
+    // Dynamic import: music-metadata v11 is ESM-only.
+    let durationSeconds: number | null = null;
+    try {
+      const { parseBuffer } = await import("music-metadata");
+      const meta = await parseBuffer(audioBytes, "audio/mpeg", { skipCovers: true });
+      if (meta.format.duration) durationSeconds = Math.round(meta.format.duration);
+    } catch {
+      // Duration is best-effort; row still upserts with null and can be backfilled later.
+    }
+
     // Insert audio row
     const { data: audioRow, error: insertError } = await supabase
       .from("audio")
@@ -368,6 +379,7 @@ async function processText(
           voice_name: voiceName,
           language_code: voiceName.slice(0, 5),
           mime_type: "audio/mpeg",
+          duration_seconds: durationSeconds,
           status: "ready",
           error_message: null,
         },
