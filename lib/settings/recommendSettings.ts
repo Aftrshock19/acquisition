@@ -16,7 +16,7 @@ export async function recommendSettings(): Promise<RecommendedSettings> {
     return { recommendedDailyLimit, recommendedTypes: types };
   }
 
-  const [{ count: dueCount }, { data: recentEvents }] = await Promise.all([
+  const [{ count: dueCount }, { data: recentEvents, error: eventsError }] = await Promise.all([
     supabase
       .from("user_words")
       .select("word_id", { count: "exact", head: true })
@@ -26,9 +26,13 @@ export async function recommendSettings(): Promise<RecommendedSettings> {
       .from("review_events")
       .select("correct")
       .eq("user_id", user.id)
-      .order("happened_at", { ascending: false })
+      .order("created_at", { ascending: false })
       .limit(100),
   ]);
+
+  if (eventsError) {
+    console.warn("[recommendSettings] review_events query failed", eventsError);
+  }
 
   const backlog = dueCount ?? 0;
   const events = (recentEvents ?? []) as { correct: boolean }[];
