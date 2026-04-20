@@ -2,9 +2,9 @@ import { Home as HomeIcon } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CefrBandAccordion, CefrBandAccordionItem } from "@/components/CefrBandAccordion";
+import { ContinueRow } from "@/components/ContinueRow";
 import { RecommendedReadingCard } from "@/components/reading/RecommendedReadingCard";
 import { RightIcon } from "@/components/RightIcon";
-import { StartedList, type StartedItem } from "@/components/StartedList";
 import { getUserStageIndex, stageIndexToCefrLabel } from "@/lib/listening/recommendation";
 import { getPassageIndex } from "@/lib/reading/passages";
 import { buildReason } from "@/lib/reading/recommendation";
@@ -173,22 +173,28 @@ export default async function ReadingPage() {
     ? allPassages.find((p) => p.id === dailyRec.assetId) ?? null
     : null;
 
-  const startedPassages: StartedItem[] = progressList
-    .filter((r) => r.status === "in_progress")
-    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-    .map((r) => {
-      const passage = allPassages.find((p) => p.id === r.text_id);
-      if (!passage) return null;
-      const metaParts: string[] = [passage.displayLabel];
-      if (passage.estimatedMinutes) metaParts.push(`${passage.estimatedMinutes}m`);
-      return {
-        id: passage.id,
-        title: passage.title,
-        href: `/reader/${passage.id}`,
-        meta: metaParts.join(" · "),
-      } satisfies StartedItem;
-    })
-    .filter((item): item is StartedItem => item !== null);
+  const mostRecentInProgressRow = progressList
+    .filter(
+      (r) =>
+        r.status === "in_progress" &&
+        (!dailyRec || r.text_id !== dailyRec.assetId),
+    )
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+
+  const continuePassage = mostRecentInProgressRow
+    ? allPassages.find((p) => p.id === mostRecentInProgressRow.text_id) ?? null
+    : null;
+
+  let continueRow: { title: string; href: string; meta: string } | null = null;
+  if (continuePassage) {
+    const metaParts: string[] = [continuePassage.displayLabel];
+    if (continuePassage.estimatedMinutes) metaParts.push(`${continuePassage.estimatedMinutes}m`);
+    continueRow = {
+      title: continuePassage.title,
+      href: `/reader/${continuePassage.id}`,
+      meta: metaParts.join(" · "),
+    };
+  }
 
   const cefrBands = groupByCefr(stages);
   const totalPassages = stages.reduce(
@@ -237,7 +243,13 @@ export default async function ReadingPage() {
             />
           ) : null}
 
-          <StartedList kind="reading" items={startedPassages} />
+          {continueRow ? (
+            <ContinueRow
+              title={continueRow.title}
+              href={continueRow.href}
+              meta={continueRow.meta}
+            />
+          ) : null}
 
           <CefrBandAccordion
             bandLabels={cefrBands.map((b) => b.label)}

@@ -2,7 +2,7 @@ import { Home as HomeIcon } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CefrBandAccordion, CefrBandAccordionItem } from "@/components/CefrBandAccordion";
-import { ContinueListeningRow } from "@/components/ContinueListeningRow";
+import { ContinueRow } from "@/components/ContinueRow";
 import { RecommendedListeningCard } from "@/components/listening/RecommendedListeningCard";
 import { RightIcon } from "@/components/RightIcon";
 import { buildReason, getUserStageIndex, stageIndexToCefrLabel } from "@/lib/listening/recommendation";
@@ -233,7 +233,7 @@ export default async function ListeningPage() {
       ) : null}
 
       {continueRow ? (
-        <ContinueListeningRow
+        <ContinueRow
           title={continueRow.title}
           href={continueRow.href}
           meta={continueRow.meta}

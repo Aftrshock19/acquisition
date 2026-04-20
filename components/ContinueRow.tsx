@@ -6,7 +6,7 @@ type Props = {
   meta: string;
 };
 
-export function ContinueListeningRow({ title, href, meta }: Props) {
+export function ContinueRow({ title, href, meta }: Props) {
   return (
     <section className="flex flex-col gap-3">
       <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
