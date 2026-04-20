@@ -133,21 +133,34 @@ export async function getOrCreateDailyRecommendation(
     `[daily-rec] user=${userTag} kind=${kind} branch=cold pickedId=${pickedId.slice(0, 8)}`,
   );
 
-  const { error: insertError } = await supabase
+  const { data: insertedRow, error: insertError } = await supabase
     .from("daily_recommendation")
     .insert({
       user_id: userId,
       kind,
       local_date: localDate,
       asset_id: pickedId,
-    });
+    })
+    .select("asset_id")
+    .maybeSingle();
 
-  // Ignore unique-constraint violations (race where another request inserted first).
-  // Postgres error code 23505 = unique_violation.
-  if (insertError && (insertError as { code?: string }).code !== "23505") {
+  const insertErrCode = (insertError as { code?: string } | null)?.code ?? null;
+
+  if (insertError && insertErrCode !== "23505") {
     throw new Error(insertError.message);
   }
 
+  // Happy path: INSERT returned the row via RETURNING. Use it directly —
+  // a separate SELECT across HTTP calls can land on a connection whose
+  // snapshot predates the commit, making the row temporarily invisible.
+  if (!insertError && insertedRow) {
+    const status = await fetchProgressStatus(supabase, userId, kind, insertedRow.asset_id);
+    return { assetId: insertedRow.asset_id, status };
+  }
+
+  // 23505 race path: another request inserted first. The winner's row is
+  // committed on a different request/connection by the time we get here,
+  // so a fresh SELECT will see it.
   let row = await selectDailyRow(supabase, userId, kind, localDate);
   if (!row) {
     console.log(
@@ -157,7 +170,7 @@ export async function getOrCreateDailyRecommendation(
   }
   if (!row) {
     throw new Error(
-      `daily_recommendation insert succeeded but re-select returned null for user=${userId} kind=${kind}. Possible transient stall.`,
+      `daily_recommendation insert race but re-select returned null for user=${userId} kind=${kind}.`,
     );
   }
 
