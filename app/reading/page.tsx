@@ -12,11 +12,10 @@ import { buildReason } from "@/lib/reading/recommendation";
 import type { ReadingPassageSummary, ReadingStageGroup } from "@/lib/reading/types";
 import { getOrCreateDailyRecommendation } from "@/lib/recommendation/daily";
 import type { UserSettingsRow } from "@/lib/settings/types";
-import { getSupabaseUser } from "@/lib/supabase/auth";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getSupabaseServerContextFast } from "@/lib/supabase/server";
 
 export default async function ReadingPage() {
-  const supabase = await createSupabaseServerClient();
+  const { supabase, user, error } = await getSupabaseServerContextFast();
 
   if (!supabase) {
     return (
@@ -47,8 +46,6 @@ export default async function ReadingPage() {
       </main>
     );
   }
-
-  const { user, error } = await getSupabaseUser(supabase);
 
   if (error) {
     return (

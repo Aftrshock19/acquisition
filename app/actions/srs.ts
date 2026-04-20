@@ -1620,43 +1620,44 @@ export async function uncompleteListeningStep({
       return { ok: false, error: "Not authenticated" };
     }
 
-    const currentDailySession = await getTodayDailySessionRow(supabase, user.id);
-    if (
-      !currentDailySession ||
-      currentDailySession.listening_asset_id !== assetId ||
-      !currentDailySession.listening_done
-    ) {
-      return { ok: false, error: "Nothing to undo" };
-    }
-
-    const nextProgress = getDailySessionProgressState(currentDailySession);
-    nextProgress.listeningDone = false;
-    const stage = resolveDailySessionStage(nextProgress);
-
-    const { error } = await supabase
-      .from("daily_sessions")
-      .update({
-        listening_done: false,
-        listening_completed_at: null,
-        stage,
-        completed: getDailySessionCompleted(nextProgress),
-        completed_at: getDailySessionCompleted(nextProgress)
-          ? currentDailySession.completed_at
-          : null,
-      })
-      .eq("user_id", user.id)
-      .eq("session_date", getTodaySessionDate());
-
-    if (error) {
-      return { ok: false, error: error.message };
-    }
-
-    // Remove persistent listening_progress so the passage appears untouched
-    await supabase
+    const { error: deleteError } = await supabase
       .from("listening_progress")
       .delete()
       .eq("user_id", user.id)
       .eq("asset_id", assetId);
+
+    if (deleteError) {
+      return { ok: false, error: deleteError.message };
+    }
+
+    const currentDailySession = await getTodayDailySessionRow(supabase, user.id);
+    if (
+      currentDailySession &&
+      currentDailySession.listening_asset_id === assetId &&
+      currentDailySession.listening_done
+    ) {
+      const nextProgress = getDailySessionProgressState(currentDailySession);
+      nextProgress.listeningDone = false;
+      const stage = resolveDailySessionStage(nextProgress);
+
+      const { error: updateError } = await supabase
+        .from("daily_sessions")
+        .update({
+          listening_done: false,
+          listening_completed_at: null,
+          stage,
+          completed: getDailySessionCompleted(nextProgress),
+          completed_at: getDailySessionCompleted(nextProgress)
+            ? currentDailySession.completed_at
+            : null,
+        })
+        .eq("user_id", user.id)
+        .eq("session_date", getTodaySessionDate());
+
+      if (updateError) {
+        return { ok: false, error: updateError.message };
+      }
+    }
 
     revalidatePath("/today");
     revalidatePath("/listening");
