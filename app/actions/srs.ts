@@ -373,10 +373,9 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     0,
     existingDailySession?.assigned_flashcard_count ?? 0,
   );
-  const sessionTargetCount = Math.max(
-    effective.effectiveDailyLimit,
-    existingAssignedCount,
-  );
+  const sessionTargetCount = existingAssignedCount > 0
+    ? existingAssignedCount
+    : effective.effectiveDailyLimit;
   const remainingDailyLimit = Math.max(0, sessionTargetCount - completedToday);
 
   const variant: SchedulerVariant =
