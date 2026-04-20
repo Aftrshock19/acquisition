@@ -44,6 +44,7 @@ const sampleSession: AnalyticsSessionRow = {
   completed_at: `${TODAY}T08:08:55.000Z`,
   created_at: `${TODAY}T08:00:00.000Z`,
   updated_at: `${TODAY}T08:08:55.000Z`,
+  daily_target_mode: "recommended",
 };
 
 const reviewEvents: AnalyticsReviewEventRow[] = [

@@ -437,13 +437,18 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
 
   const sessionLimit = isManualMode ? manualChunk : remainingDailyLimit;
   const session = limitTodaySession(queueResult.session, sessionLimit);
-  const dailySession = await upsertDailySession(session, existingDailySession, {
-    variant,
-    learnerStateScore: adaptiveContext?.learnerState.learnerStateScore ?? null,
-    learnerFactor: adaptiveContext?.learnerState.learnerFactor ?? null,
-    workloadFactor: adaptiveContext?.workload.workloadFactor ?? null,
-    adaptiveNewWordCap: adaptiveContext ? adaptiveNewWordCap : null,
-  });
+  const dailySession = await upsertDailySession(
+    session,
+    existingDailySession,
+    {
+      variant,
+      learnerStateScore: adaptiveContext?.learnerState.learnerStateScore ?? null,
+      learnerFactor: adaptiveContext?.learnerState.learnerFactor ?? null,
+      workloadFactor: adaptiveContext?.workload.workloadFactor ?? null,
+      adaptiveNewWordCap: adaptiveContext ? adaptiveNewWordCap : null,
+    },
+    isManualMode ? "manual" : "recommended",
+  );
 
   console.log(
     `[perf] getTodayFlashcards total=${Math.round(performance.now() - __perfStart)}ms ` +
@@ -968,6 +973,7 @@ async function upsertDailySession(
   session: TodaySession,
   existingDailySession: DailySessionRow | null,
   adaptive?: AdaptiveDailySessionPatch,
+  dailyTargetMode?: "recommended" | "manual",
 ): Promise<DailySessionRow | null> {
   const { supabase, user } = await getSupabaseServerContextFast();
   if (!supabase || !user) return null;
@@ -1010,6 +1016,7 @@ async function upsertDailySession(
         assigned_flashcard_count: progress.assignedFlashcardCount,
         assigned_new_words_count: progress.assignedNewWordsCount,
         assigned_review_cards_count: progress.assignedReviewCardsCount,
+        daily_target_mode: dailyTargetMode ?? "recommended",
         new_words_count: progress.assignedFlashcardCount,
         reviews_done: progress.flashcardCompletedCount,
         flashcard_completed_count: progress.flashcardCompletedCount,

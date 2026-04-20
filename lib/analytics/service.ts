@@ -323,6 +323,7 @@ export function buildDailyAggregates({
       adaptive_new_word_cap: session?.adaptive_new_word_cap ?? null,
       reading_question_accuracy: session?.reading_question_accuracy ?? null,
       reading_question_attempts_count: session?.reading_question_attempts_count ?? 0,
+      daily_target_mode: session?.daily_target_mode ?? "recommended",
     };
   });
 }

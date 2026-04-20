@@ -55,6 +55,7 @@ const CSV_FIELD_ORDER: Record<Exclude<ExportDataset, "all">, string[]> = {
     "adaptive_new_word_cap",
     "reading_question_accuracy",
     "reading_question_attempts_count",
+    "daily_target_mode",
   ],
   sessions: [
     "anonymous_user_id",
@@ -80,6 +81,7 @@ const CSV_FIELD_ORDER: Record<Exclude<ExportDataset, "all">, string[]> = {
     "assigned_flashcard_count",
     "assigned_new_words_count",
     "assigned_review_cards_count",
+    "daily_target_mode",
     "flashcard_completed_count",
     "flashcard_new_completed_count",
     "flashcard_review_completed_count",

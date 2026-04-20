@@ -117,6 +117,7 @@ export type DailyAggregate = {
   adaptive_new_word_cap: number | null;
   reading_question_accuracy: number | null;
   reading_question_attempts_count: number;
+  daily_target_mode: "recommended" | "manual";
 };
 
 export type StageTotals = {

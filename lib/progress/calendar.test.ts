@@ -44,6 +44,7 @@ function makeDay(overrides: Partial<DailyAggregate> = {}): DailyAggregate {
     adaptive_new_word_cap: null,
     reading_question_accuracy: null,
     reading_question_attempts_count: 0,
+    daily_target_mode: "recommended",
     ...overrides,
   };
 }

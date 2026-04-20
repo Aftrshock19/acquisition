@@ -122,6 +122,7 @@ export type DailySessionRow = {
   adaptive_new_word_cap?: number | null;
   reading_question_accuracy?: number | null;
   reading_question_attempts_count?: number | null;
+  daily_target_mode?: "recommended" | "manual";
 };
 
 export type ReviewState = {
