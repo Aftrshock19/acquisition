@@ -76,7 +76,9 @@ export async function updateUserSettingsAction(
   // Detect target-changing saves so today's in-progress session can follow the
   // user's new target. We only care if the incoming save touches the mode or
   // the manual limit; card-type toggles and other changes skip this block.
-  let pendingTargetUpdate: { sessionDate: string; newTarget: number } | null = null;
+  let pendingTargetUpdate:
+    | { sessionDate: string; newTarget: number; completedCount: number }
+    | null = null;
   const mightChangeTarget =
     payload.daily_plan_mode !== undefined || payload.manual_daily_card_limit !== undefined;
 
@@ -168,7 +170,7 @@ export async function updateUserSettingsAction(
             };
           }
 
-          pendingTargetUpdate = { sessionDate, newTarget };
+          pendingTargetUpdate = { sessionDate, newTarget, completedCount };
         }
       }
     }
@@ -225,9 +227,26 @@ export async function updateUserSettingsAction(
   if (pendingTargetUpdate) {
     // Targeted single-column update: must not use .upsert or include any
     // snapshot field, or we would overwrite frozen session-start columns.
+    const updatePayload: Record<string, unknown> = {
+      assigned_flashcard_count: pendingTargetUpdate.newTarget,
+    };
+
+    // Raising the target above current completed count re-opens the flashcard
+    // phase. Without resetting stage and flashcards_completed_at, the page
+    // continues to render the 'Reading is next' gate using the stale stage
+    // column and the user cannot resume flashcards.
+    const willReopenFlashcards =
+      pendingTargetUpdate.newTarget > pendingTargetUpdate.completedCount;
+    if (willReopenFlashcards) {
+      updatePayload.stage = 'flashcards';
+      updatePayload.flashcards_completed_at = null;
+      updatePayload.completed = false;
+      updatePayload.completed_at = null;
+    }
+
     const { error: targetUpdateError } = await supabase
       .from('daily_sessions')
-      .update({ assigned_flashcard_count: pendingTargetUpdate.newTarget })
+      .update(updatePayload)
       .eq('user_id', user.id)
       .eq('session_date', pendingTargetUpdate.sessionDate);
 
