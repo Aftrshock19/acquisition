@@ -6,16 +6,44 @@ import { getMcqQuestionFormatsPreference } from '@/lib/settings/mcqQuestionForma
 import { recommendSettings } from '@/lib/settings/recommendSettings';
 import { resolveEffectiveSettings } from '@/lib/settings/resolveEffectiveSettings';
 import { FlashcardSettingsForm } from '@/components/settings/FlashcardSettingsForm';
+import { getSupabaseServerContextFast } from '@/lib/supabase/server';
+import { getTodaySessionDate } from '@/lib/loop/dailySessions';
+
+async function getTodaySessionSnapshot(): Promise<{
+  completedCount: number;
+  effectiveDailyTargetMode: 'recommended' | 'manual' | null;
+}> {
+  const { supabase, user } = await getSupabaseServerContextFast();
+  if (!supabase || !user) {
+    return { completedCount: 0, effectiveDailyTargetMode: null };
+  }
+  const { data } = await supabase
+    .from('daily_sessions')
+    .select('flashcard_completed_count, effective_daily_target_mode')
+    .eq('user_id', user.id)
+    .eq('session_date', getTodaySessionDate())
+    .maybeSingle();
+  const row = data as {
+    flashcard_completed_count: number | null;
+    effective_daily_target_mode: 'recommended' | 'manual' | null;
+  } | null;
+  return {
+    completedCount: row?.flashcard_completed_count ?? 0,
+    effectiveDailyTargetMode: row?.effective_daily_target_mode ?? null,
+  };
+}
 
 export default async function SettingsPage() {
   const [
     { settings, signedIn, error },
     mcqQuestionFormats,
     recommended,
+    todaySession,
   ] = await Promise.all([
     getUserSettings(),
     getMcqQuestionFormatsPreference(),
     recommendSettings(),
+    getTodaySessionSnapshot(),
   ]);
 
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
@@ -75,6 +103,8 @@ export default async function SettingsPage() {
           mcqQuestionFormats={mcqQuestionFormats}
           recommended={recommended}
           effective={effective}
+          todayCompletedCount={todaySession.completedCount}
+          effectiveDailyTargetMode={todaySession.effectiveDailyTargetMode}
         />
       </div>
       <div className="app-card flex flex-col gap-2 p-6">

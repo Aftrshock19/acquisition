@@ -17,6 +17,8 @@ type Props = {
   mcqQuestionFormats: McqQuestionFormat[];
   recommended: RecommendedSettings;
   effective: EffectiveFlashcardSettings;
+  todayCompletedCount: number;
+  effectiveDailyTargetMode: 'recommended' | 'manual' | null;
 };
 
 type ManualTypeKey =
@@ -96,21 +98,44 @@ export function FlashcardSettingsForm({
   mcqQuestionFormats: initialMcqQuestionFormats,
   recommended,
   effective,
+  todayCompletedCount,
+  effectiveDailyTargetMode,
 }: Props) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+
+  // Client-side floor: user cannot set a target below cards already practiced
+  // today. The server action in updateUserSettingsAction is authoritative; this
+  // is purely a UI affordance that prevents reaching an invalid state.
+  const effectiveMin = Math.max(1, todayCompletedCount);
+  // Standard slider maxes out at 200. If the user has already done more than
+  // 200 today, the floor would exceed the standard ceiling, so we force
+  // remove_daily_limit on in the form. The toggle is disabled below so the
+  // user cannot turn it back off while the floor requires the extended range.
+  const forceRemoveLimit = todayCompletedCount > 200;
+
+  // Override state: today's session has been flagged as effectively manual
+  // (user completed past recommendation or extended in recommended mode) but
+  // the user's stated preference is still 'recommended'. The recommended
+  // radio is disabled for today only; we show the form as 'manual' so the
+  // number input is usable, but we omit daily_plan_mode from submit so
+  // user_settings.daily_plan_mode stays 'recommended' for tomorrow.
+  const isOverridden =
+    effectiveDailyTargetMode === "manual" &&
+    userSettings.daily_plan_mode === "recommended";
+
   const [dailyPlanMode, setDailyPlanMode] = useState<"recommended" | "manual">(
-    userSettings.daily_plan_mode,
+    isOverridden ? "manual" : userSettings.daily_plan_mode,
   );
   const [flashcardSelectionMode, setFlashcardSelectionMode] = useState<
     "recommended" | "manual"
   >(userSettings.flashcard_selection_mode);
   const [manualDailyLimit, setManualDailyLimit] = useState<number>(
-    userSettings.manual_daily_card_limit,
+    Math.max(effectiveMin, userSettings.manual_daily_card_limit),
   );
   const [removeDailyLimit, setRemoveDailyLimit] = useState<boolean>(
-    Boolean(userSettings.remove_daily_limit),
+    forceRemoveLimit || Boolean(userSettings.remove_daily_limit),
   );
   const [autoAdvanceCorrect, setAutoAdvanceCorrect] = useState<boolean>(
     Boolean(userSettings.auto_advance_correct),
@@ -155,9 +180,28 @@ export function FlashcardSettingsForm({
       setError("Select at least one MCQ question format.");
       return;
     }
+    // Final clamp: user may have typed a value below the floor without
+    // triggering blur (e.g. submit via Enter). The server action validates
+    // anyway, but normalize here so the formData reflects what we'll display.
+    const clampedManualDailyLimit = clampLimit(
+      manualDailyLimit,
+      removeDailyLimit,
+      effectiveMin,
+    );
+    if (clampedManualDailyLimit !== manualDailyLimit) {
+      setManualDailyLimit(clampedManualDailyLimit);
+    }
     const formData = new FormData(e.currentTarget);
-    formData.set("daily_plan_mode", dailyPlanMode);
-    formData.set("manual_daily_card_limit", String(manualDailyLimit));
+    // When overridden, we display 'manual' but must NOT persist that choice
+    // to user_settings.daily_plan_mode — the override is today-only, and the
+    // user's preference for tomorrow stays 'recommended'. Omit the field
+    // entirely so the server's upsert leaves the column untouched.
+    if (isOverridden) {
+      formData.delete("daily_plan_mode");
+    } else {
+      formData.set("daily_plan_mode", dailyPlanMode);
+    }
+    formData.set("manual_daily_card_limit", String(clampedManualDailyLimit));
     formData.set("remove_daily_limit", String(removeDailyLimit));
     formData.set("flashcard_selection_mode", flashcardSelectionMode);
     for (const key of MANUAL_TYPE_FIELDS) {
@@ -288,13 +332,14 @@ export function FlashcardSettingsForm({
           <label
             className={`app-toggle ${
               dailyPlanMode === "recommended" ? "app-toggle-active" : ""
-            }`}
+            } ${isOverridden ? "opacity-60" : ""}`}
           >
             <input
               type="radio"
               name="daily_plan_mode"
               value="recommended"
               checked={dailyPlanMode === "recommended"}
+              disabled={isOverridden}
               onChange={() => setDailyPlanMode("recommended")}
               className="app-check app-check-round"
             />
@@ -303,6 +348,12 @@ export function FlashcardSettingsForm({
               <span className="text-xs text-zinc-500">
                 ({recommended.recommendedDailyLimit} cards/day)
               </span>
+              {isOverridden ? (
+                <span className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  You&apos;ve completed more than today&apos;s recommendation.
+                  Available again tomorrow.
+                </span>
+              ) : null}
             </span>
           </label>
           <label
@@ -329,7 +380,7 @@ export function FlashcardSettingsForm({
             <div className="flex items-center gap-3">
               <input
                 type="range"
-                min={0}
+                min={valueToMinTick(effectiveMin, getSliderValues(removeDailyLimit))}
                 max={getSliderValues(removeDailyLimit).length - 1}
                 step={1}
                 value={valueToTick(
@@ -338,21 +389,32 @@ export function FlashcardSettingsForm({
                 )}
                 onChange={(e) => {
                   const values = getSliderValues(removeDailyLimit);
-                  const v = values[Number(e.currentTarget.value)] ?? 1;
-                  setManualDailyLimit(clampLimit(v, removeDailyLimit));
+                  const v = values[Number(e.currentTarget.value)] ?? effectiveMin;
+                  setManualDailyLimit(clampLimit(v, removeDailyLimit, effectiveMin));
                 }}
                 className="app-range flex-1"
               />
               <input
                 type="number"
                 name="manual_daily_card_limit"
-                min={1}
+                min={effectiveMin}
                 max={removeDailyLimit ? 9999 : 200}
                 value={manualDailyLimit}
                 onChange={(e) => {
                   const next = Number(e.currentTarget.value);
                   if (!Number.isFinite(next)) return;
-                  setManualDailyLimit(clampLimit(next, removeDailyLimit));
+                  // Upper-bound clamp only here; lower-bound enforced on blur
+                  // so typing a larger number (e.g. "27" when min is 15) isn't
+                  // interrupted after the first digit.
+                  const max = removeDailyLimit ? 9999 : 200;
+                  setManualDailyLimit(
+                    Math.min(max, Math.max(1, Math.round(next))),
+                  );
+                }}
+                onBlur={() => {
+                  setManualDailyLimit((prev) =>
+                    clampLimit(prev, removeDailyLimit, effectiveMin),
+                  );
                 }}
                 className="app-input app-input-no-spinner w-20 px-2 py-1 text-sm"
               />
@@ -363,6 +425,7 @@ export function FlashcardSettingsForm({
                 <input
                   type="checkbox"
                   checked={removeDailyLimit}
+                  disabled={forceRemoveLimit}
                   onChange={(e) => {
                     const checked = e.currentTarget.checked;
                     setRemoveDailyLimit(checked);
@@ -375,7 +438,9 @@ export function FlashcardSettingsForm({
                 <span>No ceiling</span>
               </label>
               <p className="mt-1 pl-6 text-xs text-zinc-400 dark:text-zinc-500">
-                Allows targets above 200 for advanced practice needs.
+                {forceRemoveLimit
+                  ? "You've completed more than 200 cards today; the limit is automatically removed."
+                  : "Allows targets above 200 for advanced practice needs."}
               </p>
             </div>
           </div>
@@ -852,9 +917,9 @@ function typeLabel(key: string) {
   return key.replace(/_/g, " ");
 }
 
-function clampLimit(value: number, removeDailyLimit = false) {
+function clampLimit(value: number, removeDailyLimit = false, min = 1) {
   const max = removeDailyLimit ? 9999 : 200;
-  return Math.min(max, Math.max(1, Math.round(value)));
+  return Math.min(max, Math.max(min, Math.round(value)));
 }
 
 // ---------------------------------------------------------------------------
@@ -888,6 +953,14 @@ const EXTENDED_SLIDER_VALUES: number[] = [
 
 function getSliderValues(removeLimitEnabled: boolean): number[] {
   return removeLimitEnabled ? EXTENDED_SLIDER_VALUES : STANDARD_SLIDER_VALUES;
+}
+
+/** Return the index of the first entry in `values` that is >= `value`. */
+function valueToMinTick(value: number, values: number[]): number {
+  for (let i = 0; i < values.length; i++) {
+    if (values[i] >= value) return i;
+  }
+  return values.length - 1;
 }
 
 /** Snap a value to the nearest entry in the values array, return its index. */
