@@ -340,7 +340,10 @@ export function FlashcardSettingsForm({
               value="recommended"
               checked={dailyPlanMode === "recommended"}
               disabled={isOverridden}
-              onChange={() => setDailyPlanMode("recommended")}
+              onChange={() => {
+                if (isOverridden) return;
+                setDailyPlanMode("recommended");
+              }}
               className="app-check app-check-round"
             />
             <span className="flex flex-col">
