@@ -10,6 +10,8 @@ import {
   readRequestedMcqQuestionFormats,
   serializeMcqQuestionFormats,
 } from '@/lib/settings/mcqQuestionFormats';
+import { recommendSettings } from '@/lib/settings/recommendSettings';
+import { getTodaySessionDate } from '@/lib/loop/dailySessions';
 import type { UserSettingsRow } from '@/lib/settings/types';
 import { revalidatePath } from 'next/cache';
 
@@ -71,6 +73,107 @@ export async function updateUserSettingsAction(
   }
   const parsedMcqQuestionFormats = parseMcqQuestionFormats(mcq_question_formats);
 
+  // Detect target-changing saves so today's in-progress session can follow the
+  // user's new target. We only care if the incoming save touches the mode or
+  // the manual limit; card-type toggles and other changes skip this block.
+  let pendingTargetUpdate: { sessionDate: string; newTarget: number } | null = null;
+  const mightChangeTarget =
+    payload.daily_plan_mode !== undefined || payload.manual_daily_card_limit !== undefined;
+
+  if (mightChangeTarget) {
+    const { data: currentSettings, error: currentSettingsError } = await supabase
+      .from('user_settings')
+      .select('daily_plan_mode, manual_daily_card_limit')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (currentSettingsError) {
+      console.warn(
+        '[settings:update] current user_settings lookup failed; skipping in-session target adjustment',
+        currentSettingsError,
+      );
+    } else if (currentSettings) {
+      const incomingMode = payload.daily_plan_mode;
+      const incomingLimit = payload.manual_daily_card_limit;
+      const currentMode = (currentSettings as { daily_plan_mode: 'recommended' | 'manual' | null })
+        .daily_plan_mode;
+      const currentLimit = (currentSettings as { manual_daily_card_limit: number | null })
+        .manual_daily_card_limit;
+
+      // Cases are mutually exclusive by construction:
+      //   A: both manual, limit differs
+      //   B: manual → recommended
+      //   C: recommended → manual (with an incoming limit)
+      type Case = 'A' | 'B' | 'C' | null;
+      let caseKind: Case = null;
+      if (
+        currentMode === 'manual' &&
+        incomingMode === 'manual' &&
+        typeof incomingLimit === 'number' &&
+        incomingLimit !== currentLimit
+      ) {
+        caseKind = 'A';
+      } else if (currentMode === 'manual' && incomingMode === 'recommended') {
+        caseKind = 'B';
+      } else if (
+        currentMode === 'recommended' &&
+        incomingMode === 'manual' &&
+        typeof incomingLimit === 'number'
+      ) {
+        caseKind = 'C';
+      }
+
+      if (caseKind !== null) {
+        const sessionDate = getTodaySessionDate();
+        const { data: todayRow, error: todayRowError } = await supabase
+          .from('daily_sessions')
+          .select('flashcard_completed_count, recommended_target_at_creation, session_date')
+          .eq('user_id', user.id)
+          .eq('session_date', sessionDate)
+          .maybeSingle();
+
+        if (todayRowError) {
+          // Non-critical side effect: skip the in-session target update but
+          // still persist user_settings. Next /today load will freeze fresh.
+          console.warn(
+            '[settings:update] daily_sessions lookup failed; proceeding without target adjustment',
+            todayRowError,
+          );
+        } else if (todayRow) {
+          const completedCount = (todayRow as { flashcard_completed_count: number | null })
+            .flashcard_completed_count ?? 0;
+          const snapshotted = (todayRow as { recommended_target_at_creation: number | null })
+            .recommended_target_at_creation;
+
+          let newTarget: number;
+          if (caseKind === 'A' || caseKind === 'C') {
+            newTarget = incomingLimit as number;
+          } else {
+            // Case B: defensive fallback to the live recommender when the
+            // session row was created before recommended_target_at_creation
+            // was being captured, or when the snapshot is missing for any
+            // other reason.
+            if (typeof snapshotted === 'number' && snapshotted > 0) {
+              newTarget = snapshotted;
+            } else {
+              const recommended = await recommendSettings();
+              newTarget = recommended.recommendedDailyLimit;
+            }
+          }
+
+          if (newTarget < completedCount) {
+            return {
+              ok: false,
+              error: `Can't set target below cards already practiced today (${completedCount}). Finish your session or choose ${completedCount} or higher.`,
+            };
+          }
+
+          pendingTargetUpdate = { sessionDate, newTarget };
+        }
+      }
+    }
+  }
+
   // Always ensure user_id is set for upsert
   const row: Partial<UserSettingsRow> = {
     user_id: user.id,
@@ -117,6 +220,20 @@ export async function updateUserSettingsAction(
       error:
         'Settings did not persist correctly. Apply the latest database migration for flashcard direction settings and try again.',
     };
+  }
+
+  if (pendingTargetUpdate) {
+    // Targeted single-column update: must not use .upsert or include any
+    // snapshot field, or we would overwrite frozen session-start columns.
+    const { error: targetUpdateError } = await supabase
+      .from('daily_sessions')
+      .update({ assigned_flashcard_count: pendingTargetUpdate.newTarget })
+      .eq('user_id', user.id)
+      .eq('session_date', pendingTargetUpdate.sessionDate);
+
+    if (targetUpdateError) {
+      return { ok: false, error: formatSettingsSaveError(targetUpdateError.message) };
+    }
   }
 
   const cookieStore = await cookies();
