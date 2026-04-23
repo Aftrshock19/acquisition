@@ -447,6 +447,7 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
       adaptiveNewWordCap: adaptiveContext ? adaptiveNewWordCap : null,
     },
     isManualMode ? "manual" : "recommended",
+    recommended.recommendedDailyLimit,
   );
 
   console.log(
@@ -988,6 +989,7 @@ async function upsertDailySession(
   existingDailySession: DailySessionRow | null,
   adaptive?: AdaptiveDailySessionPatch,
   dailyTargetMode?: "recommended" | "manual",
+  recommendedTargetAtCreation?: number,
 ): Promise<DailySessionRow | null> {
   const { supabase, user } = await getSupabaseServerContextFast();
   if (!supabase || !user) return null;
@@ -1033,6 +1035,7 @@ async function upsertDailySession(
     ? {
         daily_target_mode: dailyTargetMode ?? "recommended",
         initial_assigned_flashcard_count: progress.assignedFlashcardCount,
+        recommended_target_at_creation: recommendedTargetAtCreation ?? null,
         ...(adaptive
           ? {
               scheduler_variant: adaptive.variant,
