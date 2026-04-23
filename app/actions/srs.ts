@@ -842,6 +842,16 @@ export async function recordExposure(
   return { ok: true };
 }
 
+// INVARIANT: once a daily_sessions row exists, assignedFlashcardCount must be
+// returned as-is from the existing row. Do not max it against completed
+// counts. The "Do more flashcards" path legitimately mutates the column via
+// extendFlashcardsSession, but any other code path reaching this helper with
+// an existing row must preserve the value. The other five upsert call sites
+// (extendFlashcardsSession, completeReadingStep, completeListeningStep,
+// markReadingOpened, markListeningOpened, markListeningPlaybackStarted) all
+// pass the result of this helper through to their own upsert payloads,
+// relying on this preservation. If you change this helper back to max
+// semantics, you silently corrupt research data across all six call sites.
 function getDailySessionProgressState(
   current:
     | {
@@ -883,12 +893,17 @@ function getDailySessionProgressState(
     current?.flashcard_completed_count ?? current?.reviews_done ?? 0,
   );
 
+  const hasExistingAssigned =
+    current?.assigned_flashcard_count != null || current?.new_words_count != null;
+
   return {
-    assignedFlashcardCount: Math.max(
-      assignedFlashcardCount,
-      flashcardCompletedCount,
-      assignedNewWordsCount + assignedReviewCardsCount,
-    ),
+    assignedFlashcardCount: hasExistingAssigned
+      ? assignedFlashcardCount
+      : Math.max(
+          assignedFlashcardCount,
+          flashcardCompletedCount,
+          assignedNewWordsCount + assignedReviewCardsCount,
+        ),
     assignedNewWordsCount,
     assignedReviewCardsCount,
     flashcardCompletedCount,
@@ -1005,6 +1020,31 @@ async function upsertDailySession(
       ? existingDailySession?.flashcards_completed_at ?? now
       : existingDailySession?.flashcards_completed_at ?? null;
 
+  // These columns capture state at session creation and must never be rewritten.
+  // upsertDailySession runs on every /today render (settings save, loop-stage
+  // completion, or plain reload all revalidate /today). If these columns sat in
+  // the payload on conflict, Supabase's upsert compiles to INSERT ... ON CONFLICT
+  // DO UPDATE SET <every column in the payload>, silently overwriting the
+  // session-start snapshot with live user_settings and freshly recomputed
+  // adaptive values. Omitting them from the payload on the update path means
+  // they are absent from the SET list and cannot be touched.
+  const isInsert = existingDailySession === null;
+  const insertOnlySnapshot = isInsert
+    ? {
+        daily_target_mode: dailyTargetMode ?? "recommended",
+        initial_assigned_flashcard_count: progress.assignedFlashcardCount,
+        ...(adaptive
+          ? {
+              scheduler_variant: adaptive.variant,
+              learner_state_score: adaptive.learnerStateScore,
+              learner_factor: adaptive.learnerFactor,
+              workload_factor: adaptive.workloadFactor,
+              adaptive_new_word_cap: adaptive.adaptiveNewWordCap,
+            }
+          : {}),
+      }
+    : {};
+
   const { data, error } = await supabase
     .from("daily_sessions")
     .upsert(
@@ -1015,7 +1055,6 @@ async function upsertDailySession(
         assigned_flashcard_count: progress.assignedFlashcardCount,
         assigned_new_words_count: progress.assignedNewWordsCount,
         assigned_review_cards_count: progress.assignedReviewCardsCount,
-        daily_target_mode: dailyTargetMode ?? "recommended",
         new_words_count: progress.assignedFlashcardCount,
         reviews_done: progress.flashcardCompletedCount,
         flashcard_completed_count: progress.flashcardCompletedCount,
@@ -1059,15 +1098,7 @@ async function upsertDailySession(
         completed_at: completed
           ? existingDailySession?.completed_at ?? now
           : existingDailySession?.completed_at ?? null,
-        ...(adaptive
-          ? {
-              scheduler_variant: adaptive.variant,
-              learner_state_score: adaptive.learnerStateScore,
-              learner_factor: adaptive.learnerFactor,
-              workload_factor: adaptive.workloadFactor,
-              adaptive_new_word_cap: adaptive.adaptiveNewWordCap,
-            }
-          : {}),
+        ...insertOnlySnapshot,
       },
       { onConflict: "user_id,session_date" },
     )

@@ -114,6 +114,7 @@ export function LoginForm() {
           required
           autoComplete="email"
           className="app-input"
+          suppressHydrationWarning
         />
         <input
           type="password"
@@ -123,6 +124,7 @@ export function LoginForm() {
           required
           autoComplete="current-password"
           className="app-input"
+          suppressHydrationWarning
         />
         <button
           type="submit"
@@ -149,6 +151,7 @@ export function LoginForm() {
           required
           autoComplete="email"
           className="app-input"
+          suppressHydrationWarning
         />
         <input
           type="password"
@@ -159,6 +162,7 @@ export function LoginForm() {
           minLength={6}
           autoComplete="new-password"
           className="app-input"
+          suppressHydrationWarning
         />
         <button
           type="submit"

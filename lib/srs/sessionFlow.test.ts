@@ -349,30 +349,98 @@ describe("retries don't block or corrupt continuation", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Part 6: Progress bar semantics
+// Part 6: Progress bar semantics (unified cap model)
 // ---------------------------------------------------------------------------
-describe("progress tracking semantics", () => {
-  it("progressTotal is initial queue size, not allCards size", () => {
+// Under the unified cap, the React component ends the session when
+// totalAnswered >= dailyLimit. Retries count toward the cap. The bar uses:
+//   progressTotal  = dailyLimit (committed target)
+//   completedCount = normalizedInitialCompleted + totalAnswered, clamped to total
+//   barWidthPercent = min(100, 100 * completedCount / progressTotal)
+// These tests model the derivation directly rather than simulating React state.
+describe("progress tracking semantics (unified cap)", () => {
+  function deriveProgress(args: {
+    dailyLimit: number;
+    normalizedInitialCompleted?: number;
+    totalAnswered: number;
+    allExhausted?: boolean;
+    totalDelivered?: number;
+  }) {
+    const init = args.normalizedInitialCompleted ?? 0;
+    const progressTotal = args.allExhausted
+      ? Math.max(1, init + (args.totalDelivered ?? 0))
+      : Math.max(1, args.dailyLimit);
+    const completedCount = Math.min(progressTotal, init + args.totalAnswered);
+    const progressPercent = (100 * completedCount) / progressTotal;
+    const barWidthPercent = Math.min(100, progressPercent);
+    return { progressTotal, completedCount, progressPercent, barWidthPercent };
+  }
+
+  it("progressTotal equals committed target, not queue length", () => {
+    // dailyLimit=10, user answers 5: bar reads 5/10
+    const p = deriveProgress({ dailyLimit: 10, totalAnswered: 5 });
+    expect(p.progressTotal).toBe(10);
+    expect(p.completedCount).toBe(5);
+    expect(p.progressPercent).toBe(50);
+    expect(p.barWidthPercent).toBe(50);
+  });
+
+  it("retries count toward completedCount (submissions-based)", () => {
+    // 5 mains + 5 retries = 10 submissions → session ends via cap
+    const p = deriveProgress({ dailyLimit: 10, totalAnswered: 10 });
+    expect(p.progressTotal).toBe(10);
+    expect(p.completedCount).toBe(10);
+    expect(p.progressPercent).toBe(100);
+  });
+
+  it("cap clamps completedCount at progressTotal even if totalAnswered would exceed", () => {
+    // Defensive: cap in React ends session at >= dailyLimit, but the clamp
+    // ensures the UI never shows an overflow if some edge case overshoots.
+    const p = deriveProgress({ dailyLimit: 10, totalAnswered: 14 });
+    expect(p.completedCount).toBe(10);
+    expect(p.barWidthPercent).toBe(100);
+    expect(p.progressPercent).toBeGreaterThanOrEqual(100);
+  });
+
+  it("resume: normalizedInitialCompleted bumps the starting point", () => {
+    // Session resumed with 3 already done; user does 4 more this round
+    const p = deriveProgress({
+      dailyLimit: 10,
+      normalizedInitialCompleted: 3,
+      totalAnswered: 4,
+    });
+    expect(p.progressTotal).toBe(10);
+    expect(p.completedCount).toBe(7);
+    expect(p.progressPercent).toBe(70);
+  });
+
+  it("allExhausted shrinks progressTotal to what was actually delivered", () => {
+    // dailyLimit=10, server only delivered 7 cards before exhausting supply.
+    // progressTotal collapses to actual so bar ends at 100% instead of 7/10.
+    const p = deriveProgress({
+      dailyLimit: 10,
+      totalAnswered: 7,
+      allExhausted: true,
+      totalDelivered: 7,
+    });
+    expect(p.progressTotal).toBe(7);
+    expect(p.completedCount).toBe(7);
+    expect(p.barWidthPercent).toBe(100);
+  });
+
+  it("retry-queue pure algorithm (simulateSession) still models main-card counts", () => {
+    // Sanity: the simulateSession helper is a retry-queue unit tester, not a
+    // React cap simulator. It continues to report mainCompletedCount against
+    // the main queue size, unchanged by the cap rewrite.
     const initialReviews = Array.from({ length: 10 }, (_, i) => makeReview(`r${i}`));
     const { queue: initialQueue } = buildQueue(initialReviews, []);
-
     const continuationReviews = Array.from({ length: CONTINUATION_REVIEW_CHUNK }, (_, i) =>
       makeReview(`c${i}`),
     );
     const { queue: contQueue } = buildQueue(continuationReviews, []);
 
-    // progressTotal mirrors TodaySession: based on initial queue.length
-    const progressTotal = initialQueue.length;
     const allCards = [...initialQueue, ...contQueue];
-
-    // After completing everything:
     const result = simulateSession(allCards);
     expect(result.mainCompletedCount).toBe(allCards.length);
-
-    // But progress is capped: completedCount <= progressTotal
-    const completedCount = Math.min(progressTotal, result.mainCompletedCount);
-    expect(completedCount).toBe(progressTotal);
-    // Progress = 100% (recommended batch done), even though more cards were served
   });
 });
 

@@ -1,5 +1,9 @@
 -- SRS API for cloze UX: get_daily_queue returns definition; record_review drops p_correct, derives correct from grade.
 
+-- RETURNS TABLE shape changed (added `definition`). CREATE OR REPLACE cannot change the OUT param row type,
+-- so drop the prior definition from an earlier migration before recreating.
+DROP FUNCTION IF EXISTS public.get_daily_queue(text, int, int);
+
 CREATE OR REPLACE FUNCTION public.get_daily_queue(p_lang text, p_new_limit int, p_review_limit int)
 RETURNS TABLE (
   word_id uuid,

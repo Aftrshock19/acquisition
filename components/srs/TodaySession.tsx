@@ -597,6 +597,14 @@ export function TodaySession({
     );
   }
 
+  function endSession() {
+    retryQueueRef.current.reset();
+    setRetryPending(0);
+    setCurrent(null);
+    setPhase("done");
+    if (retryPersistKey) clearRetryQueue(retryPersistKey);
+  }
+
   function advanceFromCurrentCard() {
     if (!current) return;
 
@@ -604,19 +612,12 @@ export function TodaySession({
 
     const rq = retryQueueRef.current;
 
-    // Manual-target strict cap: retries count toward the session total. Once
+    // Session cap: retries count toward the session total. Once
     // normalizedInitialCompleted + totalAnswered hits dailyLimit the session
     // ends, any pending retries are dropped (they are already logged in
     // review_events and will resurface tomorrow via SRS).
-    if (
-      manualTargetMode &&
-      normalizedInitialCompleted + totalAnswered >= dailyLimit
-    ) {
-      rq.reset();
-      setRetryPending(0);
-      setCurrent(null);
-      setPhase("done");
-      if (retryPersistKey) clearRetryQueue(retryPersistKey);
+    if (normalizedInitialCompleted + totalAnswered >= dailyLimit) {
+      endSession();
       return;
     }
 
@@ -658,11 +659,9 @@ export function TodaySession({
       }
     }
 
-    setCurrent(null);
-    setPhase("done");
     // Session is complete: purge persisted retry state so nothing leaks to
     // tomorrow or to a subsequent fresh session on the same day.
-    if (retryPersistKey) clearRetryQueue(retryPersistKey);
+    endSession();
   }
 
   function scheduleSuccessAdvance() {
@@ -977,46 +976,18 @@ export function TodaySession({
     />
   );
   const totalDelivered = queue.length + extraCards.length;
-  let progressTotal: number;
-  if (manualTargetMode && !allExhausted) {
-    // Chunked manual target: show full target as denominator
-    progressTotal = dailyLimit;
-  } else if (manualTargetMode && allExhausted) {
-    // Supply exhausted before target met: reconcile to actual
-    progressTotal = Math.max(1, normalizedInitialCompleted + totalDelivered);
-  } else {
-    // Recommended mode: original formula grounded in delivered queue
-    progressTotal = Math.max(
-      totalCards,
-      Math.min(dailyLimit, normalizedInitialCompleted + totalCards),
-    );
-  }
-  let completedCount: number;
-  if (manualTargetMode) {
-    // Retries count toward the manual target. totalAnswered is bumped after
-    // recordReview succeeds, so the feedback phase already reflects the card
-    // currently shown — no +1 trick needed.
-    completedCount = Math.min(
-      progressTotal,
-      normalizedInitialCompleted + totalAnswered,
-    );
-  } else {
-    const localCompletedCount =
-      currentSource === "main" &&
-      (phase === "feedback" || phase === "correction")
-        ? mainCompletedCount + 1
-        : mainCompletedCount;
-    completedCount = Math.min(
-      progressTotal,
-      normalizedInitialCompleted + localCompletedCount,
-    );
-  }
-  const progressPercent =
-    progressTotal > 0 ? (100 * completedCount) / progressTotal : 0;
-  const displayPosition = Math.min(
+  // Unified progress: submissions (main + retry) against committed target.
+  // totalAnswered is bumped right after recordReview succeeds, so feedback
+  // phase already reflects the current card — no +1 trick needed.
+  const progressTotal = allExhausted
+    ? Math.max(1, normalizedInitialCompleted + totalDelivered)
+    : Math.max(1, dailyLimit);
+  const completedCount = Math.min(
     progressTotal,
-    completedCount + (phase === "prompt" ? 1 : 0),
+    normalizedInitialCompleted + totalAnswered,
   );
+  const progressPercent = (100 * completedCount) / progressTotal;
+  const barWidthPercent = Math.min(100, progressPercent);
   const interactiveTextCloseSignal = current
     ? `${current.id}:${phase}:${historyIndex ?? "live"}`
     : `${phase}:${historyIndex ?? "live"}`;
@@ -1144,8 +1115,8 @@ export function TodaySession({
         <div className="mx-auto flex w-full min-w-0 max-w-2xl flex-col gap-6">
           <SessionProgressBar
             completedCount={completedCount}
-            displayPosition={displayPosition}
             progressPercent={progressPercent}
+            barWidthPercent={barWidthPercent}
             progressTotal={progressTotal}
             hideTarget={unlimitedMode}
           />
@@ -1664,14 +1635,14 @@ function ReviewedFeedback({
 
 function SessionProgressBar({
   completedCount,
-  displayPosition,
   progressPercent,
+  barWidthPercent,
   progressTotal,
   hideTarget,
 }: {
   completedCount: number;
-  displayPosition: number;
   progressPercent: number;
+  barWidthPercent: number;
   progressTotal: number;
   hideTarget?: boolean;
 }) {
@@ -1681,8 +1652,8 @@ function SessionProgressBar({
         <div className="flex justify-between text-sm text-zinc-500 dark:text-zinc-400">
           <span>
             {hideTarget
-              ? `Card ${displayPosition}`
-              : `Card ${displayPosition} of ${progressTotal}`}
+              ? `${completedCount}`
+              : `${completedCount} / ${progressTotal}`}
           </span>
           {hideTarget ? null : <span>{Math.round(progressPercent)}%</span>}
         </div>
@@ -1695,7 +1666,7 @@ function SessionProgressBar({
         >
           <div
             className="h-full rounded-full bg-zinc-700 transition-[width] duration-300 ease-out dark:bg-zinc-300"
-            style={{ width: `${progressPercent}%` }}
+            style={{ width: `${barWidthPercent}%` }}
           />
         </div>
       </div>

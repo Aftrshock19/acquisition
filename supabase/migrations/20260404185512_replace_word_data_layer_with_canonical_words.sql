@@ -424,6 +424,9 @@ ALTER TABLE public.word_forms
 CREATE INDEX IF NOT EXISTS word_forms_word_id_idx
   ON public.word_forms (word_id);
 
+-- RETURNS TABLE shape changed again (canonical words layer). Drop prior definition before recreating.
+DROP FUNCTION IF EXISTS public.get_daily_queue(text, int, int);
+
 CREATE OR REPLACE FUNCTION public.get_daily_queue(p_lang text, p_new_limit int, p_review_limit int)
 RETURNS TABLE (
   word_id uuid,
