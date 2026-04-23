@@ -731,6 +731,62 @@ export async function recordReview(
       return { ok: false, error: error.message };
     }
 
+    // Override check: if this main-queue submission has pushed today's
+    // completion past the recommender snapshot while the user's stated
+    // preference is 'recommended', mark today's session as effectively
+    // overridden. Fires on the regular card flow (not just at extend time),
+    // so a user whose due-review queue naturally carries them past the
+    // recommended number also trips the flag. Guarded by queue_source !==
+    // 'retry' and idempotent via the effective_daily_target_mode !== 'manual'
+    // check. All failures here are logged but do not fail the action — the
+    // review was already persisted by the RPC above.
+    if (queueSource !== "retry" && settings.daily_plan_mode === "recommended") {
+      const sessionDate = getTodaySessionDate();
+      const { data: sessionRow, error: sessionLookupError } = await supabase
+        .from("daily_sessions")
+        .select(
+          "flashcard_completed_count,recommended_target_at_creation,effective_daily_target_mode",
+        )
+        .eq("user_id", user.id)
+        .eq("session_date", sessionDate)
+        .maybeSingle();
+
+      if (sessionLookupError) {
+        console.warn(
+          "[recordReview] daily_sessions lookup for override check failed",
+          sessionLookupError,
+        );
+      } else if (sessionRow) {
+        const row = sessionRow as {
+          flashcard_completed_count: number | null;
+          recommended_target_at_creation: number | null;
+          effective_daily_target_mode: "recommended" | "manual" | null;
+        };
+        const completed = row.flashcard_completed_count ?? 0;
+        const snapshot = row.recommended_target_at_creation;
+        const alreadyOverridden = row.effective_daily_target_mode === "manual";
+
+        if (
+          typeof snapshot === "number" &&
+          snapshot > 0 &&
+          completed > snapshot &&
+          !alreadyOverridden
+        ) {
+          const { error: overrideError } = await supabase
+            .from("daily_sessions")
+            .update({ effective_daily_target_mode: "manual" })
+            .eq("user_id", user.id)
+            .eq("session_date", sessionDate);
+          if (overrideError) {
+            console.warn(
+              "[recordReview] failed to mark effective_daily_target_mode override",
+              overrideError,
+            );
+          }
+        }
+      }
+    }
+
     const __perfRpcDone = performance.now();
     // Debug snapshot is consumed only by dev tooling; skip the 3 extra
     // queries on the hot submit path in production. Do not remove this
@@ -1202,6 +1258,58 @@ export async function extendFlashcardsSession(
     );
 
   if (error) return { ok: false, reason: error.message };
+
+  // After a successful extend, align the user's stated preference (or today's
+  // override flag) with what they just committed to. The two cases are
+  // mutually exclusive:
+  //   - manual: mirror the new assigned count into user_settings so their
+  //     preference (and therefore tomorrow's target) reflects today's commitment.
+  //   - recommended: today has been overridden, but their preference for
+  //     tomorrow stays 'recommended'. Mark the session row so /settings can
+  //     disable the recommended radio for the rest of today without mutating
+  //     user_settings.
+  // Both secondary writes are best-effort: if they fail, the extend itself
+  // already succeeded and the user-facing flow must not be blocked.
+  const { data: userSettingsRow, error: userSettingsLookupError } = await supabase
+    .from("user_settings")
+    .select("daily_plan_mode")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (userSettingsLookupError) {
+    console.warn(
+      "[extendFlashcardsSession] user_settings lookup failed; skipping secondary write",
+      userSettingsLookupError,
+    );
+  } else if (userSettingsRow) {
+    const dailyPlanMode = (userSettingsRow as { daily_plan_mode: "recommended" | "manual" | null })
+      .daily_plan_mode;
+
+    if (dailyPlanMode === "manual") {
+      const { error: manualLimitError } = await supabase
+        .from("user_settings")
+        .update({ manual_daily_card_limit: nextProgress.assignedFlashcardCount })
+        .eq("user_id", user.id);
+      if (manualLimitError) {
+        console.warn(
+          "[extendFlashcardsSession] failed to mirror manual_daily_card_limit",
+          manualLimitError,
+        );
+      }
+    } else if (dailyPlanMode === "recommended") {
+      const { error: overrideError } = await supabase
+        .from("daily_sessions")
+        .update({ effective_daily_target_mode: "manual" })
+        .eq("user_id", user.id)
+        .eq("session_date", sessionDate);
+      if (overrideError) {
+        console.warn(
+          "[extendFlashcardsSession] failed to mark effective_daily_target_mode override",
+          overrideError,
+        );
+      }
+    }
+  }
 
   revalidatePath("/today");
   return { ok: true };
