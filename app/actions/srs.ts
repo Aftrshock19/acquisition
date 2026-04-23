@@ -803,6 +803,7 @@ export async function recordReview(
         `rpc=${Math.round(__perfRpcDone - __perfPreRpc)}ms ` +
         `debug=${Math.round(performance.now() - __perfRpcDone)}ms`,
     );
+    revalidatePath("/settings");
     return { ok: true, debugSnapshot };
   } catch (error) {
     return {
@@ -1312,6 +1313,7 @@ export async function extendFlashcardsSession(
   }
 
   revalidatePath("/today");
+  revalidatePath("/settings");
   return { ok: true };
 }
 
