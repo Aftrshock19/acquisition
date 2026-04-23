@@ -514,15 +514,13 @@ export function TodaySession({
   const handleLoadMoreRef = useRef(handleLoadMore);
   handleLoadMoreRef.current = handleLoadMore;
   const allExhausted = reviewsExhausted && newWordsExhausted;
-  const targetRemaining = manualTargetMode
-    ? dailyLimit - normalizedInitialCompleted - totalAnswered
-    : dailyLimit - normalizedInitialCompleted - mainCompletedCount;
+  const targetRemaining =
+    dailyLimit - normalizedInitialCompleted - totalAnswered;
 
   // --- Prefetch: load next chunk while user still has cards to practice ---
   const PREFETCH_THRESHOLD = 10;
   const unseenRemaining = allCards.length - mainIndex - 1;
   const shouldPrefetch =
-    manualTargetMode &&
     !unlimitedMode &&
     !loadingMore &&
     !allExhausted &&
@@ -538,7 +536,7 @@ export function TodaySession({
 
   // --- Fallback: immediate load when queue is fully exhausted ---
   const shouldAutoLoadChunk =
-    manualTargetMode && !unlimitedMode && targetRemaining > 0 && !allExhausted;
+    !unlimitedMode && targetRemaining > 0 && !allExhausted;
 
   useEffect(() => {
     if (phase !== "done" || loadingMore) return;

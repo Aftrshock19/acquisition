@@ -401,10 +401,16 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     scheduledNewCount: adaptiveNewWordCap,
   });
 
+  // Queue sizing policy: manual mode and non-comeback recommended mode both
+  // fill up to chunk size (min of remaining target and MANUAL_TARGET_CHUNK).
+  // Comeback recommended users get a soft cap of 3 new words for gentle
+  // re-entry. Comeback logic still lives in workloadPolicy; we read isComeback
+  // here rather than relying on the now-deprecated recommendedNewWords output.
   const isManualMode = settings.daily_plan_mode === "manual";
-  const manualChunk  = Math.min(remainingDailyLimit, MANUAL_TARGET_CHUNK);
-  const newLimit     = isManualMode ? manualChunk : workloadPolicy.recommendedNewWords;
-  const reviewLimit  = isManualMode ? manualChunk : workloadPolicy.recommendedReviews;
+  const chunk = Math.min(remainingDailyLimit, MANUAL_TARGET_CHUNK);
+  const isComebackRecommended = !isManualMode && workloadPolicy.isComeback;
+  const newLimit = isComebackRecommended ? Math.min(chunk, 3) : chunk;
+  const reviewLimit = chunk;
 
   const effectiveSettings = {
     dailyLimit: sessionTargetCount,
@@ -434,7 +440,7 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     };
   }
 
-  const sessionLimit = isManualMode ? manualChunk : remainingDailyLimit;
+  const sessionLimit = isManualMode ? chunk : remainingDailyLimit;
   const session = limitTodaySession(queueResult.session, sessionLimit);
   const dailySession = await upsertDailySession(
     session,
