@@ -111,6 +111,7 @@ export function TypingFlashcardCard({
 
       {answerRevealed ? (
         <button
+          key="continue-after-reveal"
           type="button"
           onClick={onNext}
           disabled={busy}
@@ -123,6 +124,7 @@ export function TypingFlashcardCard({
       ) : (
         <>
           <button
+            key={isShowAnswer ? "show-answer" : needsCorrection ? "try-again" : "check"}
             type="button"
             onClick={isShowAnswer ? onReveal : onCheck}
             disabled={busy || (needsCorrection && !value.trim())}
