@@ -70,7 +70,7 @@ type Props = {
 };
 
 type SessionPhase = "prompt" | "feedback" | "correction" | "done";
-const TEXT_SUCCESS_DELAY_MS = 2000;
+const TEXT_SUCCESS_DELAY_MS = 5000;
 const CORRECTION_PLACEHOLDER_DELAY_MS = 1900;
 const FLASHCARD_LOOKUP_LANG = "es";
 const MANUAL_TARGET_CHUNK = 50;
