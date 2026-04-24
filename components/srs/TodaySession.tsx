@@ -372,6 +372,7 @@ export function TodaySession({
   const handleKeyDown = useEffectEvent((event: KeyboardEvent) => {
     if (busy || !current) return;
     if (event.key !== "Enter") return;
+    if (event.repeat) return;
 
     if (phase === "feedback") {
       // If an auto-advance timeout is already pending, respect it. Otherwise
