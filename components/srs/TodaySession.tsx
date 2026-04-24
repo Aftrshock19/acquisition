@@ -374,6 +374,10 @@ export function TodaySession({
     if (event.key !== "Enter") return;
 
     if (phase === "feedback") {
+      // If an auto-advance timeout is already pending, respect it. Otherwise
+      // Enter autorepeat during fast submits can bypass the 1200ms delay
+      // that the user configured via autoAdvanceCorrect.
+      if (successTimeoutRef.current !== null) return;
       event.preventDefault();
       advanceFromCurrentCard();
       return;
