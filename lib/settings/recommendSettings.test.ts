@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   ACCURACY_REFERENCE,
   ANCHOR,
+  CAPACITY_ACCURACY_GATE,
   CARD_TYPE_WEIGHTS,
   CEILING,
   FLOOR,
+  applyDemonstratedCapacityFloor,
+  computeCapacityWindowFloor,
   computeRecommendedTarget,
   computeSmoothedAccuracy,
   computeWeightedAccuracy,
@@ -169,6 +172,158 @@ describe("computeSmoothedAccuracy", () => {
     expect(smoothed).toBeCloseTo(0.9769, 3);
     expect(smoothed).toBeGreaterThan(0.95);
     expect(1.0 - smoothed).toBeLessThan(0.05);
+  });
+});
+
+describe("applyDemonstratedCapacityFloor", () => {
+  // Build N synthetic sessions with descending session_dates.
+  const makeSessions = (counts: number[]) =>
+    counts.map((c, i) => ({
+      flashcard_completed_count: c,
+      session_date: `2026-04-${String(20 - i).padStart(2, "0")}`,
+    }));
+
+  it("0 sessions: predicate false, baseRec wins", () => {
+    expect(
+      applyDemonstratedCapacityFloor({
+        baseRec: 30,
+        smoothedAccuracy: 0.9,
+        capacitySessions: [],
+      }),
+    ).toBe(30);
+  });
+
+  it("1 session below threshold: predicate false, baseRec wins", () => {
+    expect(
+      applyDemonstratedCapacityFloor({
+        baseRec: 30,
+        smoothedAccuracy: 0.95,
+        capacitySessions: makeSessions([100]),
+      }),
+    ).toBe(30);
+  });
+
+  it("2 sessions below threshold: predicate false, baseRec wins", () => {
+    expect(
+      applyDemonstratedCapacityFloor({
+        baseRec: 30,
+        smoothedAccuracy: 0.95,
+        capacitySessions: makeSessions([100, 100]),
+      }),
+    ).toBe(30);
+  });
+
+  it("3 sessions, high capacity, high accuracy: floor wins (avg 100, floor 80)", () => {
+    expect(
+      applyDemonstratedCapacityFloor({
+        baseRec: 30,
+        smoothedAccuracy: 0.95,
+        capacitySessions: makeSessions([100, 100, 100]),
+      }),
+    ).toBe(80);
+  });
+
+  it("3 sessions, high capacity, low accuracy: gate blocks", () => {
+    expect(
+      applyDemonstratedCapacityFloor({
+        baseRec: 30,
+        smoothedAccuracy: 0.79,
+        capacitySessions: makeSessions([100, 100, 100]),
+      }),
+    ).toBe(30);
+  });
+
+  it("3 sessions, accuracy exactly at gate (0.80): inclusive boundary, floor applies", () => {
+    expect(
+      applyDemonstratedCapacityFloor({
+        baseRec: 30,
+        smoothedAccuracy: CAPACITY_ACCURACY_GATE,
+        capacitySessions: makeSessions([100, 100, 100]),
+      }),
+    ).toBe(80);
+  });
+
+  it("smoothedAccuracy null: gate blocks regardless of session count", () => {
+    expect(
+      applyDemonstratedCapacityFloor({
+        baseRec: 30,
+        smoothedAccuracy: null,
+        capacitySessions: makeSessions([100, 100, 100]),
+      }),
+    ).toBe(30);
+  });
+
+  it("7 sessions with mixed capacity: arithmetic mean computed (mean 40, floor 32)", () => {
+    // mean = (10+20+30+40+50+60+70)/7 = 40; floor = 32; max(30, 32) = 32
+    expect(
+      applyDemonstratedCapacityFloor({
+        baseRec: 30,
+        smoothedAccuracy: 0.95,
+        capacitySessions: makeSessions([10, 20, 30, 40, 50, 60, 70]),
+      }),
+    ).toBe(32);
+  });
+
+  it("capacity floor smaller than baseRec: baseRec wins", () => {
+    // 3 sessions of 5 cards: avg=5, floor=4; baseRec=30 wins.
+    expect(
+      applyDemonstratedCapacityFloor({
+        baseRec: 30,
+        smoothedAccuracy: 0.95,
+        capacitySessions: makeSessions([5, 5, 5]),
+      }),
+    ).toBe(30);
+  });
+
+  it("capacity floor exceeds CEILING: clamped to CEILING", () => {
+    // 3 sessions of 300 cards: avg=300, floor=240. Clamped to CEILING=200.
+    expect(
+      applyDemonstratedCapacityFloor({
+        baseRec: 30,
+        smoothedAccuracy: 0.95,
+        capacitySessions: makeSessions([300, 300, 300]),
+      }),
+    ).toBe(CEILING);
+  });
+
+  it("capacity floor between FLOOR and baseRec: baseRec wins", () => {
+    // 3 sessions of 25 cards: avg=25, floor=20. max(30, 20)=30.
+    expect(
+      applyDemonstratedCapacityFloor({
+        baseRec: 30,
+        smoothedAccuracy: 0.95,
+        capacitySessions: makeSessions([25, 25, 25]),
+      }),
+    ).toBe(30);
+  });
+
+  it("all sessions identical: mean equals that value", () => {
+    // 5 sessions of 50: avg=50, floor=40. max(30, 40)=40.
+    expect(
+      applyDemonstratedCapacityFloor({
+        baseRec: 30,
+        smoothedAccuracy: 0.95,
+        capacitySessions: makeSessions([50, 50, 50, 50, 50]),
+      }),
+    ).toBe(40);
+  });
+});
+
+describe("computeCapacityWindowFloor", () => {
+  it("today=2026-04-25, days=30 → 2026-03-26", () => {
+    expect(computeCapacityWindowFloor("2026-04-25", 30)).toBe("2026-03-26");
+  });
+
+  it("crosses year boundary: today=2026-01-15, days=30 → 2025-12-16", () => {
+    expect(computeCapacityWindowFloor("2026-01-15", 30)).toBe("2025-12-16");
+  });
+
+  it("crosses month boundary: today=2026-03-01, days=30 → 2026-01-30", () => {
+    expect(computeCapacityWindowFloor("2026-03-01", 30)).toBe("2026-01-30");
+  });
+
+  it("days=0 returns the same date", () => {
+    expect(computeCapacityWindowFloor("2026-04-25", 0)).toBe("2026-04-25");
   });
 });
 
