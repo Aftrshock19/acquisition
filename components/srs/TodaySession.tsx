@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useRouter } from "next/navigation";
 import { recordReview, loadMoreFlashcards } from "@/app/actions/srs";
 import type { WorkloadPolicy } from "@/lib/srs/workloadPolicy";
 import { InteractiveTextProvider } from "@/components/interactive-text/InteractiveTextProvider";
@@ -184,6 +185,8 @@ export function TodaySession({
   initialDailySession = null,
   workloadPolicy,
 }: Props) {
+  const router = useRouter();
+
   const { queue, enabledImplementedTypes, enabledUnimplementedTypes } = useMemo(
     () => buildUnifiedQueue(session, enabledTypes, mcqQuestionFormats),
     [session, enabledTypes, mcqQuestionFormats],
@@ -335,6 +338,12 @@ export function TodaySession({
       }
     };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      router.refresh();
+    };
+  }, [router]);
 
   useEffect(() => {
     if (!current) return;
