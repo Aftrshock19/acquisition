@@ -89,6 +89,10 @@ export async function completeOnboardingAsBeginner(): Promise<MarkIntroSeenResul
         placement_status: "estimated",
         placement_source: "usage_only",
         placement_last_recalibrated_at: now,
+        // Clear any prior placement reference so "never placed" SQL predicates
+        // (baseline_test_run_id IS NULL) correctly identify this user.
+        baseline_test_run_id: null,
+        placement_confidence: null,
       },
       { onConflict: "user_id" },
     );
@@ -132,6 +136,10 @@ export async function completeOnboardingAsSelfCertified(
         placement_status: "estimated",
         placement_source: "usage_only",
         placement_last_recalibrated_at: now,
+        // Clear any prior placement reference so "never placed" SQL predicates
+        // (baseline_test_run_id IS NULL) correctly identify this user.
+        baseline_test_run_id: null,
+        placement_confidence: null,
       },
       { onConflict: "user_id" },
     );
