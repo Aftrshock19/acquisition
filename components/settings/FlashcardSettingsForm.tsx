@@ -19,6 +19,7 @@ type Props = {
   effective: EffectiveFlashcardSettings;
   todayCompletedCount: number;
   effectiveDailyTargetMode: 'recommended' | 'manual' | null;
+  todayAssignedCount: number | null;
 };
 
 type ManualTypeKey =
@@ -100,6 +101,7 @@ export function FlashcardSettingsForm({
   effective,
   todayCompletedCount,
   effectiveDailyTargetMode,
+  todayAssignedCount,
 }: Props) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -125,15 +127,39 @@ export function FlashcardSettingsForm({
     effectiveDailyTargetMode === "manual" &&
     userSettings.daily_plan_mode === "recommended";
 
+  // Initialize the manual target to reflect today's actual committed target
+  // when one exists. In override state the slider must show today's assigned
+  // count, not the user's stored manual preference. In natural-manual mode
+  // where extension has raised assigned above the stored preference, also
+  // initialize from assigned so the displayed number matches reality.
+  const initialManualLimit = (() => {
+    if (isOverridden && todayAssignedCount !== null && todayAssignedCount > 0) {
+      return Math.max(effectiveMin, todayAssignedCount);
+    }
+    if (
+      !isOverridden &&
+      userSettings.daily_plan_mode === "manual" &&
+      todayAssignedCount !== null &&
+      todayAssignedCount > userSettings.manual_daily_card_limit
+    ) {
+      return Math.max(effectiveMin, todayAssignedCount);
+    }
+    return Math.max(effectiveMin, userSettings.manual_daily_card_limit);
+  })();
+
   const [dailyPlanMode, setDailyPlanMode] = useState<"recommended" | "manual">(
     isOverridden ? "manual" : userSettings.daily_plan_mode,
   );
   const [flashcardSelectionMode, setFlashcardSelectionMode] = useState<
     "recommended" | "manual"
   >(userSettings.flashcard_selection_mode);
-  const [manualDailyLimit, setManualDailyLimit] = useState<number>(
-    Math.max(effectiveMin, userSettings.manual_daily_card_limit),
-  );
+  const [manualDailyLimit, setManualDailyLimit] =
+    useState<number>(initialManualLimit);
+  // Tracks whether the user has interacted with the manual target controls.
+  // The form auto-clamps the displayed value on init (e.g. when effectiveMin
+  // exceeds stored manual), so a save with an unchanged-by-user value must
+  // not be mistaken for intent. Gates whether we send a target value.
+  const [manualLimitDirty, setManualLimitDirty] = useState<boolean>(false);
   const [removeDailyLimit, setRemoveDailyLimit] = useState<boolean>(
     forceRemoveLimit || Boolean(userSettings.remove_daily_limit),
   );
@@ -192,16 +218,26 @@ export function FlashcardSettingsForm({
       setManualDailyLimit(clampedManualDailyLimit);
     }
     const formData = new FormData(e.currentTarget);
-    // When overridden, we display 'manual' but must NOT persist that choice
-    // to user_settings.daily_plan_mode — the override is today-only, and the
-    // user's preference for tomorrow stays 'recommended'. Omit the field
-    // entirely so the server's upsert leaves the column untouched.
+    // Always clear both target fields and re-add only the ones the server
+    // should act on. Policy Y: stored manual preference is owned by explicit
+    // manual flows (cases A/C). In override state, today's target is
+    // communicated via today_session_target so it cannot be confused with a
+    // manual_daily_card_limit write. In non-override state, manual_daily_card_limit
+    // is sent only when the user actually touched the controls — auto-clamping
+    // a stored value into the input is not user intent.
+    formData.delete("manual_daily_card_limit");
+    formData.delete("today_session_target");
     if (isOverridden) {
       formData.delete("daily_plan_mode");
+      if (manualLimitDirty) {
+        formData.set("today_session_target", String(clampedManualDailyLimit));
+      }
     } else {
       formData.set("daily_plan_mode", dailyPlanMode);
+      if (manualLimitDirty) {
+        formData.set("manual_daily_card_limit", String(clampedManualDailyLimit));
+      }
     }
-    formData.set("manual_daily_card_limit", String(clampedManualDailyLimit));
     formData.set("remove_daily_limit", String(removeDailyLimit));
     formData.set("flashcard_selection_mode", flashcardSelectionMode);
     for (const key of MANUAL_TYPE_FIELDS) {
@@ -223,6 +259,7 @@ export function FlashcardSettingsForm({
       void updateUserSettingsAction(
         Object.fromEntries(formData.entries()) as RawSettingsInput & {
           mcq_question_formats: string;
+          today_session_target?: string;
         },
       ).then((res) => {
         if (!res.ok) setError(res.error);
@@ -367,8 +404,11 @@ export function FlashcardSettingsForm({
               value="manual"
               checked={dailyPlanMode === "manual"}
               onChange={() => {
+                if (dailyPlanMode !== "manual") {
+                  setManualDailyLimit(recommended.recommendedDailyLimit);
+                  setManualLimitDirty(true);
+                }
                 setDailyPlanMode("manual");
-                setManualDailyLimit(recommended.recommendedDailyLimit);
               }}
               className="app-check app-check-round"
             />
@@ -391,6 +431,7 @@ export function FlashcardSettingsForm({
                   const values = getSliderValues(removeDailyLimit);
                   const v = values[Number(e.currentTarget.value)] ?? effectiveMin;
                   setManualDailyLimit(clampLimit(v, removeDailyLimit, effectiveMin));
+                  setManualLimitDirty(true);
                 }}
                 className="app-range flex-1"
               />
@@ -410,6 +451,7 @@ export function FlashcardSettingsForm({
                   setManualDailyLimit(
                     Math.min(max, Math.max(1, Math.round(next))),
                   );
+                  setManualLimitDirty(true);
                 }}
                 onBlur={() => {
                   setManualDailyLimit((prev) =>
@@ -744,8 +786,11 @@ export function FlashcardSettingsForm({
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="text-sm text-zinc-500">
           <p>
-            Effective today: {effective.effectiveDailyLimit} cards ·{" "}
-            {summarizeFamilies(effective.effectiveTypes)}
+            Effective today:{" "}
+            {todayAssignedCount !== null
+              ? Math.max(todayAssignedCount, todayCompletedCount)
+              : effective.effectiveDailyLimit}{" "}
+            cards · {summarizeFamilies(effective.effectiveTypes)}
           </p>
           <p className="mt-1">
             Effective directions:{" "}

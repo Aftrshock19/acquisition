@@ -18,6 +18,7 @@ import { revalidatePath } from 'next/cache';
 export type UpdateUserSettingsResult = { ok: true } | { ok: false; error: string };
 type UpdateUserSettingsInput = RawSettingsInput & {
   mcq_question_formats?: string;
+  today_session_target?: string;
 };
 
 const DEBUG_SETTINGS_KEYS = [
@@ -59,7 +60,7 @@ export async function updateUserSettingsAction(
   }
 
   let payload: Partial<UserSettingsRow>;
-  const { mcq_question_formats, ...settingsInput } = input;
+  const { mcq_question_formats, today_session_target, ...settingsInput } = input;
   try {
     payload = normalizeUserSettingsInput(settingsInput);
   } catch (e) {
@@ -74,13 +75,17 @@ export async function updateUserSettingsAction(
   const parsedMcqQuestionFormats = parseMcqQuestionFormats(mcq_question_formats);
 
   // Detect target-changing saves so today's in-progress session can follow the
-  // user's new target. We only care if the incoming save touches the mode or
-  // the manual limit; card-type toggles and other changes skip this block.
+  // user's new target. We care if the incoming save touches the mode, the
+  // stored manual limit, or sends a today-only target (override flow).
+  // Card-type toggles and other changes skip this block.
   let pendingTargetUpdate:
     | { sessionDate: string; newTarget: number; completedCount: number }
     | null = null;
+  const incomingTodaySessionTarget = parseTodaySessionTarget(today_session_target);
   const mightChangeTarget =
-    payload.daily_plan_mode !== undefined || payload.manual_daily_card_limit !== undefined;
+    payload.daily_plan_mode !== undefined ||
+    payload.manual_daily_card_limit !== undefined ||
+    incomingTodaySessionTarget !== null;
 
   if (mightChangeTarget) {
     const { data: currentSettings, error: currentSettingsError } = await supabase
@@ -95,74 +100,88 @@ export async function updateUserSettingsAction(
         currentSettingsError,
       );
     } else if (currentSettings) {
-      const incomingMode = payload.daily_plan_mode;
-      const incomingLimit = payload.manual_daily_card_limit;
-      const currentMode = (currentSettings as { daily_plan_mode: 'recommended' | 'manual' | null })
-        .daily_plan_mode;
-      const currentLimit = (currentSettings as { manual_daily_card_limit: number | null })
-        .manual_daily_card_limit;
+      const sessionDate = getTodaySessionDate();
+      const { data: todayRow, error: todayRowError } = await supabase
+        .from('daily_sessions')
+        .select(
+          'flashcard_completed_count, recommended_target_at_creation, session_date, assigned_flashcard_count, effective_daily_target_mode',
+        )
+        .eq('user_id', user.id)
+        .eq('session_date', sessionDate)
+        .maybeSingle();
 
-      // Cases are mutually exclusive by construction:
-      //   A: both manual, limit differs
-      //   B: manual → recommended
-      //   C: recommended → manual (with an incoming limit)
-      type Case = 'A' | 'B' | 'C' | null;
-      let caseKind: Case = null;
-      if (
-        currentMode === 'manual' &&
-        incomingMode === 'manual' &&
-        typeof incomingLimit === 'number' &&
-        incomingLimit !== currentLimit
-      ) {
-        caseKind = 'A';
-      } else if (currentMode === 'manual' && incomingMode === 'recommended') {
-        caseKind = 'B';
-      } else if (
-        currentMode === 'recommended' &&
-        incomingMode === 'manual' &&
-        typeof incomingLimit === 'number'
-      ) {
-        caseKind = 'C';
-      }
+      if (todayRowError) {
+        // Non-critical side effect: skip the in-session target update but
+        // still persist user_settings. Next /today load will freeze fresh.
+        console.warn(
+          '[settings:update] daily_sessions lookup failed; proceeding without target adjustment',
+          todayRowError,
+        );
+      } else if (todayRow) {
+        const incomingMode = payload.daily_plan_mode;
+        const incomingLimit = payload.manual_daily_card_limit;
+        const currentMode = (currentSettings as { daily_plan_mode: 'recommended' | 'manual' | null })
+          .daily_plan_mode;
+        const currentLimit = (currentSettings as { manual_daily_card_limit: number | null })
+          .manual_daily_card_limit;
 
-      if (caseKind !== null) {
-        const sessionDate = getTodaySessionDate();
-        const { data: todayRow, error: todayRowError } = await supabase
-          .from('daily_sessions')
-          .select('flashcard_completed_count, recommended_target_at_creation, session_date')
-          .eq('user_id', user.id)
-          .eq('session_date', sessionDate)
-          .maybeSingle();
+        const completedCount = (todayRow as { flashcard_completed_count: number | null })
+          .flashcard_completed_count ?? 0;
+        const snapshotted = (todayRow as { recommended_target_at_creation: number | null })
+          .recommended_target_at_creation;
+        const assignedCount = (todayRow as { assigned_flashcard_count: number | null })
+          .assigned_flashcard_count ?? 0;
+        const isOverride = (todayRow as {
+          effective_daily_target_mode: 'recommended' | 'manual' | null;
+        }).effective_daily_target_mode === 'manual';
 
-        if (todayRowError) {
-          // Non-critical side effect: skip the in-session target update but
-          // still persist user_settings. Next /today load will freeze fresh.
-          console.warn(
-            '[settings:update] daily_sessions lookup failed; proceeding without target adjustment',
-            todayRowError,
-          );
-        } else if (todayRow) {
-          const completedCount = (todayRow as { flashcard_completed_count: number | null })
-            .flashcard_completed_count ?? 0;
-          const snapshotted = (todayRow as { recommended_target_at_creation: number | null })
-            .recommended_target_at_creation;
+        // Mutually exclusive by construction:
+        //   A: both manual, limit differs
+        //   B: manual → recommended
+        //   C: recommended → manual (with an incoming limit)
+        //   D: recommended preference + override active + override-form sent
+        //      a today_session_target that differs from today's assigned count.
+        //      Policy Y: only daily_sessions is touched; user_settings stays
+        //      out of override decisions (extension follows the same rule).
+        type Case = 'A' | 'B' | 'C' | 'D' | null;
+        let caseKind: Case = null;
+        let newTarget: number | null = null;
 
-          let newTarget: number;
-          if (caseKind === 'A' || caseKind === 'C') {
-            newTarget = incomingLimit as number;
+        if (
+          currentMode === 'manual' &&
+          incomingMode === 'manual' &&
+          typeof incomingLimit === 'number' &&
+          incomingLimit !== currentLimit
+        ) {
+          caseKind = 'A';
+          newTarget = incomingLimit;
+        } else if (currentMode === 'manual' && incomingMode === 'recommended') {
+          caseKind = 'B';
+          if (typeof snapshotted === 'number' && snapshotted > 0) {
+            newTarget = snapshotted;
           } else {
-            // Case B: defensive fallback to the live recommender when the
-            // session row was created before recommended_target_at_creation
-            // was being captured, or when the snapshot is missing for any
-            // other reason.
-            if (typeof snapshotted === 'number' && snapshotted > 0) {
-              newTarget = snapshotted;
-            } else {
-              const recommended = await recommendSettings();
-              newTarget = recommended.recommendedDailyLimit;
-            }
+            const recommended = await recommendSettings();
+            newTarget = recommended.recommendedDailyLimit;
           }
+        } else if (
+          currentMode === 'recommended' &&
+          incomingMode === 'manual' &&
+          typeof incomingLimit === 'number'
+        ) {
+          caseKind = 'C';
+          newTarget = incomingLimit;
+        } else if (
+          currentMode === 'recommended' &&
+          incomingMode === undefined &&
+          isOverride &&
+          incomingTodaySessionTarget !== null &&
+          incomingTodaySessionTarget !== assignedCount
+        ) {
+          caseKind = 'D';
+          newTarget = incomingTodaySessionTarget;
+        }
 
+        if (caseKind !== null && newTarget !== null) {
           if (newTarget < completedCount) {
             return {
               ok: false,
@@ -321,6 +340,15 @@ function debugSettings(
 ) {
   if (process.env.NODE_ENV === 'test') return;
   console.log(`[settings:update] ${stage}`, pickDebugSettings(settings));
+}
+
+function parseTodaySessionTarget(value: unknown): number | null {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  const rounded = Math.round(n);
+  if (rounded < 1 || rounded > 9999) return null;
+  return rounded;
 }
 
 function pickDebugSettings(settings: Partial<UserSettingsRow> | null | undefined) {

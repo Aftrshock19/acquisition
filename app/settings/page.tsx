@@ -12,24 +12,33 @@ import { getTodaySessionDate } from '@/lib/loop/dailySessions';
 async function getTodaySessionSnapshot(): Promise<{
   completedCount: number;
   effectiveDailyTargetMode: 'recommended' | 'manual' | null;
+  assignedFlashcardCount: number | null;
 }> {
   const { supabase, user } = await getSupabaseServerContextFast();
   if (!supabase || !user) {
-    return { completedCount: 0, effectiveDailyTargetMode: null };
+    return {
+      completedCount: 0,
+      effectiveDailyTargetMode: null,
+      assignedFlashcardCount: null,
+    };
   }
   const { data } = await supabase
     .from('daily_sessions')
-    .select('flashcard_completed_count, effective_daily_target_mode')
+    .select(
+      'flashcard_completed_count, effective_daily_target_mode, assigned_flashcard_count',
+    )
     .eq('user_id', user.id)
     .eq('session_date', getTodaySessionDate())
     .maybeSingle();
   const row = data as {
     flashcard_completed_count: number | null;
     effective_daily_target_mode: 'recommended' | 'manual' | null;
+    assigned_flashcard_count: number | null;
   } | null;
   return {
     completedCount: row?.flashcard_completed_count ?? 0,
     effectiveDailyTargetMode: row?.effective_daily_target_mode ?? null,
+    assignedFlashcardCount: row?.assigned_flashcard_count ?? null,
   };
 }
 
@@ -105,6 +114,7 @@ export default async function SettingsPage() {
           effective={effective}
           todayCompletedCount={todaySession.completedCount}
           effectiveDailyTargetMode={todaySession.effectiveDailyTargetMode}
+          todayAssignedCount={todaySession.assignedFlashcardCount}
         />
       </div>
       <div className="app-card flex flex-col gap-2 p-6">
