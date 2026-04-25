@@ -402,13 +402,41 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
   });
 
   const isManualMode = settings.daily_plan_mode === "manual";
-  const manualChunk  = Math.min(remainingDailyLimit, MANUAL_TARGET_CHUNK);
-  const newLimit     = isManualMode ? manualChunk : workloadPolicy.recommendedNewWords;
-  const reviewLimit  = isManualMode ? manualChunk : workloadPolicy.recommendedReviews;
+
+  // Detect whether today's target is user-driven rather than autopilot.
+  // Three signals — any one is sufficient:
+  //   - manual mode: user picked the target explicitly
+  //   - explicit override flag: recordReview / extendFlashcardsSession set
+  //     effective_daily_target_mode='manual' for a recommended-mode user
+  //     who has gone past today's frozen recommendation
+  //   - extended assigned vs frozen snapshot: assigned has been raised above
+  //     recommended_target_at_creation. Defense-in-depth against the override
+  //     flag write failing — both writers treat that update as best-effort.
+  // When user-driven, queue sizing and continuation use chunk-fill semantics
+  // instead of the recommendedNewWords cap, so the user can reach the target
+  // they chose. Pure recommended autopilot (none of the signals) keeps the
+  // cap as a pedagogical guardrail.
+  const isExplicitOverride =
+    existingDailySession?.effective_daily_target_mode === "manual";
+  const snapshotRecommended =
+    existingDailySession?.recommended_target_at_creation ?? null;
+  const isExtended =
+    typeof snapshotRecommended === "number" &&
+    snapshotRecommended > 0 &&
+    existingAssignedCount > snapshotRecommended;
+  const isUserDrivenTarget = isManualMode || isExplicitOverride || isExtended;
+
+  const chunk = Math.min(remainingDailyLimit, MANUAL_TARGET_CHUNK);
+  const newLimit = isUserDrivenTarget
+    ? chunk
+    : workloadPolicy.recommendedNewWords;
+  const reviewLimit = isUserDrivenTarget
+    ? chunk
+    : workloadPolicy.recommendedReviews;
 
   const effectiveSettings = {
     dailyLimit: sessionTargetCount,
-    manualTargetMode: isManualMode,
+    manualTargetMode: isUserDrivenTarget,
     autoAdvanceCorrect: effective.autoAdvanceCorrect,
     showPosHint: effective.showPosHint,
     showDefinitionFirst: effective.showDefinitionFirst,
@@ -434,7 +462,7 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     };
   }
 
-  const sessionLimit = isManualMode ? manualChunk : remainingDailyLimit;
+  const sessionLimit = isUserDrivenTarget ? chunk : remainingDailyLimit;
   const session = limitTodaySession(queueResult.session, sessionLimit);
   const dailySession = await upsertDailySession(
     session,

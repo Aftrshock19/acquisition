@@ -123,6 +123,8 @@ export type DailySessionRow = {
   reading_question_accuracy?: number | null;
   reading_question_attempts_count?: number | null;
   daily_target_mode?: "recommended" | "manual";
+  recommended_target_at_creation?: number | null;
+  effective_daily_target_mode?: "recommended" | "manual" | null;
 };
 
 export type ReviewState = {
