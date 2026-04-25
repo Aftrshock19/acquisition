@@ -5,8 +5,8 @@ import { getSupabaseServerContext } from "@/lib/supabase/server";
 import {
   BEGINNER_DEFAULT_FRONTIER,
   cefrOption,
-  isCefrLevel,
-  type CefrLevel,
+  isSelfCertCefrLevel,
+  type SelfCertCefrLevel,
 } from "@/lib/onboarding/cefr";
 
 export type MarkIntroSeenResult = { ok: true } | { ok: false; error: string };
@@ -106,9 +106,9 @@ export async function completeOnboardingAsBeginner(): Promise<MarkIntroSeenResul
  * practises — self-certification is explicitly a starting point, not a lock.
  */
 export async function completeOnboardingAsSelfCertified(
-  level: CefrLevel,
+  level: SelfCertCefrLevel,
 ): Promise<MarkIntroSeenResult> {
-  if (!isCefrLevel(level)) return { ok: false, error: "invalid_level" };
+  if (!isSelfCertCefrLevel(level)) return { ok: false, error: "invalid_level" };
 
   const { supabase, user } = await getSupabaseServerContext();
   if (!supabase) return { ok: false, error: "no_supabase" };

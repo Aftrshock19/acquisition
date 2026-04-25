@@ -8,13 +8,33 @@
  * self-certification is not a permanent lock.
  */
 
-export const CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1"] as const;
+export const CEFR_LEVELS = ["A0", "A1", "A2", "B1", "B2", "C1"] as const;
 export type CefrLevel = (typeof CEFR_LEVELS)[number];
+
+/**
+ * Subset of CEFR_LEVELS that maps to a real self-certified frontier rank
+ * stored in user_settings.self_certified_cefr_level. A0 is excluded — A0
+ * users route to completeOnboardingAsBeginner instead, which leaves the
+ * column null.
+ */
+export const SELF_CERT_CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1"] as const;
+export type SelfCertCefrLevel = (typeof SELF_CERT_CEFR_LEVELS)[number];
 
 export type CefrOption = {
   level: CefrLevel;
   label: string;
+  /** Short, action-oriented primary line shown on the picker. */
   canDo: string;
+  /**
+   * Longer behavioural descriptor shown as a secondary line on the picker.
+   * Paraphrased from the Council of Europe CEFR self-assessment grid
+   * (Council of Europe 2001; CEFR Companion Volume 2020), prioritising
+   * listening and reading descriptors since (a) this app trains receptive
+   * vocabulary via reading and listening, and (b) self-rating is more
+   * accurate for receptive than productive skills (Ross 1998 meta-analysis;
+   * LittleNorth 2019).
+   */
+  canDoExpanded: string;
   /** Approximate target word-frequency rank used as the initial frontier. */
   frontierRank: number;
   /**
@@ -60,9 +80,21 @@ export type CefrOption = {
  */
 export const CEFR_OPTIONS: readonly CefrOption[] = [
   {
+    level: "A0",
+    label: "Just starting",
+    canDo: "I'm completely new to Spanish",
+    canDoExpanded: "I have little or no experience with Spanish.",
+    frontierRank: 0,
+    frontierRankLow: 0,
+    frontierRankHigh: 0,
+  },
+  {
     level: "A1",
     label: "Beginner",
-    canDo: "I only know a few words or phrases",
+    canDo:
+      "I know everyday phrases like greetings, numbers, and basic questions",
+    canDoExpanded:
+      "I can recognise familiar words and very basic phrases about myself, my family, and concrete surroundings when people speak slowly and clearly. I can read very short, simple texts and find specific information in everyday material like menus or timetables.",
     frontierRank: 500,
     frontierRankLow: 1,
     frontierRankHigh: 800,
@@ -70,8 +102,9 @@ export const CEFR_OPTIONS: readonly CefrOption[] = [
   {
     level: "A2",
     label: "Elementary",
-    canDo:
-      "I understand very simple Spanish and familiar everyday expressions",
+    canDo: "I can understand simple everyday sentences",
+    canDoExpanded:
+      "I can understand frequently used expressions related to areas of immediate relevance (shopping, family, local geography, employment). I can read short, simple texts on familiar matters and understand short, simple personal letters.",
     frontierRank: 1501,
     frontierRankLow: 800,
     frontierRankHigh: 1800,
@@ -79,7 +112,10 @@ export const CEFR_OPTIONS: readonly CefrOption[] = [
   {
     level: "B1",
     label: "Intermediate",
-    canDo: "I can follow clear everyday Spanish but still miss a lot",
+    canDo:
+      "I can follow everyday conversations when people speak clearly",
+    canDoExpanded:
+      "I can understand the main points of clear standard speech on familiar matters regularly encountered in work, school, and leisure. I can read straightforward factual texts on subjects related to my interests with a satisfactory level of comprehension.",
     frontierRank: 4301,
     frontierRankLow: 1800,
     frontierRankHigh: 3500,
@@ -87,8 +123,9 @@ export const CEFR_OPTIONS: readonly CefrOption[] = [
   {
     level: "B2",
     label: "Upper intermediate",
-    canDo:
-      "I can handle most normal content and conversations with some gaps",
+    canDo: "I can understand most Spanish content with some gaps",
+    canDoExpanded:
+      "I can understand extended speech and lectures and follow complex lines of argument provided the topic is reasonably familiar. I can read articles and reports concerned with contemporary problems, and understand contemporary literary prose.",
     frontierRank: 9201,
     frontierRankLow: 3500,
     frontierRankHigh: 7000,
@@ -96,7 +133,10 @@ export const CEFR_OPTIONS: readonly CefrOption[] = [
   {
     level: "C1",
     label: "Advanced",
-    canDo: "I understand most content comfortably, though not perfectly",
+    canDo:
+      "I'm comfortable with complex Spanish and rarely get lost",
+    canDoExpanded:
+      "I can understand extended speech even when it is not clearly structured and when relationships are only implied. I can understand long and complex factual and literary texts, appreciating distinctions of style.",
     frontierRank: 17001,
     frontierRankLow: 7000,
     frontierRankHigh: 12000,
@@ -130,5 +170,14 @@ export function isCefrLevel(value: unknown): value is CefrLevel {
   return (
     typeof value === "string" &&
     (CEFR_LEVELS as readonly string[]).includes(value)
+  );
+}
+
+export function isSelfCertCefrLevel(
+  value: unknown,
+): value is SelfCertCefrLevel {
+  return (
+    typeof value === "string" &&
+    (SELF_CERT_CEFR_LEVELS as readonly string[]).includes(value)
   );
 }

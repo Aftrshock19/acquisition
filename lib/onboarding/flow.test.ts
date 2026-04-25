@@ -242,11 +242,15 @@ describe("first-run onboarding flow (integration)", () => {
     expect(INTRO_PAGE_COUNT).toBe(8);
   });
 
-  it("exposes 5 CEFR options with can-do descriptions", () => {
-    expect(CEFR_OPTIONS.length).toBe(5);
+  it("exposes 6 CEFR options with can-do descriptions", () => {
+    expect(CEFR_OPTIONS.length).toBe(6);
     for (const opt of CEFR_OPTIONS) {
       expect(isCefrLevel(opt.level)).toBe(true);
       expect(opt.canDo.length).toBeGreaterThan(10);
+      // 40-char floor: catches truly empty/missing strings while permitting
+      // the intentionally short A0 entry ("I have little or no experience
+      // with Spanish.", ~44 chars).
+      expect(opt.canDoExpanded.length).toBeGreaterThan(40);
       // frontierRankLow/High are legacy fields; intentionally not asserted
       // against frontierRank — see CefrOption doc in lib/onboarding/cefr.ts.
     }

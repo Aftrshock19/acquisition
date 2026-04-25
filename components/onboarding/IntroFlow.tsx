@@ -106,7 +106,10 @@ export function IntroFlow({ initialPage = 0, replay = false }: IntroFlowProps) {
   const pickCefr = (level: CefrLevel) => {
     startTransition(async () => {
       setError(null);
-      const res = await completeOnboardingAsSelfCertified(level);
+      const res =
+        level === "A0"
+          ? await completeOnboardingAsBeginner()
+          : await completeOnboardingAsSelfCertified(level);
       if (!res.ok) {
         setError(res.error);
         return;
@@ -752,10 +755,10 @@ function StartBranch({
     <div className="flex flex-col gap-5" data-testid="intro-branch-pick-cefr">
       <h1 className="app-title">Pick a starting level</h1>
       <p className="text-base text-zinc-600 dark:text-zinc-400">
-        Choose whichever description sounds closest. The app keeps adjusting
-        as you use it, so this is only a starting point.
+        Choose the level that best matches what you can do now. We&apos;ll
+        keep adjusting as you learn.
       </p>
-      <ul className="flex flex-col gap-3">
+      <ul className="flex flex-col gap-4">
         {CEFR_OPTIONS.map((option) => (
           <li key={option.level}>
             <button
@@ -769,12 +772,19 @@ function StartBranch({
                 <span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
                   {option.label}
                 </span>
-                <span className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">
-                  {option.level}
-                </span>
+                {/* A0 is not a real CEFR level — used as an internal
+                    discriminator only, no visible pill. */}
+                {option.level === "A0" ? null : (
+                  <span className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">
+                    {option.level}
+                  </span>
+                )}
               </span>
-              <span className="mt-1 block text-sm text-zinc-600 dark:text-zinc-400">
+              <span className="mt-2 block text-base text-zinc-800 dark:text-zinc-100">
                 {option.canDo}
+              </span>
+              <span className="mt-2 block text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+                {option.canDoExpanded}
               </span>
             </button>
           </li>
