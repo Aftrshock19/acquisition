@@ -251,8 +251,11 @@ describe("first-run onboarding flow (integration)", () => {
       // the intentionally short A0 entry ("I have little or no experience
       // with Spanish.", ~44 chars).
       expect(opt.canDoExpanded.length).toBeGreaterThan(40);
-      // frontierRankLow/High are legacy fields; intentionally not asserted
-      // against frontierRank — see CefrOption doc in lib/onboarding/cefr.ts.
+      // frontierRankLow ≤ frontierRank ≤ frontierRankHigh. The picker reads
+      // frontierRankLow (see lib/placement/newWordPicker.ts), so this
+      // invariant matters at runtime — keeping it here as a guard rail.
+      expect(opt.frontierRankLow).toBeLessThanOrEqual(opt.frontierRank);
+      expect(opt.frontierRank).toBeLessThanOrEqual(opt.frontierRankHigh);
     }
   });
 

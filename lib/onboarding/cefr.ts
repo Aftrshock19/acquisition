@@ -38,12 +38,25 @@ export type CefrOption = {
   /** Approximate target word-frequency rank used as the initial frontier. */
   frontierRank: number;
   /**
-   * Legacy field. Not consumed by any routing logic; retained for back-compat
-   * with earlier placement bracket UI. Inconsistent with frontierRank under
-   * the floor-based calibration documented on CEFR_OPTIONS below.
+   * Lower bound for the new-word picker's selection window. Written to
+   * user_settings.current_frontier_rank_low at onboarding, then read by
+   * pickNewWordsNearFrontier (lib/placement/newWordPicker.ts) — the
+   * picker computes its query lower bound as
+   *   max(1, round(frontierRankLow * 0.85)).
+   *
+   * Set to the floor of the substage one below the "--" substage of this
+   * level's band (0 for A1/beginner). This anchors the picker's window
+   * within the band while leaving a small conservative tail below for
+   * back-fill as upper-rank words get learned.
    */
   frontierRankLow: number;
-  /** Legacy field; see frontierRankLow. */
+  /**
+   * Upper bound conceptually associated with this level's band — set to
+   * the ceiling of the "++" substage. NOT currently consumed by routing
+   * or the new-word picker (which hardcodes its upper window to
+   * frontierRank + 300). Retained as documentation of the band's
+   * intended ceiling and for possible future consumers.
+   */
   frontierRankHigh: number;
 };
 
@@ -96,8 +109,8 @@ export const CEFR_OPTIONS: readonly CefrOption[] = [
     canDoExpanded:
       "I can recognise familiar words and very basic phrases about myself, my family, and concrete surroundings when people speak slowly and clearly. I can read very short, simple texts and find specific information in everyday material like menus or timetables.",
     frontierRank: 500,
-    frontierRankLow: 1,
-    frontierRankHigh: 800,
+    frontierRankLow: 0,
+    frontierRankHigh: 1500,
   },
   {
     level: "A2",
@@ -106,8 +119,8 @@ export const CEFR_OPTIONS: readonly CefrOption[] = [
     canDoExpanded:
       "I can understand frequently used expressions related to areas of immediate relevance (shopping, family, local geography, employment). I can read short, simple texts on familiar matters and understand short, simple personal letters.",
     frontierRank: 1501,
-    frontierRankLow: 800,
-    frontierRankHigh: 1800,
+    frontierRankLow: 1051,
+    frontierRankHigh: 4300,
   },
   {
     level: "B1",
@@ -117,8 +130,8 @@ export const CEFR_OPTIONS: readonly CefrOption[] = [
     canDoExpanded:
       "I can understand the main points of clear standard speech on familiar matters regularly encountered in work, school, and leisure. I can read straightforward factual texts on subjects related to my interests with a satisfactory level of comprehension.",
     frontierRank: 4301,
-    frontierRankLow: 1800,
-    frontierRankHigh: 3500,
+    frontierRankLow: 3621,
+    frontierRankHigh: 9200,
   },
   {
     level: "B2",
@@ -127,8 +140,8 @@ export const CEFR_OPTIONS: readonly CefrOption[] = [
     canDoExpanded:
       "I can understand extended speech and lectures and follow complex lines of argument provided the topic is reasonably familiar. I can read articles and reports concerned with contemporary problems, and understand contemporary literary prose.",
     frontierRank: 9201,
-    frontierRankLow: 3500,
-    frontierRankHigh: 7000,
+    frontierRankLow: 8001,
+    frontierRankHigh: 17000,
   },
   {
     level: "C1",
@@ -138,8 +151,8 @@ export const CEFR_OPTIONS: readonly CefrOption[] = [
     canDoExpanded:
       "I can understand extended speech even when it is not clearly structured and when relationships are only implied. I can understand long and complex factual and literary texts, appreciating distinctions of style.",
     frontierRank: 17001,
-    frontierRankLow: 7000,
-    frontierRankHigh: 12000,
+    frontierRankLow: 15251,
+    frontierRankHigh: 27500,
   },
 ] as const;
 
@@ -149,13 +162,17 @@ export const CEFR_OPTIONS: readonly CefrOption[] = [
  * very floor of substage 1 (A1--, 0-150). The recalibration layer
  * (lib/placement/recalibrate.ts) lifts this as recall evidence accumulates.
  *
- * frontierRankLow / frontierRankHigh are legacy fields (see CefrOption type
- * doc) — not consumed by routing logic.
+ * Note: the new-word picker is gated by `frontierRank > 200` in
+ * app/actions/srs.ts, so for the default beginner (frontierRank=0) the
+ * picker is skipped entirely and the default RPC serves rank-1-ASC. The
+ * `frontierRankLow`/`frontierRankHigh` values below are therefore not
+ * consumed for beginner users today, but are kept consistent with the
+ * A1 entry for predictability if the gate ever changes.
  */
 export const BEGINNER_DEFAULT_FRONTIER = {
   frontierRank: 0,
-  frontierRankLow: 1,
-  frontierRankHigh: 600,
+  frontierRankLow: 0,
+  frontierRankHigh: 1500,
 } as const;
 
 export function cefrOption(level: CefrLevel): CefrOption {
