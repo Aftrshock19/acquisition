@@ -1,125 +1,305 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+<div align="center">
 
-## Getting Started
+# Acquisition
 
-Copy `.env.example` to `.env.local` and set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Apply the Supabase migrations in order with the Supabase CLI. Seed vocabulary from `supabase/seed/new_spa.csv` with `npm run seed` after the project is linked and the migration has been pushed.
+A research-informed Spanish learning web app.
 
-### Database overview
+[![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Supabase](https://img.shields.io/badge/Supabase-Postgres-3ECF8E?logo=supabase&logoColor=white)](https://supabase.com/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-38B2AC?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
 
-The Supabase database is organized into shared content tables and user-specific progress tables.
+[Live app](https://languageacquisition.net) · [Dissertation metrics](docs/dissertation-metrics.md) · [Analysis pipeline](analysis/README.md)
 
-- Shared content: `words`, `word_forms`, `texts`, `audio`
-- User progress: `user_words`, `review_events`, `daily_sessions`, `user_settings`
-- Identity: `auth.users`
+</div>
 
-`words` is the canonical vocabulary curriculum table. `user_words` is the source of truth for each user's current state for each word. `review_events` is the append-only history of graded reviews. `daily_sessions` tracks guided day-by-day loop progress. `user_settings` stores per-user preferences. `word_forms`, `texts`, and `audio` support inflected form resolution plus matched reading/listening content.
+Acquisition is a final-year Computer Science dissertation project at the University of Bristol. It runs one small daily loop: review vocabulary, read a matched Spanish passage, listen to matched audio, stop. No streaks, XP, or guilt framing. The system records enough behaviour to evaluate whether the loop actually works.
 
-Dissertation-facing instrumentation, metric definitions, export formats, and consistency checks are documented in [`docs/dissertation-metrics.md`](docs/dissertation-metrics.md).
+**Status.** Pre-launch pilot. Deployed on Vercel.
 
-Evaluation chapter support (measures, analysis procedure, results scaffold, figure captions, and threats to validity) is in the [`docs/`](docs/) directory:
+---
 
-- [`dissertation-evaluation-measures.md`](docs/dissertation-evaluation-measures.md) — Operationalised measure definitions for the Measures section
-- [`dissertation-analysis-procedure.md`](docs/dissertation-analysis-procedure.md) — Export, validation, and analysis workflow for the methodology section
-- [`dissertation-results-scaffold.md`](docs/dissertation-results-scaffold.md) — Results section scaffold with placeholders
-- [`dissertation-figure-table-captions.md`](docs/dissertation-figure-table-captions.md) — Draft captions for all generated figures and tables
-- [`dissertation-threats-to-validity.md`](docs/dissertation-threats-to-validity.md) — Threats-to-validity mapping tied to the implemented measures
-- [`evaluation-metric-wording.md`](docs/evaluation-metric-wording.md) — Precise metric wording guide for examiner-safe prose
+## The daily loop
 
-The reproducible analysis pipeline is in [`analysis/`](analysis/README.md).
-
-Multi-participant study operations (enrollment, cohort export, researcher access) are documented in [`docs/study-operations.md`](docs/study-operations.md).
-
-### Seeding words
-
-The canonical vocabulary source is `supabase/seed/new_spa.csv`. The import flow is:
-
-```bash
-python3 scripts/generate_words_import_sql.py supabase/seed/new_spa.csv supabase/.temp/import_words.sql
-/usr/local/bin/supabase db query --linked -f supabase/.temp/import_words.sql
+```mermaid
+flowchart LR
+    A[Start session] --> B[Flashcards]
+    B --> C[Interactive reading]
+    C --> D[Matched listening]
+    D --> E[Done]
 ```
 
-The final `public.words` schema is:
+One session, three linked stages, resumable. Vocabulary introduced in flashcards reappears in the same session's reading passage and listening track. This reflects Nation's argument that deliberate word-card study works best when paired with meaning-focused input.
 
-- `id uuid primary key default gen_random_uuid()`
-- `rank integer not null unique`
-- `lemma text not null`
-- `original_lemma text not null`
-- `translation text`
-- `tags text[] not null default '{}'`
-- `pos text not null`
-- `example_sentence text`
-- `example_sentence_en text`
-- `created_at timestamptz not null default now()`
+---
 
-The large definition payload lives in `public.definitions`:
+## How it works
 
-- `id uuid primary key references public.words(id) on delete cascade`
-- `rank integer not null unique`
-- `lemma text not null`
-- `translation text`
-- `definition_es text`
-- `definition_en text`
-- `created_at timestamptz not null default now()`
+### Content pipeline
 
-The import uses `public.words_import_raw` as a staging table, accepts both the legacy `spa.csv` header set and the current `new_spa.csv` header set, persists `tags` on `public.words`, writes the large definition text to `public.definitions`, normalizes `pos`, and upserts on `rank` so reruns are idempotent.
+The app includes a custom Spanish content pipeline for producing level-banded reading, listening, and flashcard material. The production app does not make runtime LLM calls.
 
-### Generating TypeScript types from Supabase
+The pipeline combines:
 
-From project root, with Supabase CLI linked to your project:
+- corpus-backed Spanish examples
+- controlled vocabulary selection
+- CEFR-banded constraints
+- template and frame-based sentence construction
+- validation checks for level, vocabulary coverage, and formatting
+- manual review and correction passes for user-facing content
 
-```bash
-npx supabase gen types typescript --project-id YOUR_PROJECT_REF > lib/supabase/database.types.ts
+The lexicon underneath is 35,000+ Spanish lemmas, built from Wiktextract/Kaikki, Helsinki-NLP opus-mt translations, and morphological expansion.
+
+| Module    | Inventory                          |
+| --------- | ---------------------------------- |
+| Lexicon   | 35,000+ lemmas                     |
+| Reader    | 806 passages across A1 to C2       |
+| Listening | 955 tracks across A1 to C2         |
+| Placement | Item bank scaled to roughly 30,000 |
+
+### Adaptive placement
+
+A short vocabulary-frontier test runs before the first session. Length is dynamic (10 to 26 items) with stopping rules for precision, max items, bottom-out failure, and top-of-bank performance.
+
+The engine is designed to resist lucky guesses. It weights floor modules around vocabulary checkpoints, discounts cognate-heavy answers, and requires morphological evidence for non-cognate support. Onboarding includes a short Zipf's law explanation so the learner understands why a frontier-based test matters.
+
+### Spaced repetition
+
+Flashcards use an FSRS-style stability and difficulty model with an adaptive workload layer on top.
+
+Card types: cloze, normal, MCQ, audio, sentence. Correctness updates scheduling directly; no "again / hard / good / easy" self-grading.
+
+Daily target options:
+
+- **Recommended.** Computed from backlog and accuracy, range 20 to 40.
+- **Manual.** 1 to 200, or 1 to 9,999 with an explicit remove-limit toggle. Fulfils in chunks of 50 with prefetch at 10 remaining. Threshold warnings at 251 and 501.
+
+Retries count strictly toward the target. A post-session Practice Complete screen shows stats and offers continuation.
+
+### Reader
+
+A LingQ-style tappable reader with inline tokens that preserve spacing and punctuation. Tapping a word opens a definition panel and a save action that upserts into `user_words` as learning and adds to the manual deck. Known and unknown words are highlighted. A floating listening player is available during reading.
+
+### Listening
+
+Audio synthesised via Google Cloud TTS. Play, pause, seek, transcript show/hide, speed 0.5x to 1.5x. Tracks are matched to the learner's current vocabulary level. Sessions gate on a single listen-through to encourage actual exposure.
+
+---
+
+## Research grounding
+
+The design maps to four lines of empirical work.
+
+| Finding                           | Source                      | Product decision                                                  |
+| --------------------------------- | --------------------------- | ----------------------------------------------------------------- |
+| Spacing effect                    | Cepeda et al., 2006         | SRS intervals rather than bulk repetition                         |
+| Retrieval practice                | Roediger and Karpicke, 2006 | Recall-based cards, not passive flipping                          |
+| Multi-strand vocabulary learning  | Nation, 2007                | Flashcards feed matched reading and listening in the same session |
+| Task and process-focused feedback | Hattie and Timperley, 2007  | Progress framed as practice and review, not mastery or self-worth |
+
+The app does not claim that words are "learned" or "mastered". Framing throughout is practice, review, and exposure.
+
+---
+
+## Data and analytics
+
+Every meaningful event is recorded. The same server-side metrics bundle feeds both the in-app progress view and the dissertation export.
+
+**Tracked events.** Flashcard attempts with correctness, timing, queue source, queue kind, and retry metadata. Reading completions, saved words, active reading time. Listening completions and listening time. Daily session stage transitions and drop-off.
+
+**Export endpoint.**
+
+```text
+/api/progress/export
+  ?format=json|csv
+  &dataset=all|daily_aggregates|sessions|review_events|reading_events|listening_events|saved_words|export_runs
+  &from=YYYY-MM-DD
+  &to=YYYY-MM-DD
 ```
 
-Use the generated types in server client and actions (e.g. type the Supabase client with `Database`).
+The JSON export includes metadata, metric definitions, summary metrics, daily aggregates, sessions, review events, reading and listening events, saved words, and export logs.
 
-First, run the development server:
+**Reproducibility.** The Python pipeline in `analysis/` consumes an export and produces the dissertation figures and tables.
+
+**Known data-integrity note.** Between 2026-04-11 and 2026-04-15, five session rows across four users have unreliable `assigned_*`, `workload_*`, `learner_*`, and `adaptive_new_word_cap` fields, caused by a now-fixed column-name mismatch (`adaptive_new_word_budget` in code, `adaptive_new_word_cap` in database). These rows are excluded from analyses using those fields. Effort metrics such as completion, attempts, retries, and accuracy are unaffected.
+
+See also: [evaluation measures](docs/dissertation-evaluation-measures.md), [analysis procedure](docs/dissertation-analysis-procedure.md), [threats to validity](docs/dissertation-threats-to-validity.md).
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TD
+    subgraph Client[Next.js App Router]
+        UI[Today]
+        Reader[Reader]
+        Listening[Listening player]
+        Progress[Progress and export]
+    end
+
+    subgraph Server[Server actions and API routes]
+        SRS[SRS actions]
+        Placement[Adaptive placement]
+        Analytics[Analytics service]
+        Audio[TTS generation]
+    end
+
+    subgraph Supabase[Supabase]
+        Auth[Auth]
+        Content[words, definitions, texts, audio]
+        ProgressDB[user_words, review_events, daily_sessions]
+        Research[export_runs, study tables]
+    end
+
+    subgraph ResearchTools[Research tooling]
+        Export[JSON and CSV export]
+        Pipeline[Python analysis]
+        Figures[Dissertation figures and tables]
+    end
+
+    UI --> SRS
+    Reader --> SRS
+    Listening --> SRS
+    SRS --> ProgressDB
+    Placement --> Content
+    Analytics --> ProgressDB
+    Audio --> Content
+    Progress --> Analytics
+    Analytics --> Export
+    Export --> Pipeline
+    Pipeline --> Figures
+    Auth --> UI
+```
+
+### Stack
+
+| Layer     | Technology                                |
+| --------- | ----------------------------------------- |
+| Framework | Next.js 16 App Router                     |
+| UI        | React 19, TypeScript, Tailwind CSS 4      |
+| Database  | Supabase Postgres                         |
+| Auth      | Supabase Auth with SSR clients            |
+| Storage   | Supabase Storage for audio                |
+| TTS       | Google Cloud Text-to-Speech               |
+| Testing   | Vitest                                    |
+| Scripts   | TypeScript via `tsx`, Python for analysis |
+| Hosting   | Vercel                                    |
+
+### Data model
+
+```mermaid
+erDiagram
+    auth_users ||--o{ user_words : owns
+    auth_users ||--o{ review_events : produces
+    auth_users ||--o{ daily_sessions : starts
+    auth_users ||--o{ user_settings : configures
+    auth_users ||--o{ user_deck_words : saves
+
+    words ||--|| definitions : has
+    words ||--o{ word_forms : inflects
+    words ||--o{ user_words : scheduled_as
+    words ||--o{ review_events : reviewed_as
+
+    texts ||--o{ audio : has
+    texts ||--o{ user_deck_words : source_for
+    daily_sessions ||--o{ review_events : contains
+```
+
+### Hot paths
+
+Flashcard submission, Today page loading, reader word lookup, saved-word actions, reading completion, and listening completion are performance-critical. Before changing any of them, read [performance guardrails](docs/performance-guardrails.md) and run `npm run perf:check`.
+
+---
+
+## Repository layout
+
+```text
+acquisition/
+├── app/          Next.js routes, server actions, API
+├── lib/          SRS, placement, analytics, Supabase helpers
+├── components/   Reusable UI
+├── supabase/    Migrations, seed data
+├── scripts/     Import, audio, patching, performance
+├── analysis/    Dissertation analysis pipeline (Python)
+├── docs/        Evaluation, metrics, operations, performance
+└── public/      Static assets and PWA resources
+```
+
+---
+
+## Running locally
+
+Intended for dissertation reviewers reproducing the project, not general public use.
 
 ```bash
+git clone https://github.com/Aftrshock19/acquisition.git
+cd acquisition
+npm install
+cp .env.example .env.local   # fill in Supabase keys
+supabase link && supabase db push
+npm run seed
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Required environment variables:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Performance guardrails
-
-Before editing any hot path (flashcard submit, Today loader, reader
-word tap, save word, reading/listening completion), read:
-
-- [docs/performance-guardrails.md](docs/performance-guardrails.md)
-- [docs/hot-path-checklist.md](docs/hot-path-checklist.md)
-- [docs/deployment-region-alignment.md](docs/deployment-region-alignment.md)
-
-Run the automated checker before opening a perf-sensitive PR:
-
-```sh
-npm run perf:check
+```bash
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+SUPABASE_SERVICE_ROLE_KEY=          # research and admin flows
+RESEARCHER_EMAILS=
+APP_SESSION_TIME_ZONE=Europe/London
+GOOGLE_APPLICATION_CREDENTIALS=     # audio synthesis only
 ```
 
-For Claude-assisted performance work, paste the template in
-[docs/claude-performance-prompt.md](docs/claude-performance-prompt.md).
+Useful commands:
 
-## Learn More
+| Task                      | Command                     |
+| ------------------------- | --------------------------- |
+| Dev server                | `npm run dev`               |
+| Production build          | `npm run build`             |
+| Lint                      | `npm run lint`              |
+| Tests                     | `npm run test`              |
+| Seed vocabulary           | `npm run seed`              |
+| Import passages           | `npm run import:passages`   |
+| Synthesise TTS audio      | `npm run generate:audio`    |
+| Backfill audio duration   | `npm run backfill:duration` |
+| Performance guardrail run | `npm run perf:check`        |
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Documentation
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Document                                                                | Purpose                                          |
+| ----------------------------------------------------------------------- | ------------------------------------------------ |
+| [Dissertation metrics](docs/dissertation-metrics.md)                    | Sources of truth, derived metrics, export format |
+| [Evaluation measures](docs/dissertation-evaluation-measures.md)         | Operationalised measures for the methodology     |
+| [Analysis procedure](docs/dissertation-analysis-procedure.md)           | Export, validation, and analysis workflow        |
+| [Results scaffold](docs/dissertation-results-scaffold.md)               | Dissertation results structure                   |
+| [Figure and table captions](docs/dissertation-figure-table-captions.md) | Captions for generated outputs                   |
+| [Threats to validity](docs/dissertation-threats-to-validity.md)         | Validity risks mapped to implemented measures    |
+| [Study operations](docs/study-operations.md)                            | Enrolment, cohort export, researcher access      |
+| [Analysis pipeline](analysis/README.md)                                 | Python workflow for figures, tables, reports     |
+| [Performance guardrails](docs/performance-guardrails.md)                | Hot-path rules and latency logging               |
+| [Hot-path checklist](docs/hot-path-checklist.md)                        | Pre-merge checklist for latency-sensitive code   |
 
-## Deploy on Vercel
+---
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Design principles
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Non-negotiable constraints the codebase is held to:
+
+1. **Calm over gamified.** No streaks, XP, owls, or guilt framing.
+2. **Low burden over high pressure.** Recommended workloads guide the learner; motivated users are never capped.
+3. **Context over isolated recall.** Vocabulary is reused inside reading and listening within the same session.
+4. **Honest framing.** No "learned" or "mastered" claims.
+5. **Hot paths are features.** Flashcard submission, word lookup, and Today loading have explicit latency guardrails.
+
+---
+
+## Author
+
+Bassam Toughan ([Aftrshock19](https://github.com/Aftrshock19)). BSc Computer Science, University of Bristol.
