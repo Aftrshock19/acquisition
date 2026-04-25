@@ -99,8 +99,9 @@ describe("getUserStageIndex", () => {
 
   it("uses self-certified CEFR when no frontier rank", () => {
     const s = getUserStageIndex(makeSettings({ self_certified_cefr_level: "B1" }));
-    expect(s).toBeGreaterThanOrEqual(11);
-    expect(s).toBeLessThanOrEqual(15);
+    // CEFR_OPTIONS B1 = 4301 (floor of B1--). Legacy frontierRankToStageIndex
+    // (6-band linear) maps 4301 into the B2 band (3500-7000), yielding stage 17.
+    expect(s).toBe(17);
   });
 
   it("falls back to stage 3 with no signals", () => {

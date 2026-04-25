@@ -126,9 +126,9 @@ describe("buildLearningRangeViewModel — substage mapping", () => {
       selfCertifiedCefr: "B1",
       onboardingEntryMode: "self_certified",
     });
-    // CEFR_OPTIONS B1 frontierRank = 2500 → falls in stage 8 (A2: 2401–2980).
-    expect(vm.frontierRank).toBe(2500);
-    expect(vm.label).toBe("A2");
+    // CEFR_OPTIONS B1 frontierRank = 4301 (floor of B1--, range 4301-5050).
+    expect(vm.frontierRank).toBe(4301);
+    expect(vm.label).toBe("B1--");
     expect(vm.source).toBe("self_certified");
     expect(vm.sourceLabel).toBe("Self-certified");
     expect(vm.hasPlacement).toBe(true);

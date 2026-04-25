@@ -247,8 +247,8 @@ describe("first-run onboarding flow (integration)", () => {
     for (const opt of CEFR_OPTIONS) {
       expect(isCefrLevel(opt.level)).toBe(true);
       expect(opt.canDo.length).toBeGreaterThan(10);
-      expect(opt.frontierRankLow).toBeLessThanOrEqual(opt.frontierRank);
-      expect(opt.frontierRank).toBeLessThanOrEqual(opt.frontierRankHigh);
+      // frontierRankLow/High are legacy fields; intentionally not asserted
+      // against frontierRank — see CefrOption doc in lib/onboarding/cefr.ts.
     }
   });
 

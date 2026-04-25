@@ -14,6 +14,10 @@ import {
 import { CheckIcon } from "@/components/icons/CheckIcon";
 import type { PlacementState } from "@/lib/placement/state";
 import type { AdaptivePlacementEstimate } from "@/lib/placement/types";
+import {
+  rankToSubstageIndex,
+  SUBSTAGE_TABLE,
+} from "@/lib/recommendation/substages";
 
 export function PlacementFlow({
   initialState,
@@ -469,15 +473,50 @@ function ReassuranceRow({ children }: { children: React.ReactNode }) {
   );
 }
 
-function approximateVocabLabel(estimate: AdaptivePlacementEstimate): string | null {
+/**
+ * Round a count to a learner-friendly nearest tier:
+ *   <500 → nearest 50, <5000 → nearest 100, ≥5000 → nearest 500.
+ */
+function roundConfirmedVocab(raw: number): number {
+  if (raw < 500) return Math.round(raw / 50) * 50;
+  if (raw < 5000) return Math.round(raw / 100) * 100;
+  return Math.round(raw / 500) * 500;
+}
+
+/**
+ * Round a frontier rank for display (always to the nearest 100), so a value
+ * like 14697 reads as 14,700 — close enough to the truth without false
+ * precision.
+ */
+function roundFrontierRank(rank: number): number {
+  return Math.round(rank / 100) * 100;
+}
+
+/** Conservative "words you probably know" line. Hidden when receptive vocab is unavailable. */
+function confirmedVocabLine(estimate: AdaptivePlacementEstimate): string | null {
   const raw = estimate.estimatedReceptiveVocab;
   if (raw <= 0) return null;
-  let rounded: number;
-  if (raw < 500) rounded = Math.round(raw / 50) * 50;
-  else if (raw < 5000) rounded = Math.round(raw / 100) * 100;
-  else rounded = Math.round(raw / 500) * 500;
+  const rounded = roundConfirmedVocab(raw);
   if (rounded <= 0) return null;
-  return `Rough estimate: about ${rounded.toLocaleString()} common words`;
+  return `About ${rounded.toLocaleString()} confirmed common words`;
+}
+
+/**
+ * Maps the run's frontier rank into the same substage labels and rounded
+ * frontier display the /progress page uses. Returns null when the rank is
+ * unavailable so the caller can fall back to generic copy.
+ */
+function frontierRangeLines(
+  estimate: AdaptivePlacementEstimate,
+): { rangeLine: string; frontierLine: string } | null {
+  const rank = estimate.estimatedFrontierRank;
+  if (!rank || rank <= 0) return null;
+  const substageRow = SUBSTAGE_TABLE[rankToSubstageIndex(rank) - 1];
+  const rounded = roundFrontierRank(rank);
+  return {
+    rangeLine: `We'll start you in the ${substageRow.label} content range`,
+    frontierLine: `Vocabulary frontier: around the top ${rounded.toLocaleString()} Spanish words`,
+  };
 }
 
 function startingPointCopy(estimate: AdaptivePlacementEstimate): string {
@@ -533,12 +572,9 @@ function ResultScreen({
       </section>
 
       <div className="app-card flex flex-col gap-6 p-6 md:p-8">
+        <ResultDetails estimate={estimate} />
+
         <dl className="flex flex-col gap-5">
-          <ResultRow
-            label="Starting point"
-            value={startingPointCopy(estimate)}
-            detail={approximateVocabLabel(estimate)}
-          />
           <ResultRow
             label="Confidence"
             value={confidenceCopy(estimate)}
@@ -585,6 +621,35 @@ function ResultScreen({
         </div>
       </div>
     </main>
+  );
+}
+
+/**
+ * Top of the result card. Surfaces both numbers the user is going to see
+ * downstream:
+ *   - the conservative "confirmed words" count (anchored to the cleared
+ *     placement floor), and
+ *   - the recommender's content range (the substage that current_frontier_rank
+ *     maps to on /progress) plus the rounded frontier rank.
+ *
+ * Falls back to the legacy generic copy when either signal is missing so a
+ * partial / null estimate still renders something coherent.
+ */
+function ResultDetails({ estimate }: { estimate: AdaptivePlacementEstimate }) {
+  const rangeLines = frontierRangeLines(estimate);
+  const vocabLine = confirmedVocabLine(estimate);
+
+  return (
+    <dl className="flex flex-col gap-5">
+      <ResultRow
+        label="Starting point"
+        value={rangeLines?.rangeLine ?? startingPointCopy(estimate)}
+        detail={rangeLines?.frontierLine ?? null}
+      />
+      {vocabLine ? (
+        <ResultRow label="Confirmed vocabulary" value={vocabLine} />
+      ) : null}
+    </dl>
   );
 }
 
