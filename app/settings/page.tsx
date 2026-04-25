@@ -13,6 +13,7 @@ async function getTodaySessionSnapshot(): Promise<{
   completedCount: number;
   effectiveDailyTargetMode: 'recommended' | 'manual' | null;
   assignedFlashcardCount: number | null;
+  recommendedTargetAtCreation: number | null;
 }> {
   const { supabase, user } = await getSupabaseServerContextFast();
   if (!supabase || !user) {
@@ -20,12 +21,18 @@ async function getTodaySessionSnapshot(): Promise<{
       completedCount: 0,
       effectiveDailyTargetMode: null,
       assignedFlashcardCount: null,
+      recommendedTargetAtCreation: null,
     };
   }
+  // Freshness of this read across navigations relies on the router.refresh()
+  // call in <TodaySession>'s unmount effect (components/srs/TodaySession.tsx)
+  // to invalidate the RSC cache when the user leaves /today. Without that, a
+  // /today → /settings soft nav could serve a stale snapshot from before the
+  // session row was created.
   const { data } = await supabase
     .from('daily_sessions')
     .select(
-      'flashcard_completed_count, effective_daily_target_mode, assigned_flashcard_count',
+      'flashcard_completed_count, effective_daily_target_mode, assigned_flashcard_count, recommended_target_at_creation',
     )
     .eq('user_id', user.id)
     .eq('session_date', getTodaySessionDate())
@@ -34,11 +41,13 @@ async function getTodaySessionSnapshot(): Promise<{
     flashcard_completed_count: number | null;
     effective_daily_target_mode: 'recommended' | 'manual' | null;
     assigned_flashcard_count: number | null;
+    recommended_target_at_creation: number | null;
   } | null;
   return {
     completedCount: row?.flashcard_completed_count ?? 0,
     effectiveDailyTargetMode: row?.effective_daily_target_mode ?? null,
     assignedFlashcardCount: row?.assigned_flashcard_count ?? null,
+    recommendedTargetAtCreation: row?.recommended_target_at_creation ?? null,
   };
 }
 
@@ -95,7 +104,20 @@ export default async function SettingsPage() {
     redirect('/login');
   }
 
-  const effective = resolveEffectiveSettings(settings, recommended);
+  // Stabilize the recommended daily limit for the day. Once today's session
+  // row exists with a frozen recommended_target_at_creation snapshot, every
+  // place on /settings that reasons about "the recommended number" must use
+  // that snapshot — otherwise the label drifts mid-day as accuracy and
+  // inactivity inputs change. Fall back to the live recommender value when
+  // no usable snapshot is available: null (legacy rows pre-migration) or
+  // <= 0 (defensive — recommender clamps to FLOOR > 0, so this is impossible
+  // in practice but guards against future migrations or bad writes).
+  const snapshotLimit = todaySession.recommendedTargetAtCreation;
+  const stableRecommended =
+    typeof snapshotLimit === 'number' && snapshotLimit > 0
+      ? { ...recommended, recommendedDailyLimit: snapshotLimit }
+      : recommended;
+  const effective = resolveEffectiveSettings(settings, stableRecommended);
 
   return (
     <main className="app-shell">
@@ -110,7 +132,7 @@ export default async function SettingsPage() {
         <FlashcardSettingsForm
           userSettings={settings}
           mcqQuestionFormats={mcqQuestionFormats}
-          recommended={recommended}
+          recommended={stableRecommended}
           effective={effective}
           todayCompletedCount={todaySession.completedCount}
           effectiveDailyTargetMode={todaySession.effectiveDailyTargetMode}
