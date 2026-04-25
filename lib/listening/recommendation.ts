@@ -1,6 +1,10 @@
 import type { ListeningIndexAsset } from "@/lib/loop/listening";
 import type { UserSettingsRow } from "@/lib/settings/types";
 import { CEFR_OPTIONS } from "@/lib/onboarding/cefr";
+import {
+  pickFromBucketAndMode,
+  type PassageMode,
+} from "@/lib/recommendation/substages";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -9,14 +13,13 @@ export type ListeningRecommendation = {
   reason: string;
 };
 
-// ── Frontier rank → stage_index mapping ─────────────────────
+// ── Frontier rank → stage_index mapping (LEGACY, 6-band linear) ────
 //
-// stage_index 1..5 = A1 (frontier ~1..800)
-// stage_index 6..10 = A2 (frontier ~800..1800)
-// stage_index 11..15 = B1 (frontier ~1800..3500)
-// stage_index 16..20 = B2 (frontier ~3500..7000)
-// stage_index 21..25 = C1 (frontier ~7000..12000)
-// stage_index 26..30 = C2 (frontier ~12000+)
+// Retained for the accordion's defaultOpenBand and any other consumer that
+// expects the 1-30 stage_index space derived from the prior CEFR-band mapping.
+// The new picker uses rankToSubstageIndex from lib/recommendation/substages.ts
+// instead — that function reads the SUBSTAGE_TABLE rank ranges, which differ
+// from the bands below.
 
 const RANK_BANDS = [
   { low: 0, high: 800, stageBase: 1 },
@@ -61,37 +64,6 @@ export function stageIndexToCefrLabel(stageIndex: number): string {
 
 // ── Helpers ─────────────────────────────────────────────────
 
-const MIN_STAGE = 0;
-const MAX_STAGE = 29;
-
-const MODE_DURATION_BONUS: Record<string, number> = {
-  short: 3,
-  medium: 1,
-  long: -1,
-  very_long: -3,
-};
-
-export function buildTryStageOrder(userStage: number): number[] {
-  const order: number[] = [
-    userStage,
-    userStage - 1,
-    userStage + 1,
-    userStage - 2,
-    userStage + 2,
-  ];
-  for (let s = userStage + 3; s <= MAX_STAGE; s++) {
-    order.push(s);
-  }
-  return order;
-}
-
-function withinBucketScore(asset: ListeningIndexAsset): number {
-  const mode = asset.text?.passageMode ?? "medium";
-  const passageNumber = asset.text?.passageNumber ?? 1;
-  const modeBonus = MODE_DURATION_BONUS[mode] ?? 0;
-  return modeBonus - passageNumber * 0.01;
-}
-
 export function buildReason(asset: ListeningIndexAsset): string {
   const stageIndex = asset.text?.stageIndex ?? 3;
   const passageMode = asset.text?.passageMode ?? "medium";
@@ -112,40 +84,44 @@ export function buildReason(asset: ListeningIndexAsset): string {
 /**
  * Pick the single best fresh listening recommendation for a user.
  *
- * Walks stage buckets outward from the user's stage:
- *   [user, user-1, user+1, user-2, user+2, user+3, user+4, ... up to 29]
- * Returns the first bucket with a non-excluded candidate; within a bucket
- * picks by mode bonus with passage-number tiebreak.
+ * Mirrors the reading picker via the shared rank+target algorithm. See
+ * lib/recommendation/substages.ts for the rank→substage table, the
+ * target→mode table, and the 4-phase fallback ladder.
+ *
+ * Independent of the daily-loop matched-listening flow, which uses
+ * `getListeningAssetForTextId` to pair audio with the chosen reading text.
  */
 export function getListeningRecommendation(
-  allAssets: ListeningIndexAsset[],
-  settings: UserSettingsRow,
-  excludedAssetIds: Set<string>,
+  allAssets: readonly ListeningIndexAsset[],
+  rank: number | null | undefined,
+  target: number | null | undefined,
+  excludedAssetIds: ReadonlySet<string>,
 ): ListeningRecommendation | null {
-  const userStage = getUserStageIndex(settings);
-  const tryStages = buildTryStageOrder(userStage);
+  type Wrapped = {
+    id: string;
+    stageIndex: number | null | undefined;
+    passageMode: PassageMode | string | null | undefined;
+    passageNumber: number | null | undefined;
+    original: ListeningIndexAsset;
+  };
+  const candidates: Wrapped[] = allAssets.map((a) => ({
+    id: a.id,
+    stageIndex: a.text?.stageIndex,
+    passageMode: a.text?.passageMode,
+    passageNumber: a.text?.passageNumber,
+    original: a,
+  }));
 
-  for (const stage of tryStages) {
-    if (stage < MIN_STAGE || stage > MAX_STAGE) continue;
+  const picked = pickFromBucketAndMode<Wrapped>({
+    rank,
+    target,
+    candidates,
+    excludedIds: excludedAssetIds,
+  });
+  if (!picked) return null;
 
-    const candidates = allAssets.filter(
-      (a) =>
-        a.text != null &&
-        a.text.stageIndex === stage &&
-        !excludedAssetIds.has(a.id),
-    );
-
-    if (candidates.length === 0) continue;
-
-    const best = candidates.reduce((a, b) =>
-      withinBucketScore(a) >= withinBucketScore(b) ? a : b,
-    );
-
-    return {
-      asset: best,
-      reason: buildReason(best),
-    };
-  }
-
-  return null;
+  return {
+    asset: picked.original,
+    reason: buildReason(picked.original),
+  };
 }

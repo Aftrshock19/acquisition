@@ -4,6 +4,7 @@ import { getPassageIndex } from "@/lib/reading/passages";
 import { getListeningIndexData } from "@/lib/loop/listening";
 import { getReadingRecommendation } from "@/lib/reading/recommendation";
 import { getListeningRecommendation } from "@/lib/listening/recommendation";
+import { recommendSettings } from "@/lib/settings/recommendSettings";
 
 export type RecommendationKind = "reading" | "listening";
 
@@ -39,14 +40,54 @@ async function fetchExcludedIds(
   userId: string,
   kind: RecommendationKind,
 ): Promise<Set<string>> {
+  // Only completed items are excluded. In-progress items remain eligible so
+  // the picker can re-surface them (the card flips to "Continue"). The page's
+  // "Continue where you left off" row dedupes against the daily rec so we
+  // don't show the same in-progress item twice.
   const { table, idColumn } = PROGRESS_TABLE[kind];
   const { data, error } = await supabase
     .from(table)
     .select(idColumn)
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .eq("status", "completed");
   if (error) throw new Error(error.message);
   const rows = (data ?? []) as unknown as Record<string, string>[];
   return new Set(rows.map((r) => r[idColumn]!));
+}
+
+/**
+ * Resolve today's flashcard target for the recommendation picker.
+ *
+ * Primary: today's daily_sessions.assigned_flashcard_count if a row exists
+ * with a positive value (the post-stable-target-snapshot value the user is
+ * actually working against).
+ *
+ * Fallback: the live recommender's recommendedDailyLimit. This branch fires
+ * for users who haven't yet visited /today on the current local day, so no
+ * daily_sessions row exists.
+ *
+ * Cold-path only — called from pickRecommendation, which only runs when the
+ * daily_recommendation row for today doesn't exist yet.
+ */
+async function getDailyTarget(
+  supabase: Supabase,
+  userId: string,
+  settings: UserSettingsRow,
+): Promise<number> {
+  const today = getLocalDate(settings.timezone);
+  const { data, error } = await supabase
+    .from("daily_sessions")
+    .select("assigned_flashcard_count")
+    .eq("user_id", userId)
+    .eq("session_date", today)
+    .maybeSingle();
+  if (!error && data) {
+    const assigned = (data as { assigned_flashcard_count: number | null })
+      .assigned_flashcard_count;
+    if (typeof assigned === "number" && assigned > 0) return assigned;
+  }
+  const rec = await recommendSettings();
+  return rec.recommendedDailyLimit;
 }
 
 async function fetchProgressStatus(
@@ -71,18 +112,21 @@ async function fetchProgressStatus(
 
 async function pickRecommendation(
   supabase: Supabase,
+  userId: string,
   kind: RecommendationKind,
   settings: UserSettingsRow,
   excluded: Set<string>,
 ): Promise<string | null> {
+  const target = await getDailyTarget(supabase, userId, settings);
+  const rank = settings.current_frontier_rank ?? null;
   if (kind === "reading") {
     const stages = await getPassageIndex(supabase);
     const passages = stages.flatMap((s) => s.modes.flatMap((m) => m.passages));
-    const rec = getReadingRecommendation(passages, settings, excluded);
+    const rec = getReadingRecommendation(passages, rank, target, excluded);
     return rec?.passage.id ?? null;
   }
   const assets = await getListeningIndexData(supabase);
-  const rec = getListeningRecommendation(assets, settings, excluded);
+  const rec = getListeningRecommendation(assets, rank, target, excluded);
   return rec?.asset.id ?? null;
 }
 
@@ -120,7 +164,7 @@ export async function getOrCreateDailyRecommendation(
   }
 
   const excluded = await fetchExcludedIds(supabase, userId, kind);
-  const pickedId = await pickRecommendation(supabase, kind, settings, excluded);
+  const pickedId = await pickRecommendation(supabase, userId, kind, settings, excluded);
   if (!pickedId) {
     throw new Error(
       `No eligible ${kind} content for user=${userId} at stage=${String(
@@ -195,7 +239,7 @@ export async function rerollDailyRecommendation(
   }
 
   const excluded = await fetchExcludedIds(supabase, userId, kind);
-  const pickedId = await pickRecommendation(supabase, kind, settings, excluded);
+  const pickedId = await pickRecommendation(supabase, userId, kind, settings, excluded);
   if (!pickedId) return null;
 
   const { error } = await supabase

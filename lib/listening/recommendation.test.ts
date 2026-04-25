@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   frontierRankToStageIndex,
   getUserStageIndex,
-  buildTryStageOrder,
   getListeningRecommendation,
 } from "./recommendation";
 import type { ListeningAsset } from "@/lib/loop/listening";
@@ -10,7 +9,14 @@ import type { UserSettingsRow } from "@/lib/settings/types";
 
 // ── Helpers ─────────────────────────────────────────────────
 
-function makeAsset(overrides: Partial<ListeningAsset> & { stageIndex?: number; passageMode?: string; passageNumber?: number; displayLabel?: string }): ListeningAsset {
+function makeAsset(
+  overrides: Partial<ListeningAsset> & {
+    stageIndex?: number;
+    passageMode?: string;
+    passageNumber?: number;
+    displayLabel?: string;
+  },
+): ListeningAsset {
   const {
     stageIndex = 3,
     passageMode = "short",
@@ -80,7 +86,7 @@ function makeSettings(overrides: Partial<UserSettingsRow> = {}): UserSettingsRow
   };
 }
 
-// ── frontierRankToStageIndex ────────────────────────────────
+// ── frontierRankToStageIndex (legacy; retained for accordion UI) ─────
 
 describe("frontierRankToStageIndex", () => {
   it("maps low A1 rank to early stages", () => {
@@ -148,144 +154,91 @@ describe("getUserStageIndex", () => {
   });
 });
 
-// ── buildTryStageOrder ──────────────────────────────────────
-
-describe("buildTryStageOrder", () => {
-  it("starts with user, -1, +1, -2, +2", () => {
-    const order = buildTryStageOrder(10);
-    expect(order.slice(0, 5)).toEqual([10, 9, 11, 8, 12]);
-  });
-
-  it("continues upward to 29", () => {
-    const order = buildTryStageOrder(10);
-    expect(order.slice(5)).toEqual([13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]);
-  });
-});
-
-// ── getListeningRecommendation ──────────────────────────────
+// ── getListeningRecommendation (rank + target driven) ────────
+//
+// Reference: rank 500 → substage 3 (table row 351..650).
+// Target 20 → "short" mode.
 
 describe("getListeningRecommendation", () => {
-  it("returns recommended at user's stage when available", () => {
-    const assets = [
-      makeAsset({ id: "a1", stageIndex: 3 }),
-      makeAsset({ id: "a2", stageIndex: 8 }),
-    ];
-    const result = getListeningRecommendation(
-      assets,
-      makeSettings({ current_frontier_rank: 500 }),
-      new Set(),
-    );
-
-    expect(result).not.toBeNull();
-    expect(result!.asset.id).toBe("a1");
+  it("returns null for empty asset list", () => {
+    const rec = getListeningRecommendation([], 500, 20, new Set());
+    expect(rec).toBeNull();
   });
 
-  it("walks the try_stage order: user_stage empty, user_stage-1 picked", () => {
-    // User at stage 8. Stage 8 absent, stages 7 and 9 both present.
-    // Expect stage 7 (user_stage - 1 comes before user_stage + 1 in the order).
-    const assets = [
-      makeAsset({ id: "below", stageIndex: 7 }),
-      makeAsset({ id: "above", stageIndex: 9 }),
-    ];
-    const result = getListeningRecommendation(
-      assets,
-      makeSettings({ current_frontier_rank: 1200 }), // stage 8
-      new Set(),
-    );
-    const userStage = getUserStageIndex(makeSettings({ current_frontier_rank: 1200 }));
-    if (userStage === 8) {
-      expect(result!.asset.id).toBe("below");
-    }
+  it("Phase 1: exact (substage, mode) match wins", () => {
+    const at = makeAsset({ id: "at", stageIndex: 3, passageMode: "short" });
+    const off = makeAsset({ id: "off", stageIndex: 5, passageMode: "long" });
+    const rec = getListeningRecommendation([off, at], 500, 20, new Set());
+    expect(rec?.asset.id).toBe("at");
   });
 
-  it("widens outward when nearby buckets are all empty", () => {
-    const far = makeAsset({ id: "far", stageIndex: 20 });
-    const result = getListeningRecommendation([far], makeSettings(), new Set());
-    expect(result?.asset.id).toBe("far");
+  it("Phase 1 tiebreak: lowest passageNumber wins within bucket", () => {
+    const p1 = makeAsset({ id: "p1", stageIndex: 3, passageMode: "short", passageNumber: 1 });
+    const p5 = makeAsset({ id: "p5", stageIndex: 3, passageMode: "short", passageNumber: 5 });
+    const rec = getListeningRecommendation([p5, p1], 500, 20, new Set());
+    expect(rec?.asset.id).toBe("p1");
   });
 
-  it("hard-excludes started asset and picks fresh one", () => {
-    const assets = [
-      makeAsset({ id: "started", stageIndex: 3 }),
-      makeAsset({ id: "fresh", stageIndex: 4 }),
-    ];
-    const result = getListeningRecommendation(
-      assets,
-      makeSettings({ current_frontier_rank: 500 }),
-      new Set(["started"]),
-    );
-
-    expect(result).not.toBeNull();
-    expect(result!.asset.id).toBe("fresh");
+  it("Phase 2: same substage, alternative mode when desired missing", () => {
+    const med = makeAsset({ id: "med", stageIndex: 3, passageMode: "medium" });
+    const rec = getListeningRecommendation([med], 500, 20, new Set());
+    expect(rec?.asset.id).toBe("med");
   });
 
-  it("hard-excludes completed asset — never recommends it", () => {
-    const assets = [
-      makeAsset({ id: "completed", stageIndex: 3 }),
-      makeAsset({ id: "fresh", stageIndex: 4 }),
-    ];
-    const result = getListeningRecommendation(
-      assets,
-      makeSettings({ current_frontier_rank: 500 }),
+  it("Phase 2 priority: same substage adjacent mode beats nearby substage desired mode", () => {
+    const stage3med = makeAsset({ id: "s3med", stageIndex: 3, passageMode: "medium" });
+    const stage4short = makeAsset({ id: "s4short", stageIndex: 4, passageMode: "short" });
+    const rec = getListeningRecommendation([stage4short, stage3med], 500, 20, new Set());
+    expect(rec?.asset.id).toBe("s3med");
+  });
+
+  it("Phase 3: symmetric substage walk (-1 before +1)", () => {
+    const stage2 = makeAsset({ id: "s2", stageIndex: 2, passageMode: "short" });
+    const stage4 = makeAsset({ id: "s4", stageIndex: 4, passageMode: "short" });
+    const rec = getListeningRecommendation([stage4, stage2], 500, 20, new Set());
+    expect(rec?.asset.id).toBe("s2");
+  });
+
+  it("Phase 4: cross product reaches distant (substage, mode)", () => {
+    const far = makeAsset({ id: "far", stageIndex: 15, passageMode: "very_long" });
+    const rec = getListeningRecommendation([far], 500, 20, new Set());
+    expect(rec?.asset.id).toBe("far");
+  });
+
+  it("excludes completed assets", () => {
+    const completed = makeAsset({ id: "completed", stageIndex: 3, passageMode: "short" });
+    const fresh = makeAsset({ id: "fresh", stageIndex: 4, passageMode: "short" });
+    const rec = getListeningRecommendation(
+      [completed, fresh],
+      500,
+      20,
       new Set(["completed"]),
     );
-
-    expect(result).not.toBeNull();
-    expect(result!.asset.id).toBe("fresh");
+    expect(rec?.asset.id).toBe("fresh");
   });
 
-  it("returns null when all assets are excluded", () => {
-    const assets = [
-      makeAsset({ id: "a1", stageIndex: 3 }),
-      makeAsset({ id: "a2", stageIndex: 4 }),
-    ];
-    const result = getListeningRecommendation(
-      assets,
-      makeSettings(),
-      new Set(["a1", "a2"]),
-    );
-    expect(result).toBeNull();
+  it("returns null when every asset is excluded", () => {
+    const a1 = makeAsset({ id: "a1", stageIndex: 3 });
+    const a2 = makeAsset({ id: "a2", stageIndex: 4 });
+    const rec = getListeningRecommendation([a1, a2], 500, 20, new Set(["a1", "a2"]));
+    expect(rec).toBeNull();
   });
 
-  it("returns null when no assets exist", () => {
-    const result = getListeningRecommendation(
-      [],
-      makeSettings(),
-      new Set(),
-    );
-    expect(result).toBeNull();
+  it("rank null defaults to substage 1", () => {
+    const stage1 = makeAsset({ id: "s1", stageIndex: 1, passageMode: "short" });
+    const stage5 = makeAsset({ id: "s5", stageIndex: 5, passageMode: "short" });
+    const rec = getListeningRecommendation([stage5, stage1], null, 20, new Set());
+    expect(rec?.asset.id).toBe("s1");
   });
 
-  it("works with default settings (no level data)", () => {
-    const assets = [
-      makeAsset({ id: "a1", stageIndex: 3 }),
-      makeAsset({ id: "b2", stageIndex: 18 }),
-    ];
-    const result = getListeningRecommendation(
-      assets,
-      makeSettings(),
-      new Set(),
-    );
-
-    expect(result).not.toBeNull();
-    expect(result!.asset.id).toBe("a1");
-  });
-
-  it("within-bucket: prefers short over very_long", () => {
-    const assets = [
-      makeAsset({ id: "vlong", stageIndex: 3, passageMode: "very_long" }),
-      makeAsset({ id: "short", stageIndex: 3, passageMode: "short" }),
-    ];
-    const result = getListeningRecommendation(assets, makeSettings(), new Set());
-    expect(result?.asset.id).toBe("short");
-  });
-
-  it("within-bucket: tiebreak by lower passageNumber", () => {
-    const assets = [
-      makeAsset({ id: "p5", stageIndex: 3, passageMode: "short", passageNumber: 5 }),
-      makeAsset({ id: "p1", stageIndex: 3, passageMode: "short", passageNumber: 1 }),
-    ];
-    const result = getListeningRecommendation(assets, makeSettings(), new Set());
-    expect(result?.asset.id).toBe("p1");
+  it("target=100 picks long when available", () => {
+    const short = makeAsset({ id: "short", stageIndex: 3, passageMode: "short" });
+    const long = makeAsset({ id: "long", stageIndex: 3, passageMode: "long" });
+    const rec = getListeningRecommendation([short, long], 500, 100, new Set());
+    expect(rec?.asset.id).toBe("long");
   });
 });
+
+// ── makeSettings is retained for the legacy frontierRankToStageIndex /
+// getUserStageIndex tests above; the picker no longer takes settings.
+void makeSettings;
