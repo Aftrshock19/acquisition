@@ -67,7 +67,9 @@ function readableReason(reason: string): string {
       return "Can't extend right now — refresh and try again.";
     case "not_authenticated":
       return "Sign in and try again.";
+    case "listening_already_done":
+      return "Your session has moved on. Refresh the page and try again.";
     default:
-      return "Something went wrong. Try again.";
+      return `Something went wrong: ${reason}. Refresh and try again.`;
   }
 }

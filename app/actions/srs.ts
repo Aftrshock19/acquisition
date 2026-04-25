@@ -1222,9 +1222,6 @@ export async function extendFlashcardsSession(
   if (!currentDailySession.flashcards_completed_at) {
     return { ok: false, reason: "flashcards_not_complete" };
   }
-  if (currentDailySession.listening_done) {
-    return { ok: false, reason: "listening_already_done" };
-  }
 
   const currentProgress = getDailySessionProgressState(currentDailySession);
   const nextProgress: DailySessionProgressState = {
@@ -1264,7 +1261,7 @@ export async function extendFlashcardsSession(
         reading_opened_at: currentDailySession.reading_opened_at,
         reading_completed_at: currentDailySession.reading_completed_at,
         reading_time_seconds: currentDailySession.reading_time_seconds ?? 0,
-        listening_done: currentDailySession.listening_done ?? false,
+        listening_done: false,
         listening_asset_id: currentDailySession.listening_asset_id,
         listening_opened_at: currentDailySession.listening_opened_at,
         listening_playback_started_at:
@@ -1341,6 +1338,26 @@ export async function extendFlashcardsSession(
 
   revalidatePath("/today");
   return { ok: true };
+}
+
+export async function skipFlashcardsToReading() {
+  const { supabase, user, error: authError } = await getSupabaseServerContextFast();
+  if (!supabase || authError || !user) return;
+
+  const now = new Date().toISOString();
+  const sessionDate = getTodaySessionDate();
+
+  await supabase
+    .from("daily_sessions")
+    .update({
+      stage: "reading",
+      flashcards_completed_at: now,
+      last_active_at: now,
+    })
+    .eq("user_id", user.id)
+    .eq("session_date", sessionDate);
+
+  revalidatePath("/today");
 }
 
 export async function completeReadingStep({

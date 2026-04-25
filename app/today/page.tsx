@@ -1,7 +1,7 @@
 import { Home as HomeIcon } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getTodayFlashcards } from "@/app/actions/srs";
+import { getTodayFlashcards, skipFlashcardsToReading } from "@/app/actions/srs";
 import { ExtendFlashcardsPanel } from "@/components/srs/ExtendFlashcardsPanel";
 import { PracticeCompleteScreen } from "@/components/srs/PracticeCompleteScreen";
 import { TodaySession } from "@/components/srs/TodaySession";
@@ -254,6 +254,23 @@ export default async function TodayPage() {
             accuracy={null}
             timeOnTaskMs={computeDailySessionElapsedMs(dailySession)}
           />
+        ) : dailySession &&
+          dailySession.stage === "flashcards" &&
+          dailySession.flashcard_completed_count > 0 ? (
+          <div className="app-card flex flex-col gap-4 p-8">
+            <h2 className="text-xl font-semibold tracking-tight">
+              No more words available
+            </h2>
+            <p className="text-zinc-600 dark:text-zinc-400">
+              No more words available near your level right now. You&apos;ve practiced{" "}
+              {dailySession.flashcard_completed_count} cards today.
+            </p>
+            <form action={skipFlashcardsToReading}>
+              <button type="submit" className="app-button self-start">
+                Continue to reading
+              </button>
+            </form>
+          </div>
         ) : dailySession ? (
           <div className="app-card flex flex-col gap-4 p-8">
             <h2 className="text-xl font-semibold tracking-tight">
