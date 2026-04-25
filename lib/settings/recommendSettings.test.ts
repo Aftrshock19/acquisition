@@ -6,6 +6,7 @@ import {
   CEILING,
   FLOOR,
   computeRecommendedTarget,
+  computeSmoothedAccuracy,
   computeWeightedAccuracy,
   type ReviewEventForAccuracy,
 } from "./recommendSettings";
@@ -56,7 +57,7 @@ describe("computeRecommendedTarget", () => {
     ).toBe(ANCHOR);
   });
 
-  it("neutral accuracy (0.80) and no inactivity returns ANCHOR", () => {
+  it("neutral accuracy (matches ACCURACY_REFERENCE) and no inactivity returns ANCHOR", () => {
     expect(
       computeRecommendedTarget({
         weightedAccuracy: ACCURACY_REFERENCE,
@@ -65,13 +66,13 @@ describe("computeRecommendedTarget", () => {
     ).toBe(ANCHOR);
   });
 
-  it("perfect accuracy (1.0) and no inactivity returns a value in [140, 160]", () => {
+  it("perfect accuracy (1.0) and no inactivity returns a value in [72, 76]", () => {
     const target = computeRecommendedTarget({
       weightedAccuracy: 1.0,
       daysSinceLast: 0,
     });
-    expect(target).toBeGreaterThanOrEqual(140);
-    expect(target).toBeLessThanOrEqual(160);
+    expect(target).toBeGreaterThanOrEqual(72);
+    expect(target).toBeLessThanOrEqual(76);
   });
 
   it("zero accuracy (0.0) and no inactivity returns FLOOR exactly", () => {
@@ -132,6 +133,42 @@ describe("computeRecommendedTarget", () => {
         daysSinceLast: -5,
       }),
     ).toBe(ANCHOR);
+  });
+});
+
+describe("computeSmoothedAccuracy", () => {
+  it("returns null for empty events", () => {
+    expect(computeSmoothedAccuracy([])).toBeNull();
+  });
+
+  it("pulls a low-evidence 100%-correct user strongly toward ACCURACY_REFERENCE", () => {
+    // 5 cloze events (weight 1.7 each → total weight 8.5) all correct.
+    // smoothed = (8.5*1 + 20*0.85)/(8.5+20) = 25.5/28.5 ≈ 0.8947
+    const events: ReviewEventForAccuracy[] = Array.from({ length: 5 }, () => ({
+      card_type: "cloze",
+      correct: true,
+    }));
+    const smoothed = computeSmoothedAccuracy(events)!;
+    expect(smoothed).toBeCloseTo(0.8947, 3);
+    expect(smoothed).toBeGreaterThan(ACCURACY_REFERENCE);
+    expect(smoothed).toBeLessThan(1.0);
+    // Distance to prior is much smaller than distance to raw.
+    expect(Math.abs(smoothed - ACCURACY_REFERENCE)).toBeLessThan(
+      Math.abs(smoothed - 1.0),
+    );
+  });
+
+  it("barely shifts a high-evidence 100%-correct user from the raw value", () => {
+    // 100 normal events (weight 1.1 each → total weight 110) all correct.
+    // smoothed = (110*1 + 20*0.85)/(110+20) = 127/130 ≈ 0.9769
+    const events: ReviewEventForAccuracy[] = Array.from({ length: 100 }, () => ({
+      card_type: "normal",
+      correct: true,
+    }));
+    const smoothed = computeSmoothedAccuracy(events)!;
+    expect(smoothed).toBeCloseTo(0.9769, 3);
+    expect(smoothed).toBeGreaterThan(0.95);
+    expect(1.0 - smoothed).toBeLessThan(0.05);
   });
 });
 

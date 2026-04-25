@@ -28,9 +28,30 @@ import type { RecommendedSettings, RecommendedTypes } from "./types";
 
 export const ANCHOR = 30;
 export const FLOOR = 10;
+// CEILING is the hard clamp. The accuracy curve saturates well below it:
+// at the maximum reachable accuracy of 1.0 with ACCURACY_REFERENCE=0.85
+// and K_UP=2, targetFromAccuracy ≈ 74. Higher recommendations require
+// the demonstrated-capacity signal, not accuracy alone. CEILING is a
+// defensive upper bound, not a value reachable from the accuracy curve.
 export const CEILING = 200;
-export const ACCURACY_REFERENCE = 0.80;
-export const K_UP = 6;
+export const ACCURACY_REFERENCE = 0.85;
+/**
+ * Bayesian shrinkage strength: number of pseudo-events at the prior
+ * (ACCURACY_REFERENCE) blended with the measured weighted accuracy.
+ * Larger k pulls low-evidence users harder toward the prior. At k=20 a
+ * user with ~20 weighted events is roughly half measurement, half prior.
+ */
+export const ACCURACY_PRIOR_WEIGHT = 20;
+/**
+ * Saturation rate of the upward (above-reference) accuracy curve.
+ *
+ * K_UP < K_DOWN is intentional: high accuracy alone should not produce
+ * large target increases. Demonstrated capacity (a separate signal,
+ * planned for the next iteration) is the path to higher recommendations.
+ * The asymmetry encodes "we recalibrate quickly when you're struggling,
+ * we don't push you upward without evidence you can sustain it."
+ */
+export const K_UP = 2;
 export const K_DOWN = 6;
 export const INACTIVITY_MAX_DAYS = 21;
 export const INACTIVITY_MAX_PENALTY = 0.67;
@@ -76,6 +97,38 @@ export function computeWeightedAccuracy(
   }
   if (den <= 0) return null;
   return num / den;
+}
+
+/**
+ * Card-type-weighted accuracy with Bayesian shrinkage toward the prior.
+ * Returns null when there are no events (caller falls back to the
+ * reference value via the null-handling in `computeRecommendedTarget`).
+ *
+ *   smoothed = (n * measured + k * prior) / (n + k)
+ *
+ * where:
+ *   n = Σ w_i (total weighted evidence over the rolling window)
+ *   k = ACCURACY_PRIOR_WEIGHT
+ *   prior = ACCURACY_REFERENCE
+ *
+ * Low-evidence users (small n) get pulled strongly toward the prior so
+ * a short streak of correct or wrong answers does not slam the target
+ * to the rails. High-evidence users (n >> k) are barely affected.
+ */
+export function computeSmoothedAccuracy(
+  events: readonly ReviewEventForAccuracy[],
+): number | null {
+  if (events.length === 0) return null;
+  let num = 0;
+  let den = 0;
+  for (const e of events) {
+    const w = CARD_TYPE_WEIGHTS[e.card_type] ?? DEFAULT_CARD_TYPE_WEIGHT;
+    num += w * (e.correct ? 1 : 0);
+    den += w;
+  }
+  if (den <= 0) return null;
+  return (num + ACCURACY_PRIOR_WEIGHT * ACCURACY_REFERENCE) /
+    (den + ACCURACY_PRIOR_WEIGHT);
 }
 
 /**
@@ -138,21 +191,11 @@ export async function recommendSettings(): Promise<RecommendedSettings> {
     return { recommendedDailyLimit, recommendedTypes: types };
   }
 
-  // Backlog query retained per spec. Not consumed by the new target formula;
-  // kept for now to avoid a behavioural change elsewhere. Safe to remove in
-  // a follow-up once it is confirmed that no other caller depends on the
-  // side effect of this fetch.
   const [
-    { count: _backlogDueCount },
     { data: recentEvents, error: eventsError },
     { count: totalEventCount },
     { data: lastSession },
   ] = await Promise.all([
-    supabase
-      .from("user_words")
-      .select("word_id", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .lte("due_at", new Date().toISOString()),
     supabase
       .from("review_events")
       .select("correct,card_type")
@@ -171,14 +214,13 @@ export async function recommendSettings(): Promise<RecommendedSettings> {
       .limit(1)
       .maybeSingle(),
   ]);
-  void _backlogDueCount;
 
   if (eventsError) {
     console.warn("[recommendSettings] review_events query failed", eventsError);
   }
 
   const events = (recentEvents ?? []) as ReviewEventForAccuracy[];
-  const weightedAccuracy = computeWeightedAccuracy(events);
+  const weightedAccuracy = computeSmoothedAccuracy(events);
 
   const lastSessionDate = (lastSession as { session_date: string } | null)?.session_date ?? null;
   const daysSinceLast = lastSessionDate
@@ -187,14 +229,14 @@ export async function recommendSettings(): Promise<RecommendedSettings> {
 
   recommendedDailyLimit = computeRecommendedTarget({ weightedAccuracy, daysSinceLast });
 
-  // Card-type recommendation (behaviour preserved from prior implementation).
-  // Previously used `events.length` as a review-count proxy, which was capped
-  // at 100 by the .limit(100) fetch — making the 200-review branch unreachable.
-  // Fixed by reading the true count via `{ count: "exact", head: true }` above.
+  // Card-type recommendation. Single boundary at 200 lifetime reviews:
+  // introduce sentence cards once the user has enough recall practice to
+  // handle in-context production. Earlier implementations used `events.length`
+  // as a proxy, which was capped at 100 by the .limit(100) fetch — making the
+  // 200-review branch unreachable. Reading the true count via
+  // `{ count: "exact", head: true }` above fixes that.
   const totalReviews = totalEventCount ?? 0;
-  if (totalReviews < 50) {
-    types = { cloze: true, normal: true, audio: false, mcq: true, sentences: false };
-  } else if (totalReviews < 200) {
+  if (totalReviews < 200) {
     types = { cloze: true, normal: true, audio: false, mcq: true, sentences: false };
   } else {
     types = { cloze: true, normal: true, audio: false, mcq: true, sentences: true };
