@@ -349,7 +349,7 @@ export function ListeningPlayer({
 
   function handleDoneForToday() {
     if (localCompleted) {
-      router.push("/today");
+      router.push("/done");
       return;
     }
     if (!thresholdMet || pending) return;
@@ -371,7 +371,11 @@ export function ListeningPlayer({
       }
 
       setLocalCompleted(true);
-      router.push(result.nextPath);
+      // "Done for today" is the terminal CTA of the daily loop. Always land
+      // on /done (the dedicated completion page); do not follow
+      // result.nextPath, which can compute to /reader/<id> if the row's
+      // reading_done was false at the time of the upsert.
+      router.push("/done");
     });
   }
 

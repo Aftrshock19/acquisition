@@ -39,6 +39,13 @@ export default async function TodayPage() {
   const effectiveSettings = result.effectiveSettings;
   const dailySession = result.dailySession ?? null;
   const hasCards = session.dueReviews.length > 0 || session.newWords.length > 0;
+
+  // Daily-loop completion lives at /done, not on the Vocabulary page. Once
+  // the loop is finished for the day, route users there so the heading and
+  // shell reflect "whole loop done" rather than a vocab tab.
+  if (dailySession?.stage === "completed") {
+    redirect("/done");
+  }
   const enabledTypeCount = Object.values(effectiveSettings.enabledTypes).filter(
     Boolean,
   ).length;
@@ -227,22 +234,6 @@ export default async function TodayPage() {
             >
               Continue to listening
             </Link>
-          </div>
-        ) : dailySession?.stage === "completed" ? (
-          <div className="app-card flex flex-col gap-4 p-8">
-            <h2 className="text-xl font-semibold tracking-tight">
-              All done for today
-            </h2>
-            <p className="text-zinc-600 dark:text-zinc-400">
-              Today&apos;s loop is complete. Come back tomorrow or check your{" "}
-              <Link
-                href="/progress"
-                className="font-medium text-zinc-900 underline dark:text-zinc-100"
-              >
-                progress
-              </Link>
-              .
-            </p>
           </div>
         ) : dailySession &&
           dailySession.flashcard_completed_count >=

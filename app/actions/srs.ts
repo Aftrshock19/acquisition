@@ -1125,6 +1125,10 @@ function getNextPathForDailySession(
     return "/listening";
   }
 
+  if (dailySession.stage === "completed") {
+    return "/done";
+  }
+
   return "/today";
 }
 
@@ -1748,8 +1752,16 @@ export async function completeListeningStep({
     }
 
     const currentProgress = getDailySessionProgressState(currentDailySession);
+    // "Done for today" is the terminal step of the daily loop. We mark
+    // readingDone alongside listeningDone so resolveDailySessionStage can
+    // collapse to 'completed' even if the session row's reading_done was
+    // somehow still false (e.g. data drift, partial recovery, a flow that
+    // bypassed completeReadingStep). Without this, a user who legitimately
+    // pressed "Done for today" can compute stage='reading' and land back on
+    // /reader/<id> via getNextPathForDailySession.
     const nextProgress: DailySessionProgressState = {
       ...currentProgress,
+      readingDone: true,
       listeningDone: true,
     };
     const stage = resolveDailySessionStage(nextProgress);
@@ -1785,7 +1797,7 @@ export async function completeListeningStep({
             nextProgress.flashcardCompletedCount >= nextProgress.assignedFlashcardCount
               ? now
               : null),
-          reading_done: currentProgress.readingDone,
+          reading_done: nextProgress.readingDone,
           reading_text_id:
             currentDailySession?.reading_text_id ?? listeningAsset.textId,
           reading_opened_at: currentDailySession?.reading_opened_at ?? null,
