@@ -17,6 +17,7 @@ import { LeftIcon } from "@/components/LeftIcon";
 import { RightIcon } from "@/components/RightIcon";
 import { SettingsButton } from "@/components/SettingsButton";
 import { PracticeCompleteScreen } from "@/components/srs/PracticeCompleteScreen";
+import { SuspendWordControl } from "@/components/srs/SuspendWordControl";
 import { AudioCard } from "@/components/srs/cards/AudioCard";
 import { ClozeCard } from "@/components/srs/cards/ClozeCard";
 import { McqCard } from "@/components/srs/cards/McqCard";
@@ -1244,6 +1245,9 @@ export function TodaySession({
               onNext={() => advanceFromCurrentCard()}
               navigation={flashcardNavigation}
             />
+          ) : null}
+          {phase === "feedback" && !showingHistory && current ? (
+            <SuspendWordControl wordId={current.id} />
           ) : null}
         </div>
       ) : null}

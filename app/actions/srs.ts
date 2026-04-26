@@ -777,7 +777,7 @@ export async function recordReview(
       (async () => {
         const { data } = await supabase
           .from("user_words")
-          .select("difficulty,adaptive_evidence_count,words(rank)")
+          .select("difficulty,adaptive_evidence_count,status,words(rank)")
           .eq("user_id", user.id)
           .eq("word_id", payload.wordId)
           .maybeSingle();
@@ -785,11 +785,20 @@ export async function recordReview(
           | {
               difficulty: number | null;
               adaptive_evidence_count: number | null;
+              status: string | null;
               words: { rank: number | null } | null;
             }
           | null;
       })(),
     ]);
+
+    // Stale-tab guard: a card may have been opened before the user (or
+    // another tab) suspended this word. The queue gate in get_daily_queue
+    // prevents fresh draws of suspended words; this catches the race where
+    // a stale review is submitted after suspension.
+    if (wordStateData?.status === "suspended") {
+      return { ok: false, error: "word_suspended" };
+    }
     const variant: SchedulerVariant =
       settings.scheduler_variant === "adaptive" ? "adaptive" : "baseline";
 
@@ -2307,4 +2316,101 @@ export async function getFlashcardDebugSnapshot(
       (latestByHappened?.data as Record<string, unknown> | null) ??
       null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Soft-suspend: remove a word from the user's active deck without losing
+// history. The row stays in user_words so review_events / exposure_events
+// remain joinable, the new-word picker keeps excluding it (NOT EXISTS), and
+// the review branch of get_daily_queue gates on status (see migration
+// 20260426140000_add_word_suspend.sql). srs_state is the scheduler's private
+// state; we never touch it from these actions.
+// ---------------------------------------------------------------------------
+
+export type SuspendReason =
+  | "already_known"
+  | "not_useful"
+  | "incorrect"
+  | "do_not_want"
+  | "other";
+
+export type SuspendWordResult =
+  | { ok: true }
+  | { ok: false; reason: string };
+
+const SUSPEND_REASONS: ReadonlySet<SuspendReason> = new Set([
+  "already_known",
+  "not_useful",
+  "incorrect",
+  "do_not_want",
+  "other",
+]);
+
+export async function suspendWord(
+  wordId: string,
+  reason?: SuspendReason | null,
+): Promise<SuspendWordResult> {
+  const { supabase, user, error: authError } = await getSupabaseServerContextFast();
+  if (!supabase) return { ok: false, reason: "supabase_unavailable" };
+  if (authError) return { ok: false, reason: authError };
+  if (!user) return { ok: false, reason: "not_authenticated" };
+  if (!wordId) return { ok: false, reason: "invalid_word_id" };
+
+  const safeReason: SuspendReason | null =
+    reason && SUSPEND_REASONS.has(reason) ? reason : null;
+  const now = new Date().toISOString();
+
+  // .select() returns the affected rows; an empty array means no row matched
+  // (either the row does not exist or RLS denied access — both are surfaced
+  // as 'not_found' to the caller). suspendWord must NOT insert: the row only
+  // exists once the user has actually engaged with the word.
+  const { data, error } = await supabase
+    .from("user_words")
+    .update({
+      status: "suspended",
+      suspended_at: now,
+      suspended_reason: safeReason,
+      updated_at: now,
+    })
+    .eq("user_id", user.id)
+    .eq("word_id", wordId)
+    .select("word_id");
+
+  if (error) return { ok: false, reason: error.message };
+  if (!data || data.length === 0) return { ok: false, reason: "not_found" };
+
+  revalidatePath("/today");
+  return { ok: true };
+}
+
+export async function unsuspendWord(wordId: string): Promise<SuspendWordResult> {
+  const { supabase, user, error: authError } = await getSupabaseServerContextFast();
+  if (!supabase) return { ok: false, reason: "supabase_unavailable" };
+  if (authError) return { ok: false, reason: authError };
+  if (!user) return { ok: false, reason: "not_authenticated" };
+  if (!wordId) return { ok: false, reason: "invalid_word_id" };
+
+  const now = new Date().toISOString();
+
+  // Restore to 'learning' so the row re-enters the review queue. We
+  // intentionally do NOT touch srs_state, next_due, reps, stability,
+  // difficulty, ewma_*, learned_level, or any of the SRS history — the
+  // scheduler picks up exactly where it left off.
+  const { data, error } = await supabase
+    .from("user_words")
+    .update({
+      status: "learning",
+      suspended_at: null,
+      suspended_reason: null,
+      updated_at: now,
+    })
+    .eq("user_id", user.id)
+    .eq("word_id", wordId)
+    .select("word_id");
+
+  if (error) return { ok: false, reason: error.message };
+  if (!data || data.length === 0) return { ok: false, reason: "not_found" };
+
+  revalidatePath("/today");
+  return { ok: true };
 }
