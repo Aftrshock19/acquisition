@@ -6,7 +6,10 @@ import { ExtendFlashcardsPanel } from "@/components/srs/ExtendFlashcardsPanel";
 import { PracticeCompleteScreen } from "@/components/srs/PracticeCompleteScreen";
 import { TodaySession } from "@/components/srs/TodaySession";
 import { getPlacementBannerState } from "@/lib/placement/status";
-import { shouldRedirectToIntro } from "@/lib/onboarding/state";
+import {
+  shouldRedirectToIntro,
+  shouldRedirectToPlacement,
+} from "@/lib/onboarding/state";
 import type { DailySessionRow } from "@/lib/srs/types";
 
 function computeDailySessionElapsedMs(session: DailySessionRow) {
@@ -21,6 +24,9 @@ function computeDailySessionElapsedMs(session: DailySessionRow) {
 export default async function TodayPage() {
   if (await shouldRedirectToIntro()) {
     redirect("/onboarding");
+  }
+  if (await shouldRedirectToPlacement()) {
+    redirect("/placement");
   }
   const todayShellClassName = "app-shell";
   const [result, placementBanner] = await Promise.all([

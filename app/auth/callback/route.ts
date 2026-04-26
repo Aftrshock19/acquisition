@@ -1,7 +1,10 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { shouldRedirectToIntro } from "@/lib/onboarding/state";
+import {
+  shouldRedirectToIntro,
+  shouldRedirectToPlacement,
+} from "@/lib/onboarding/state";
 import { getAppUrl } from "@/lib/url";
 
 export async function GET(request: NextRequest) {
@@ -68,6 +71,9 @@ export async function GET(request: NextRequest) {
   // introduction flow, route them through it before their requested landing.
   if (await shouldRedirectToIntro()) {
     return NextResponse.redirect(new URL("/onboarding", origin));
+  }
+  if (await shouldRedirectToPlacement()) {
+    return NextResponse.redirect(new URL("/placement", origin));
   }
 
   // Only allow relative paths for the `next` redirect to prevent open redirect

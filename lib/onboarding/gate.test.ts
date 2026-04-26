@@ -69,7 +69,31 @@ describe("decideOnboardingGate", () => {
 
   it("allows users who finished onboarding as baseline", () => {
     expect(
-      decideOnboardingGate({ ...base, onboardingEntryMode: "baseline" }),
+      decideOnboardingGate({
+        ...base,
+        onboardingEntryMode: "baseline",
+        placementStatus: "estimated",
+      }),
     ).toEqual({ action: "allow" });
+  });
+
+  it("redirects baseline users to /placement when placement_status is unknown", () => {
+    expect(
+      decideOnboardingGate({
+        ...base,
+        onboardingEntryMode: "baseline",
+        placementStatus: "unknown",
+      }),
+    ).toEqual({ action: "redirect_placement" });
+  });
+
+  it("redirects baseline users to /placement when placement_status is calibrating (mid-test)", () => {
+    expect(
+      decideOnboardingGate({
+        ...base,
+        onboardingEntryMode: "baseline",
+        placementStatus: "calibrating",
+      }),
+    ).toEqual({ action: "redirect_placement" });
   });
 });

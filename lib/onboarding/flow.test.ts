@@ -10,17 +10,17 @@ import {
   INTRO_PAGE_COUNT,
   introNavReduce,
   introNavState,
-  startBranchCanGoBack,
-  startBranchReduce,
-  type StartBranchStep,
 } from "./introNavigation";
 
 /**
  * Full first-run onboarding integration test.
  *
  * Simulates the real runtime chain against an in-memory user_settings record.
- * The branching final page covers three exit paths: beginner_default,
- * baseline, and self_certified.
+ * The final page sends users into placement (default) or, via the secondary
+ * "Skip and choose my own level" link, into the standalone /choose-level
+ * page. The standalone /choose-level page hosts the A0/A1/A2/B1/B2/C1
+ * picker; that's the only place self-certification (including the beginner
+ * A0 entry) is committed.
  */
 
 type FakeSettings = {
@@ -129,24 +129,28 @@ describe("first-run onboarding flow (integration)", () => {
     expect(introNavState(page).isLast).toBe(true);
   });
 
-  it("'No, I'm new to Spanish' commits beginner_default and bypasses baseline", () => {
+  it("Start on placement-start screen routes into baseline", () => {
+    // From screen 3 the user clicks the primary "Start" button, which fires
+    // startOnboardingAsBaseline and routes to /placement; the placement run
+    // then finishes and writes the frontier.
     const settings = emptySettings();
+    commitBaselineStart(settings);
+    commitBaselineFinish(settings);
 
-    // Branch starts at ask_experience
-    let branch: StartBranchStep = { kind: "ask_experience" };
-    expect(startBranchCanGoBack(branch)).toBe(false);
+    expect(settings.onboarding_entry_mode).toBe("baseline");
+    expect(
+      decideOnboardingGate(fakeGetOnboardingState(settings)).action,
+    ).toBe("allow");
+  });
 
-    // User answers No → caller triggers beginner commit, branch itself does
-    // not advance because the exit is terminal.
-    branch = startBranchReduce(branch, {
-      kind: "answer_experience",
-      hasExperience: false,
-    });
-    expect(branch.kind).toBe("ask_experience");
-
+  it("Skip from placement-start screen → /choose-level → A0 commits beginner_default", () => {
+    // Secondary link "Skip and choose my own level" navigates without
+    // persistence; commit happens on /choose-level when the user picks the
+    // A0 "Just starting" card. Beginner default is no longer a separate
+    // branch in IntroFlow.
+    const settings = emptySettings();
     commitBeginner(settings);
 
-    // No baseline row was touched; routing should now allow
     expect(
       decideOnboardingGate(fakeGetOnboardingState(settings)).action,
     ).toBe("allow");
@@ -157,47 +161,8 @@ describe("first-run onboarding flow (integration)", () => {
     expect(settings.self_certified_cefr_level).toBeNull();
   });
 
-  it("'Yes' → 'Take quick placement' routes into baseline", () => {
+  it("Skip → /choose-level → B1 commits self_certified", () => {
     const settings = emptySettings();
-
-    let branch: StartBranchStep = { kind: "ask_experience" };
-    branch = startBranchReduce(branch, {
-      kind: "answer_experience",
-      hasExperience: true,
-    });
-    expect(branch.kind).toBe("pick_path");
-    expect(startBranchCanGoBack(branch)).toBe(true);
-
-    // User picks baseline → startOnboardingAsBaseline writes and caller
-    // navigates to /placement; then baseline run finishes.
-    commitBaselineStart(settings);
-    commitBaselineFinish(settings);
-
-    expect(settings.onboarding_entry_mode).toBe("baseline");
-    expect(
-      decideOnboardingGate(fakeGetOnboardingState(settings)).action,
-    ).toBe("allow");
-  });
-
-  it("'Yes' → 'Choose my own level' shows the CEFR picker and persists", () => {
-    const settings = emptySettings();
-
-    let branch: StartBranchStep = { kind: "ask_experience" };
-    branch = startBranchReduce(branch, {
-      kind: "answer_experience",
-      hasExperience: true,
-    });
-    branch = startBranchReduce(branch, { kind: "choose_self_certify" });
-    expect(branch.kind).toBe("pick_cefr");
-    expect(startBranchCanGoBack(branch)).toBe(true);
-
-    // Back from CEFR picker lands on pick_path
-    const backed = startBranchReduce(branch, { kind: "back" });
-    expect(backed.kind).toBe("pick_path");
-
-    // Going forward again and picking B1
-    branch = startBranchReduce(backed, { kind: "choose_self_certify" });
-    expect(branch.kind).toBe("pick_cefr");
     commitSelfCertified(settings, "B1");
 
     expect(settings.onboarding_entry_mode).toBe("self_certified");
@@ -238,8 +203,8 @@ describe("first-run onboarding flow (integration)", () => {
     ).toBe("allow");
   });
 
-  it("has an 8-screen onboarding (7 linear + branching final)", () => {
-    expect(INTRO_PAGE_COUNT).toBe(8);
+  it("has a 4-screen onboarding (3 linear + placement-start final)", () => {
+    expect(INTRO_PAGE_COUNT).toBe(4);
   });
 
   it("exposes 6 CEFR options with can-do descriptions", () => {
@@ -303,6 +268,53 @@ describe("first-run onboarding flow (integration)", () => {
     expect(
       decideOnboardingGate(fakeGetOnboardingState(settings)).action,
     ).toBe("allow");
+  });
+
+  describe("baseline entry mode requires placement_status to count as done", () => {
+    it("entry_mode 'baseline' + placement_status 'estimated' → allow", () => {
+      const settings = emptySettings();
+      commitBaselineStart(settings);
+      settings.placement_status = "estimated";
+      expect(
+        decideOnboardingGate(fakeGetOnboardingState(settings)).action,
+      ).toBe("allow");
+    });
+
+    it("entry_mode 'baseline' + placement_status 'stable' → allow", () => {
+      const settings = emptySettings();
+      commitBaselineStart(settings);
+      settings.placement_status = "stable";
+      expect(
+        decideOnboardingGate(fakeGetOnboardingState(settings)).action,
+      ).toBe("allow");
+    });
+
+    it("entry_mode 'baseline' + placement_status null → redirect to /placement", () => {
+      const settings = emptySettings();
+      commitBaselineStart(settings);
+      settings.placement_status = null;
+      expect(
+        decideOnboardingGate(fakeGetOnboardingState(settings)).action,
+      ).toBe("redirect_placement");
+    });
+
+    it("entry_mode 'baseline' + placement_status 'unknown' → redirect to /placement", () => {
+      const settings = emptySettings();
+      commitBaselineStart(settings);
+      settings.placement_status = "unknown";
+      expect(
+        decideOnboardingGate(fakeGetOnboardingState(settings)).action,
+      ).toBe("redirect_placement");
+    });
+
+    it("entry_mode 'baseline' + placement_status 'calibrating' → redirect to /placement", () => {
+      const settings = emptySettings();
+      commitBaselineStart(settings);
+      settings.placement_status = "calibrating";
+      expect(
+        decideOnboardingGate(fakeGetOnboardingState(settings)).action,
+      ).toBe("redirect_placement");
+    });
   });
 
   it("after discard, choosing a CEFR level restores frontier and placement_status", () => {

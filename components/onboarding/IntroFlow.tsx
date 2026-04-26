@@ -2,19 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import {
-  completeOnboardingAsBeginner,
-  completeOnboardingAsSelfCertified,
-  startOnboardingAsBaseline,
-} from "@/app/actions/onboarding";
-import { CEFR_OPTIONS, type CefrLevel } from "@/lib/onboarding/cefr";
+import { startOnboardingAsBaseline } from "@/app/actions/onboarding";
 import {
   INTRO_PAGE_COUNT,
   introNavReduce,
   introNavState,
-  startBranchReduce,
-  startBranchCanGoBack,
-  type StartBranchStep,
 } from "@/lib/onboarding/introNavigation";
 import {
   COVERAGE_MAX_RANK,
@@ -32,29 +24,25 @@ export type IntroFlowProps = {
   initialPage?: number;
   /**
    * Replay mode: walks the linear explanatory screens only and skips the
-   * final branching "How do you want to start?" page. Used by the profile
-   * page so users can revisit the intro without going through the
-   * beginner / baseline / self-certify fork again.
+   * final placement-start page. Used by the profile page so users can
+   * revisit the intro without re-entering the placement / level-pick fork.
    */
   replay?: boolean;
 };
 
 export function IntroFlow({ initialPage = 0, replay = false }: IntroFlowProps) {
   const router = useRouter();
-  const linearLastPage = INTRO_PAGE_COUNT - 2; // index of last linear screen
-  const [page, setPage] = useState(
-    Math.min(initialPage, replay ? linearLastPage : INTRO_PAGE_COUNT - 1),
-  );
-  const [branch, setBranch] = useState<StartBranchStep>({
-    kind: "ask_experience",
-  });
+  // Every screen is now explanatory (the placement-launch step was folded
+  // into the final-page Next button), so replay walks the full carousel.
+  const lastPage = INTRO_PAGE_COUNT - 1;
+  const [page, setPage] = useState(Math.min(initialPage, lastPage));
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   const nav = introNavState(page);
   const onFinalPage = !replay && nav.isLast;
-  const onReplayLast = replay && page === linearLastPage;
-  const effectiveTotal = replay ? INTRO_PAGE_COUNT - 1 : INTRO_PAGE_COUNT;
+  const onReplayLast = replay && nav.isLast;
+  const effectiveTotal = INTRO_PAGE_COUNT;
 
   const goNext = () => {
     if (onReplayLast) {
@@ -63,32 +51,9 @@ export function IntroFlow({ initialPage = 0, replay = false }: IntroFlowProps) {
     }
     setPage((p) => introNavReduce(p, "next"));
   };
-  const goBack = () => {
-    if (onFinalPage && startBranchCanGoBack(branch)) {
-      setBranch((b) => startBranchReduce(b, { kind: "back" }));
-      return;
-    }
-    setPage((p) => introNavReduce(p, "back"));
-  };
+  const goBack = () => setPage((p) => introNavReduce(p, "back"));
 
-  const answerYes = () =>
-    setBranch((b) =>
-      startBranchReduce(b, { kind: "answer_experience", hasExperience: true }),
-    );
-
-  const answerNo = () => {
-    startTransition(async () => {
-      setError(null);
-      const res = await completeOnboardingAsBeginner();
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      router.push("/");
-    });
-  };
-
-  const chooseBaseline = () => {
+  const startPlacement = () => {
     startTransition(async () => {
       setError(null);
       const res = await startOnboardingAsBaseline();
@@ -100,56 +65,17 @@ export function IntroFlow({ initialPage = 0, replay = false }: IntroFlowProps) {
     });
   };
 
-  const chooseSelfCertify = () =>
-    setBranch((b) => startBranchReduce(b, { kind: "choose_self_certify" }));
-
-  const pickCefr = (level: CefrLevel) => {
-    startTransition(async () => {
-      setError(null);
-      const res =
-        level === "A0"
-          ? await completeOnboardingAsBeginner()
-          : await completeOnboardingAsSelfCertified(level);
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      router.push("/");
-    });
-  };
-
-  const canGoBack = onFinalPage
-    ? nav.canGoBack || startBranchCanGoBack(branch)
-    : nav.canGoBack;
-
   return (
     <main className="app-shell" data-testid="intro-flow">
       <section className="app-hero">
-        <p className="text-xs font-medium uppercase tracking-[0.22em] text-zinc-500 dark:text-zinc-400">
-          Welcome
-        </p>
         <ProgressLabel page={page} total={effectiveTotal} />
       </section>
 
       <div className="app-card flex flex-col gap-8 p-6 md:p-8">
-        {page === 0 ? <WelcomePage /> : null}
-        {page === 1 ? <HowAcquiredPage /> : null}
-        {page === 2 ? <WhyInputHardPage /> : null}
-        {page === 3 ? <PuzzlePiecesPage /> : null}
-        {page === 4 ? <FrequencyGraphPage /> : null}
-        {page === 5 ? <DailyLoopWhyPage /> : null}
-        {page === 6 ? <AdaptiveDifferencePage /> : null}
-        {page === 7 && !replay ? (
-          <StartBranch
-            step={branch}
-            isPending={isPending}
-            onAnswerYes={answerYes}
-            onAnswerNo={answerNo}
-            onChooseBaseline={chooseBaseline}
-            onChooseSelfCertify={chooseSelfCertify}
-            onPickCefr={pickCefr}
-          />
-        ) : null}
+        {page === 0 ? <WhatIsThisPage /> : null}
+        {page === 1 ? <HowItWorksPage /> : null}
+        {page === 2 ? <AdaptsToYouPage /> : null}
+        {page === 3 ? <FrequencyGraphPage /> : null}
 
         {error ? (
           <p className="text-sm text-red-600" role="alert">
@@ -158,7 +84,7 @@ export function IntroFlow({ initialPage = 0, replay = false }: IntroFlowProps) {
         ) : null}
 
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-          {canGoBack ? (
+          {nav.canGoBack ? (
             <button
               type="button"
               onClick={goBack}
@@ -172,17 +98,19 @@ export function IntroFlow({ initialPage = 0, replay = false }: IntroFlowProps) {
             <span />
           )}
 
-          {!onFinalPage ? (
-            <button
-              type="button"
-              onClick={goNext}
-              disabled={isPending}
-              className="app-button"
-              data-testid="intro-next"
-            >
-              {onReplayLast ? "Done" : "Next"}
-            </button>
-          ) : null}
+          <button
+            type="button"
+            onClick={onFinalPage ? startPlacement : goNext}
+            disabled={isPending}
+            className="app-button"
+            data-testid="intro-next"
+          >
+            {onReplayLast
+              ? "Done"
+              : onFinalPage && isPending
+                ? "Starting…"
+                : "Next"}
+          </button>
         </div>
       </div>
     </main>
@@ -201,115 +129,40 @@ function ProgressLabel({ page, total }: { page: number; total: number }) {
   );
 }
 
+/* ─── Screen 0 ────────────────────────────────────────────────────────── */
+function WhatIsThisPage() {
+  return (
+    <div className="flex flex-col gap-4">
+      <h1 className="app-title">Learn Spanish through reading and listening</h1>
+      <p className="text-base leading-relaxed text-zinc-700 dark:text-zinc-300">
+        Short daily sessions. Vocabulary first, then practice in context.
+      </p>
+    </div>
+  );
+}
+
 /* ─── Screen 1 ────────────────────────────────────────────────────────── */
-function WelcomePage() {
+function HowItWorksPage() {
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="app-title">Welcome to Acquisition</h1>
-      <p className="text-lg leading-relaxed text-zinc-700 dark:text-zinc-300">
-        A calmer way to acquire Spanish through vocabulary, reading, and
-        listening.
-      </p>
-      <p className="text-base text-zinc-600 dark:text-zinc-400">
-        You don&apos;t need to be perfect. The app helps keep things at the
-        right level so you can keep coming back.
-      </p>
-    </div>
-  );
-}
-
-/* ─── Screen 2 ────────────────────────────────────────────────────────── */
-function HowAcquiredPage() {
-  return (
-    <div className="flex flex-col gap-4">
-      <h1 className="app-title">Languages are acquired through input</h1>
-      <p className="text-base leading-relaxed text-zinc-700 dark:text-zinc-300">
-        That means reading and listening your brain can gradually make sense
-        of. The more understandable Spanish you meet, the more your internal
-        model of the language grows.
-      </p>
-      <div
-        aria-hidden="true"
-        className="grid grid-cols-2 gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-center dark:border-zinc-800 dark:bg-zinc-900/40"
-      >
-        <div className="flex flex-col gap-1">
-          <span className="text-2xl">📖</span>
-          <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-            Reading
-          </span>
-        </div>
-        <div className="flex flex-col gap-1">
-          <span className="text-2xl">🎧</span>
-          <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-            Listening
-          </span>
-        </div>
-      </div>
-      <p className="text-sm text-zinc-500 dark:text-zinc-500">
-        Reading and listening are the long-term engine.
-      </p>
-    </div>
-  );
-}
-
-/* ─── Screen 3 ────────────────────────────────────────────────────────── */
-function WhyInputHardPage() {
-  return (
-    <div className="flex flex-col gap-4">
-      <h1 className="app-title">Real Spanish is hard when too much is unknown</h1>
-      <p className="text-base leading-relaxed text-zinc-700 dark:text-zinc-300">
-        If nearly every sentence has too many missing pieces, your brain has
-        very little to build from.
-      </p>
-      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 leading-loose text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-500">
-        <p>
-          <BlurSpan>Cuando</BlurSpan> the <BlurSpan>palabras</BlurSpan> are{" "}
-          <BlurSpan>desconocidas</BlurSpan>, the <BlurSpan>mente</BlurSpan>{" "}
-          has <BlurSpan>nada</BlurSpan> to{" "}
-          <BlurSpan>reconstruir</BlurSpan>.
-        </p>
-      </div>
-      <p className="text-sm text-zinc-500 dark:text-zinc-500">
-        Give it a few anchor words and the same sentence becomes workable.
-      </p>
-    </div>
-  );
-}
-
-function BlurSpan({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="rounded bg-zinc-300/60 px-1 text-transparent dark:bg-zinc-700/60">
-      {children}
-    </span>
-  );
-}
-
-/* ─── Screen 4 ────────────────────────────────────────────────────────── */
-function PuzzlePiecesPage() {
-  return (
-    <div className="flex flex-col gap-4">
-      <h1 className="app-title">So we start with a few useful puzzle pieces</h1>
+      <h1 className="app-title">Your daily session</h1>
       <div className="flex flex-col gap-3">
         <StepLine
           n={1}
-          title="Memorize a few common words"
-          body="A small, very useful set — your anchor points."
+          title="Flashcards"
+          body="Meet new words. You're not expected to know them yet."
         />
         <StepLine
           n={2}
-          title="Meet them again in reading and listening"
-          body="Same words, in context, at your level."
+          title="Reading"
+          body="See them again in a short passage at your level."
         />
         <StepLine
           n={3}
-          title="Your brain connects patterns"
-          body="Even before you understand everything, the pieces start fitting together."
+          title="Listening"
+          body="Hear them spoken naturally."
         />
       </div>
-      <p className="text-sm text-zinc-500 dark:text-zinc-500">
-        Memorization isn&apos;t the point. It&apos;s support for the real
-        work: understanding input.
-      </p>
     </div>
   );
 }
@@ -338,7 +191,25 @@ function StepLine({
   );
 }
 
-/* ─── Screen 5 ────────────────────────────────────────────────────────── */
+/* ─── Screen 2 ────────────────────────────────────────────────────────── */
+function AdaptsToYouPage() {
+  return (
+    <div className="flex flex-col gap-4">
+      <h1 className="app-title">The app adjusts to you</h1>
+      <p className="text-base leading-relaxed text-zinc-700 dark:text-zinc-300">
+        Start wherever you are.
+      </p>
+      <p className="text-base leading-relaxed text-zinc-700 dark:text-zinc-300">
+        Sessions stay short.
+      </p>
+      <p className="text-base leading-relaxed text-zinc-700 dark:text-zinc-300">
+        Difficulty adapts as you go.
+      </p>
+    </div>
+  );
+}
+
+/* ─── Screen 3 ────────────────────────────────────────────────────────── */
 const SLIDER_STEPS = 1000;
 
 function FrequencyGraphPage() {
@@ -417,11 +288,7 @@ function FrequencyGraphPage() {
       </div>
 
       <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-500">
-        Estimated from the app&apos;s own reading content: for each bucket, we
-        count what share of running words in a typical passage you&apos;d
-        recognise if you knew the top-N most common words. It&apos;s a rough
-        guide to how much text starts to open up — not an exact comprehension
-        score, and every text is a little different.
+        Based on word frequency in the app&apos;s reading content.
       </p>
     </div>
   );
@@ -543,253 +410,6 @@ function CoverageSvg({ topN }: { topN: number }) {
           More common words →
         </text>
       </svg>
-    </div>
-  );
-}
-
-/* ─── Screen 6 ────────────────────────────────────────────────────────── */
-function DailyLoopWhyPage() {
-  return (
-    <div className="flex flex-col gap-5">
-      <h1 className="app-title">Why this order: memorize → read → listen</h1>
-      <ol className="flex flex-col gap-3">
-        <LoopRow
-          index={1}
-          title="Memorize"
-          body="Cards give you the pieces — a fast, focused pretraining pass on useful words."
-        />
-        <LoopRow
-          index={2}
-          title="Read"
-          body="Reading lets you reuse those words in stable, visible context."
-        />
-        <LoopRow
-          index={3}
-          title="Listen"
-          body="Listening helps you recognize the same words in real-time — the harder, faster form."
-        />
-      </ol>
-      <p className="text-sm text-zinc-500 dark:text-zinc-500">
-        Together, this creates a better environment for acquisition than any
-        one activity alone.
-      </p>
-    </div>
-  );
-}
-
-function LoopRow({
-  index,
-  title,
-  body,
-}: {
-  index: number;
-  title: string;
-  body: string;
-}) {
-  return (
-    <li className="flex items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
-      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-zinc-300 text-xs font-semibold text-zinc-700 dark:border-zinc-700 dark:text-zinc-300">
-        {index}
-      </span>
-      <div className="flex flex-col gap-0.5">
-        <span className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-          {title}
-        </span>
-        <span className="text-sm text-zinc-600 dark:text-zinc-400">{body}</span>
-      </div>
-    </li>
-  );
-}
-
-/* ─── Screen 7 ────────────────────────────────────────────────────────── */
-function AdaptiveDifferencePage() {
-  return (
-    <div className="flex flex-col gap-5">
-      <h1 className="app-title">Acquisition adapts to you</h1>
-      <p className="text-base leading-relaxed text-zinc-700 dark:text-zinc-300">
-        It starts with a best estimate of where you are, then keeps adjusting
-        so your Spanish stays challenging enough to help, but not so hard it
-        becomes discouraging.
-      </p>
-      <DifficultyBand />
-      <p className="text-sm text-zinc-500 dark:text-zinc-500">
-        A starting estimate, a projected current zone, and steady
-        recalibration — not a fixed label.
-      </p>
-    </div>
-  );
-}
-
-function DifficultyBand() {
-  return (
-    <div className="flex flex-col gap-2">
-      <div
-        className="relative grid grid-cols-3 overflow-hidden rounded-xl border border-zinc-200 text-center text-xs font-medium dark:border-zinc-800"
-        role="img"
-        aria-label="Difficulty bands: too easy, best growth zone, too hard"
-      >
-        <div className="bg-zinc-100 py-3 text-zinc-500 dark:bg-zinc-900/60 dark:text-zinc-400">
-          Too easy
-        </div>
-        <div className="bg-zinc-900 py-3 text-white dark:bg-zinc-100 dark:text-zinc-900">
-          Best growth zone
-        </div>
-        <div className="bg-zinc-100 py-3 text-zinc-500 dark:bg-zinc-900/60 dark:text-zinc-400">
-          Too hard
-        </div>
-      </div>
-      <div className="flex justify-center">
-        <span className="text-[10px] uppercase tracking-widest text-zinc-500">
-          ↑ that&apos;s where we try to keep you
-        </span>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Screen 8 — branching ────────────────────────────────────────────── */
-function StartBranch({
-  step,
-  isPending,
-  onAnswerYes,
-  onAnswerNo,
-  onChooseBaseline,
-  onChooseSelfCertify,
-  onPickCefr,
-}: {
-  step: StartBranchStep;
-  isPending: boolean;
-  onAnswerYes: () => void;
-  onAnswerNo: () => void;
-  onChooseBaseline: () => void;
-  onChooseSelfCertify: () => void;
-  onPickCefr: (level: CefrLevel) => void;
-}) {
-  if (step.kind === "ask_experience") {
-    return (
-      <div
-        className="flex flex-col gap-5"
-        data-testid="intro-branch-ask-experience"
-      >
-        <h1 className="app-title">Choose where to begin</h1>
-        <p className="text-base text-zinc-600 dark:text-zinc-400">
-          Do you already have some Spanish experience? No right answer — we
-          just want to start you in the right place.
-        </p>
-        <div className="flex flex-col gap-3">
-          <button
-            type="button"
-            onClick={onAnswerYes}
-            disabled={isPending}
-            className="app-link-card text-left"
-            data-testid="intro-answer-yes"
-          >
-            <span className="block text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-              Yes, I know some Spanish
-            </span>
-            <span className="mt-1 block text-sm text-zinc-600 dark:text-zinc-400">
-              We&apos;ll help you find a good starting level.
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={onAnswerNo}
-            disabled={isPending}
-            className="app-link-card text-left"
-            data-testid="intro-answer-no"
-          >
-            <span className="block text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-              No, I&apos;m new to Spanish
-            </span>
-            <span className="mt-1 block text-sm text-zinc-600 dark:text-zinc-400">
-              We&apos;ll start from the very beginning. No test needed.
-            </span>
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (step.kind === "pick_path") {
-    return (
-      <div className="flex flex-col gap-5" data-testid="intro-branch-pick-path">
-        <h1 className="app-title">How would you like to start?</h1>
-        <p className="text-base text-zinc-600 dark:text-zinc-400">
-          A short check gives the best starting point. You can also pick a
-          level yourself if you prefer.
-        </p>
-        <div className="flex flex-col gap-3">
-          <button
-            type="button"
-            onClick={onChooseBaseline}
-            disabled={isPending}
-            className="app-button w-full justify-center py-4 text-left sm:py-4"
-            data-testid="intro-choose-baseline"
-          >
-            <span className="flex flex-col gap-1">
-              <span className="text-lg font-semibold">
-                {isPending ? "Starting…" : "Take quick placement"}
-              </span>
-              <span className="text-sm font-normal opacity-90">
-                Recommended. Gives you a better starting point in a few
-                minutes.
-              </span>
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={onChooseSelfCertify}
-            disabled={isPending}
-            className="self-start text-sm text-zinc-600 underline underline-offset-4 hover:text-zinc-900 disabled:opacity-50 dark:text-zinc-400 dark:hover:text-zinc-100"
-            data-testid="intro-choose-self-certify"
-          >
-            Choose my own level instead — pick a starting level yourself. The
-            app can still adjust as you use it.
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-5" data-testid="intro-branch-pick-cefr">
-      <h1 className="app-title">Pick a starting level</h1>
-      <p className="text-base text-zinc-600 dark:text-zinc-400">
-        Choose the level that best matches what you can do now. We&apos;ll
-        keep adjusting as you learn.
-      </p>
-      <ul className="flex flex-col gap-4">
-        {CEFR_OPTIONS.map((option) => (
-          <li key={option.level}>
-            <button
-              type="button"
-              disabled={isPending}
-              onClick={() => onPickCefr(option.level)}
-              className="app-link-card w-full text-left"
-              data-testid={`intro-cefr-${option.level}`}
-            >
-              <span className="flex items-baseline justify-between gap-3">
-                <span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-                  {option.label}
-                </span>
-                {/* A0 is not a real CEFR level — used as an internal
-                    discriminator only, no visible pill. */}
-                {option.level === "A0" ? null : (
-                  <span className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">
-                    {option.level}
-                  </span>
-                )}
-              </span>
-              <span className="mt-2 block text-base text-zinc-800 dark:text-zinc-100">
-                {option.canDo}
-              </span>
-              <span className="mt-2 block text-sm leading-6 text-zinc-500 dark:text-zinc-400">
-                {option.canDoExpanded}
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }

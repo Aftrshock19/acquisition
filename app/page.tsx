@@ -5,13 +5,19 @@ import { WeeklyProgressCard } from "@/components/progress/WeeklyProgressCard";
 import { getAppSessionDate } from "@/lib/analytics/date";
 import { getCalendarWeekSummary, type CalendarDayStatus } from "@/lib/progress/calendar";
 import { getUserSettings } from "@/lib/settings/getUserSettings";
-import { shouldRedirectToIntro } from "@/lib/onboarding/state";
+import {
+  shouldRedirectToIntro,
+  shouldRedirectToPlacement,
+} from "@/lib/onboarding/state";
 import { getSupabaseServerContextFast } from "@/lib/supabase/server";
 
 export default async function HomePage() {
   const { signedIn } = await getUserSettings();
   if (signedIn && (await shouldRedirectToIntro())) {
     redirect("/onboarding");
+  }
+  if (signedIn && (await shouldRedirectToPlacement())) {
+    redirect("/placement");
   }
 
   const week = signedIn ? await loadCurrentWeek() : null;

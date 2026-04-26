@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useState, useTransition } from "react";
 
@@ -7,11 +8,10 @@ import {
   discardPlacementResult,
   getPlacementState,
   retakePlacementTest,
-  skipPlacementRun,
   startPlacementRun,
   submitPlacementAnswer,
 } from "@/app/actions/placement";
-import { CheckIcon } from "@/components/icons/CheckIcon";
+import { completeOnboardingAsBeginner } from "@/app/actions/onboarding";
 import type { PlacementState } from "@/lib/placement/state";
 import type { AdaptivePlacementEstimate } from "@/lib/placement/types";
 import {
@@ -65,12 +65,6 @@ export function PlacementFlow({
             }
           })
         }
-        onSkip={() =>
-          startTransition(async () => {
-            await skipPlacementRun();
-            router.push("/");
-          })
-        }
       />
     );
   }
@@ -99,6 +93,25 @@ export function PlacementFlow({
           })
         }
         onChooseLevel={() => router.push("/choose-level")}
+        onStartAsBeginner={() =>
+          startTransition(async () => {
+            setError(null);
+            // Discarding first ensures the placement_runs row is properly
+            // closed; then onboarding-as-beginner clears the frontier and
+            // sets the user up for the absolute-beginner content range.
+            const discard = await discardPlacementResult();
+            if (!discard.ok) {
+              setError(discard.error);
+              return;
+            }
+            const onboard = await completeOnboardingAsBeginner();
+            if (!onboard.ok) {
+              setError(onboard.error);
+              return;
+            }
+            router.push("/");
+          })
+        }
         onDiscard={() =>
           startTransition(async () => {
             setError(null);
@@ -134,6 +147,25 @@ export function PlacementFlow({
           })
         }
         onChooseLevel={() => router.push("/choose-level")}
+        onStartAsBeginner={() =>
+          startTransition(async () => {
+            setError(null);
+            // Discarding first ensures the placement_runs row is properly
+            // closed; then onboarding-as-beginner clears the frontier and
+            // sets the user up for the absolute-beginner content range.
+            const discard = await discardPlacementResult();
+            if (!discard.ok) {
+              setError(discard.error);
+              return;
+            }
+            const onboard = await completeOnboardingAsBeginner();
+            if (!onboard.ok) {
+              setError(onboard.error);
+              return;
+            }
+            router.push("/");
+          })
+        }
         onDiscard={() =>
           startTransition(async () => {
             setError(null);
@@ -160,17 +192,15 @@ export function PlacementFlow({
         <div className="app-card flex flex-col gap-4 p-6 md:p-8">
           {state.bankEmpty ? (
             <>
-              <p className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-                No placement items available
+              <p className="text-zinc-700 dark:text-zinc-300">
+                Placement isn&apos;t available right now.
               </p>
-              <p className="text-zinc-600 dark:text-zinc-400">
-                The placement item bank is empty. Run{" "}
-                <code className="rounded bg-zinc-200 px-1 dark:bg-zinc-800">
-                  npx tsx scripts/generate_placement_item_bank.ts --lang{" "}
-                  {state.language}
-                </code>{" "}
-                to seed it.
-              </p>
+              <Link
+                href="/choose-level"
+                className="self-start text-sm font-medium text-zinc-900 underline underline-offset-4 dark:text-zinc-100"
+              >
+                Choose your own level instead
+              </Link>
             </>
           ) : (
             <p className="text-zinc-600 dark:text-zinc-400">
@@ -398,13 +428,11 @@ function IntroScreen({
   bankEmpty,
   error,
   onStart,
-  onSkip,
 }: {
   isPending: boolean;
   bankEmpty: boolean;
   error: string | null;
   onStart: () => void;
-  onSkip: () => void;
 }) {
   return (
     <main className="app-shell">
@@ -418,7 +446,7 @@ function IntroScreen({
 
       <div className="app-card flex flex-col gap-6 p-6 md:p-8">
         <ul className="flex flex-col gap-3 text-[15px] text-zinc-700 dark:text-zinc-300">
-          <ReassuranceRow>About 3 minutes</ReassuranceRow>
+          <ReassuranceRow>About 2 minutes</ReassuranceRow>
           <ReassuranceRow>
             You can choose &ldquo;I don&apos;t know&rdquo; at any time
           </ReassuranceRow>
@@ -428,36 +456,29 @@ function IntroScreen({
         </ul>
 
         {bankEmpty ? (
-          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
-            Setup needed. Run{" "}
-            <code className="rounded bg-amber-200 px-1 dark:bg-amber-900/50">
-              npx tsx scripts/generate_placement_item_bank.ts --lang es
-            </code>
+          <div className="flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
+            <span>Placement isn&apos;t available right now.</span>
+            <Link
+              href="/choose-level"
+              className="self-start font-medium underline underline-offset-4"
+            >
+              Choose your own level instead
+            </Link>
           </div>
         ) : null}
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <button
-            type="button"
-            disabled={isPending || bankEmpty}
-            onClick={onStart}
-            className="app-button"
-          >
-            Start
-          </button>
-          <button
-            type="button"
-            disabled={isPending}
-            onClick={onSkip}
-            className="app-button-secondary"
-          >
-            Skip for now
-          </button>
-        </div>
+        <button
+          type="button"
+          disabled={isPending || bankEmpty}
+          onClick={onStart}
+          className="app-button"
+        >
+          Start
+        </button>
 
         <p className="text-xs text-zinc-500 dark:text-zinc-500">
-          You can take this later in Settings.
+          You can take this later in the Profile page.
         </p>
       </div>
     </main>
@@ -466,8 +487,7 @@ function IntroScreen({
 
 function ReassuranceRow({ children }: { children: React.ReactNode }) {
   return (
-    <li className="flex items-start gap-3">
-      <CheckIcon className="mt-0.5 h-4 w-4 flex-shrink-0 text-zinc-500 dark:text-zinc-500" />
+    <li>
       <span>{children}</span>
     </li>
   );
@@ -531,11 +551,11 @@ function startingPointCopy(estimate: AdaptivePlacementEstimate): string {
 
 function confidenceCopy(estimate: AdaptivePlacementEstimate): string {
   if (estimate.topOfBankReached) {
-    return "You cleared every checkpoint we tested — we'll keep adjusting from there";
+    return "You cleared every checkpoint we tested. We'll keep adjusting from there";
   }
   switch (estimate.estimateStatus) {
     case "high":
-      return "We got a clear reading — this is a solid starting point";
+      return "We got a clear reading. This is a solid starting point";
     case "medium":
       return "We have a good sense of where to start";
     case "provisional":
@@ -551,6 +571,7 @@ function ResultScreen({
   onContinue,
   onRetake,
   onChooseLevel,
+  onStartAsBeginner,
   onDiscard,
 }: {
   estimate: AdaptivePlacementEstimate;
@@ -559,6 +580,7 @@ function ResultScreen({
   onContinue: () => void;
   onRetake: () => void;
   onChooseLevel: () => void;
+  onStartAsBeginner: () => void;
   onDiscard: () => void;
 }) {
   return (
@@ -587,7 +609,7 @@ function ResultScreen({
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <button type="button" disabled={isPending} onClick={onContinue} className="app-button">
-            Continue to today
+            Start today
           </button>
           <button
             type="button"
@@ -602,14 +624,24 @@ function ResultScreen({
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
         <div className="flex flex-col gap-2">
-          <button
-            type="button"
-            disabled={isPending}
-            onClick={onChooseLevel}
-            className="self-start text-sm text-zinc-500 underline underline-offset-4 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-300"
-          >
-            Choose your own level
-          </button>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={onChooseLevel}
+              className="self-start text-sm text-zinc-500 underline underline-offset-4 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-300"
+            >
+              Choose your own level
+            </button>
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={onStartAsBeginner}
+              className="self-start text-sm text-zinc-500 underline underline-offset-4 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-300"
+            >
+              Start as a beginner
+            </button>
+          </div>
           <button
             type="button"
             disabled={isPending}

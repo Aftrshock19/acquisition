@@ -56,3 +56,8 @@ export async function shouldRedirectToIntro(): Promise<boolean> {
   const state = await getOnboardingState();
   return decideOnboardingGate(state).action === "redirect_intro";
 }
+
+export async function shouldRedirectToPlacement(): Promise<boolean> {
+  const state = await getOnboardingState();
+  return decideOnboardingGate(state).action === "redirect_placement";
+}

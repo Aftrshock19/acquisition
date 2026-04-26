@@ -14,7 +14,8 @@ export type OnboardingGateInput = {
 
 export type OnboardingGateDecision =
   | { action: "allow" }
-  | { action: "redirect_intro" };
+  | { action: "redirect_intro" }
+  | { action: "redirect_placement" };
 
 /**
  * Pure decision function for whether a signed-in user should be routed
@@ -28,9 +29,23 @@ export function decideOnboardingGate(
 
   if (input.onboardingCompletedAt) return { action: "allow" };
 
-  // A terminal entry mode (beginner_default, baseline, or self_certified)
-  // means onboarding finished — even if onboarding_completed_at failed to
-  // persist for some reason, this alone is enough to bypass the intro.
+  // Baseline mode is set the moment the user clicks "Start" in the intro,
+  // *before* the placement check actually runs, and stays "calibrating"
+  // for the duration of an in-progress test. Treat it as done only once
+  // placement_status reflects a finished result — otherwise the user
+  // would silently bypass placement by closing the app mid-flow.
+  if (input.onboardingEntryMode === "baseline") {
+    const placementDone =
+      input.placementStatus !== null &&
+      input.placementStatus !== "unknown" &&
+      input.placementStatus !== "calibrating";
+    return placementDone
+      ? { action: "allow" }
+      : { action: "redirect_placement" };
+  }
+
+  // beginner_default and self_certified both commit a frontier and complete
+  // onboarding atomically, so reaching this branch means they're done.
   if (input.onboardingEntryMode) return { action: "allow" };
 
   if (input.hasSeenIntro) return { action: "allow" };

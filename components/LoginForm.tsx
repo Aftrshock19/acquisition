@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { getAppUrl } from "@/lib/url";
 import { useRouter } from "next/navigation";
+import { validateSignupCode, claimSignupCode } from "@/app/actions/signup-code";
 
 const EMAIL_REDIRECT_TO = `${getAppUrl()}/auth/callback`;
 
@@ -12,8 +13,11 @@ export function LoginForm() {
   const router = useRouter();
   const [signInEmail, setSignInEmail] = useState("");
   const [signInPassword, setSignInPassword] = useState("");
+  const [signupCode, setSignupCode] = useState("");
   const [signUpEmail, setSignUpEmail] = useState("");
   const [signUpPassword, setSignUpPassword] = useState("");
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showSignUpPassword, setShowSignUpPassword] = useState(false);
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [submitting, setSubmitting] = useState<"signIn" | "signUp" | null>(null);
   const [confirmationPending, setConfirmationPending] = useState(false);
@@ -47,6 +51,11 @@ export function LoginForm() {
     setMessage(null);
     setSubmitting("signUp");
     try {
+      const codeResult = await validateSignupCode(signupCode);
+      if (!codeResult.ok) {
+        setMessage({ type: "error", text: "Invalid or already used signup code." });
+        return;
+      }
       const supabase = createSupabaseBrowserClient();
       const { data, error } = await supabase.auth.signUp({
         email: signUpEmail,
@@ -58,6 +67,16 @@ export function LoginForm() {
       if (error) {
         setMessage({ type: "error", text: error.message });
         return;
+      }
+      if (data.user && data.user.identities && data.user.identities.length === 0) {
+        setMessage({ type: "error", text: "An account with this email already exists." });
+        return;
+      }
+      if (data.user) {
+        const claimResult = await claimSignupCode(signupCode, data.user.id);
+        if (!claimResult.ok) {
+          console.warn("Signup code claim failed:", claimResult.error);
+        }
       }
       if (data.session) {
         setMessage({ type: "ok", text: "Account created. Redirecting…" });
@@ -116,16 +135,25 @@ export function LoginForm() {
           className="app-input"
           suppressHydrationWarning
         />
-        <input
-          type="password"
-          placeholder="Password"
-          value={signInPassword}
-          onChange={(e) => setSignInPassword(e.target.value)}
-          required
-          autoComplete="current-password"
-          className="app-input"
-          suppressHydrationWarning
-        />
+        <div className="relative">
+          <input
+            type={showLoginPassword ? "text" : "password"}
+            placeholder="Password"
+            value={signInPassword}
+            onChange={(e) => setSignInPassword(e.target.value)}
+            required
+            autoComplete="current-password"
+            className="app-input"
+            suppressHydrationWarning
+          />
+          <button
+            type="button"
+            onClick={() => setShowLoginPassword((v) => !v)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer border-0 bg-transparent text-sm text-neutral-400 hover:text-neutral-200"
+          >
+            {showLoginPassword ? "Hide" : "Show"}
+          </button>
+        </div>
         <button
           type="submit"
           disabled={submitting !== null}
@@ -153,17 +181,47 @@ export function LoginForm() {
           className="app-input"
           suppressHydrationWarning
         />
+        <div className="relative">
+          <input
+            type={showSignUpPassword ? "text" : "password"}
+            placeholder="Password (min 6 characters)"
+            value={signUpPassword}
+            onChange={(e) => setSignUpPassword(e.target.value)}
+            required
+            minLength={6}
+            autoComplete="new-password"
+            className="app-input"
+            suppressHydrationWarning
+          />
+          <button
+            type="button"
+            onClick={() => setShowSignUpPassword((v) => !v)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer border-0 bg-transparent text-sm text-neutral-400 hover:text-neutral-200"
+          >
+            {showSignUpPassword ? "Hide" : "Show"}
+          </button>
+        </div>
+        <label htmlFor="signup-code" className="sr-only">
+          Signup code
+        </label>
         <input
-          type="password"
-          placeholder="Password (min 6 characters)"
-          value={signUpPassword}
-          onChange={(e) => setSignUpPassword(e.target.value)}
+          id="signup-code"
+          type="text"
+          placeholder="Enter your signup code"
+          value={signupCode}
+          onChange={(e) => setSignupCode(e.target.value)}
           required
-          minLength={6}
-          autoComplete="new-password"
+          autoComplete="off"
+          spellCheck={false}
           className="app-input"
           suppressHydrationWarning
         />
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          If you forgot your signup code please email{" "}
+          <a href="mailto:du22662@bristol.ac.uk" className="underline">
+            du22662@bristol.ac.uk
+          </a>
+        </p>
         <button
           type="submit"
           disabled={submitting !== null}
