@@ -81,6 +81,7 @@ export default async function ProgressPage({
         year={year}
         month={month}
         days={summary.days}
+        loopSummaries={summary.loopSummaries}
         prevHref={`/progress?year=${prev.year}&month=${prev.month}`}
         nextHref={`/progress?year=${next.year}&month=${next.month}`}
         todayDate={todayDate}

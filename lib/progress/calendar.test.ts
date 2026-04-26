@@ -29,6 +29,8 @@ function makeDay(overrides: Partial<DailyAggregate> = {}): DailyAggregate {
     reader_saved_words_count: 0,
     reading_completed: false,
     listening_completed: false,
+    reading_text_id: null,
+    listening_asset_id: null,
     reading_time_seconds: 0,
     listening_time_seconds: 0,
     flashcard_time_seconds: 0,

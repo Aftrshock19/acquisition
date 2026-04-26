@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import type { DailyLoopSummary } from "@/lib/loop/dailySummary";
 import type { CalendarDayMetrics } from "@/lib/progress/calendar";
 import { ProgressDayDetail } from "./ProgressDayDetail";
 
@@ -15,6 +16,7 @@ export type ProgressCalendarProps = {
   year: number;
   month: number;
   days: CalendarDayMetrics[];
+  loopSummaries?: Record<string, DailyLoopSummary>;
   prevHref: string;
   nextHref: string;
   todayDate: string;
@@ -24,6 +26,7 @@ export function ProgressCalendar({
   year,
   month,
   days,
+  loopSummaries,
   prevHref,
   nextHref,
   todayDate,
@@ -112,7 +115,13 @@ export function ProgressCalendar({
         <LegendSwatch status="completed" label="Daily loop complete" />
       </div>
 
-      <ProgressDayDetail day={selectedDay} todayDate={todayDate} />
+      <ProgressDayDetail
+        day={selectedDay}
+        loopSummary={
+          selectedDay && loopSummaries ? loopSummaries[selectedDay.date] ?? null : null
+        }
+        todayDate={todayDate}
+      />
     </section>
   );
 }

@@ -1,6 +1,12 @@
 import { getAppSessionDate, shiftSessionDate } from "@/lib/analytics/date";
 import { getUserAnalyticsBundle } from "@/lib/analytics/service";
 import type { DailyAggregate } from "@/lib/analytics/types";
+import {
+  buildLoopSummariesByDate,
+  type DailyLoopSummary,
+  type ListeningAudioLookup,
+  type ReadingTextLookup,
+} from "@/lib/loop/dailySummary";
 import type { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type SupabaseServerClient = NonNullable<
@@ -21,7 +27,11 @@ export type CalendarDayMetrics = {
   reviewsDone: number;
   savedWords: number;
   readingCompleted: boolean;
+  readingTextId: string | null;
+  readingTimeSeconds: number;
   listeningCompleted: boolean;
+  listeningAssetId: string | null;
+  listeningTimeSeconds: number;
   timeOnTaskMinutes: number;
   retryCount: number;
 };
@@ -41,6 +51,11 @@ export type CalendarMonthSummary = CalendarRangeTotals & {
   startDate: string;
   endDate: string;
   days: CalendarDayMetrics[];
+  /**
+   * Per-active-day formatted summary in the same shape as the /done screen.
+   * Empty days are NOT keyed; consumers fall back to "No activity" rendering.
+   */
+  loopSummaries: Record<string, DailyLoopSummary>;
 };
 
 export type CalendarWeekSummary = CalendarRangeTotals & {
@@ -68,7 +83,11 @@ export function toCalendarDayMetrics(day: DailyAggregate): CalendarDayMetrics {
     reviewsDone: day.flashcard_review_completed_count,
     savedWords: day.reader_saved_words_count,
     readingCompleted: day.reading_completed,
+    readingTextId: day.reading_text_id,
+    readingTimeSeconds: day.reading_time_seconds,
     listeningCompleted: day.listening_completed,
+    listeningAssetId: day.listening_asset_id,
+    listeningTimeSeconds: day.listening_time_seconds,
     timeOnTaskMinutes: Math.round(day.total_time_seconds / 60),
     retryCount: day.flashcard_retry_count,
   };
@@ -161,6 +180,87 @@ export async function getCalendarRangeSummary(
   return bundle.dailyAggregates.map(toCalendarDayMetrics);
 }
 
+type AudioWithTextRow = {
+  id: string;
+  duration_seconds: number | null;
+  text:
+    | { display_label: string | null }
+    | { display_label: string | null }[]
+    | null;
+};
+
+function pickJoinedDisplayLabel(text: AudioWithTextRow["text"]): string | null {
+  if (!text) return null;
+  if (Array.isArray(text)) return text[0]?.display_label ?? null;
+  return text.display_label ?? null;
+}
+
+/**
+ * Batch-fetch the texts and audio rows referenced by the visible month, then
+ * build a `date → DailyLoopSummary` map for active days only. The two queries
+ * run in parallel and are skipped when the corresponding ID set is empty.
+ */
+async function loadMonthlyLoopSummaries(
+  supabase: SupabaseServerClient,
+  days: CalendarDayMetrics[],
+): Promise<Record<string, DailyLoopSummary>> {
+  const readingTextIds = Array.from(
+    new Set(
+      days
+        .filter((d) => d.usedApp && d.readingCompleted)
+        .map((d) => d.readingTextId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  );
+  const listeningAssetIds = Array.from(
+    new Set(
+      days
+        .filter((d) => d.usedApp && d.listeningCompleted)
+        .map((d) => d.listeningAssetId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  );
+
+  const [textsResult, audiosResult] = await Promise.all([
+    readingTextIds.length > 0
+      ? supabase
+          .from("texts")
+          .select("id, word_count, estimated_minutes, display_label")
+          .in("id", readingTextIds)
+      : Promise.resolve({ data: [] as Array<unknown>, error: null }),
+    listeningAssetIds.length > 0
+      ? supabase
+          .from("audio")
+          .select("id, duration_seconds, text:texts(display_label)")
+          .in("id", listeningAssetIds)
+      : Promise.resolve({ data: [] as Array<unknown>, error: null }),
+  ]);
+
+  const textsById = new Map<string, ReadingTextLookup>();
+  for (const row of (textsResult.data ?? []) as Array<{
+    id: string;
+    word_count: number | null;
+    estimated_minutes: number | null;
+    display_label: string | null;
+  }>) {
+    textsById.set(row.id, {
+      word_count: row.word_count,
+      estimated_minutes: row.estimated_minutes,
+      display_label: row.display_label,
+    });
+  }
+
+  const audiosById = new Map<string, ListeningAudioLookup>();
+  for (const row of (audiosResult.data ?? []) as AudioWithTextRow[]) {
+    audiosById.set(row.id, {
+      duration_seconds: row.duration_seconds,
+      display_label: pickJoinedDisplayLabel(row.text),
+    });
+  }
+
+  return buildLoopSummariesByDate(days, textsById, audiosById);
+}
+
 export async function getCalendarMonthSummary(
   supabase: SupabaseServerClient,
   userId: string,
@@ -169,7 +269,16 @@ export async function getCalendarMonthSummary(
 ): Promise<CalendarMonthSummary> {
   const { from, to } = getMonthRange(year, month);
   const days = await getCalendarRangeSummary(supabase, userId, from, to);
-  return { year, month, startDate: from, endDate: to, days, ...summarize(days) };
+  const loopSummaries = await loadMonthlyLoopSummaries(supabase, days);
+  return {
+    year,
+    month,
+    startDate: from,
+    endDate: to,
+    days,
+    loopSummaries,
+    ...summarize(days),
+  };
 }
 
 export async function getCalendarWeekSummary(

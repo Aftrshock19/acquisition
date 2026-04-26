@@ -305,6 +305,8 @@ export function buildDailyAggregates({
       reader_saved_words_count: readerSavedWordsCount,
       reading_completed: Boolean(session?.reading_done),
       listening_completed: Boolean(session?.listening_done),
+      reading_text_id: session?.reading_text_id ?? null,
+      listening_asset_id: session?.listening_asset_id ?? null,
       reading_time_seconds: readingTimeSeconds,
       listening_time_seconds: listeningTimeSeconds,
       flashcard_time_seconds: flashcardTimeSeconds,

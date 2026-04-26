@@ -102,6 +102,8 @@ export type DailyAggregate = {
   reader_saved_words_count: number;
   reading_completed: boolean;
   listening_completed: boolean;
+  reading_text_id: string | null;
+  listening_asset_id: string | null;
   reading_time_seconds: number;
   listening_time_seconds: number;
   flashcard_time_seconds: number;

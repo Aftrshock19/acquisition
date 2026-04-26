@@ -37,6 +37,20 @@ export type DailyLoopSummary = {
   listening: ListeningSummary;
 };
 
+// Pre-flattened lookup shapes shared by /done and the calendar aggregator.
+// Both surfaces normalise their per-row reads into these structural types so
+// `buildDailyLoopSummary` can stay pure.
+export type ReadingTextLookup = {
+  word_count: number | null;
+  estimated_minutes: number | null;
+  display_label: string | null;
+};
+
+export type ListeningAudioLookup = {
+  duration_seconds: number | null;
+  display_label: string | null;
+};
+
 // ---------------------------------------------------------------------------
 // Pure helper: flashcard block
 // ---------------------------------------------------------------------------
@@ -101,27 +115,8 @@ export function computeFlashcardSummary(
 }
 
 // ---------------------------------------------------------------------------
-// Async helper: assemble the full DailyLoopSummary
+// Reading + listening blocks (pure)
 // ---------------------------------------------------------------------------
-
-type TextLookupRow = {
-  id: string;
-  word_count: number | null;
-  estimated_minutes: number | null;
-  display_label: string | null;
-};
-
-type AudioLookupRow = {
-  id: string;
-  duration_seconds: number | null;
-  text: { display_label: string | null } | { display_label: string | null }[] | null;
-};
-
-function pickJoinedDisplayLabel(text: AudioLookupRow["text"]): string | null {
-  if (!text) return null;
-  if (Array.isArray(text)) return text[0]?.display_label ?? null;
-  return text.display_label ?? null;
-}
 
 /**
  * Convert seconds to whole minutes for a *completed* listening item. A
@@ -132,6 +127,187 @@ function pickJoinedDisplayLabel(text: AudioLookupRow["text"]): string | null {
 function listeningMinutes(seconds: number | null | undefined): number | null {
   if (!seconds || seconds <= 0) return null;
   return Math.max(1, Math.round(seconds / 60));
+}
+
+function buildReadingSummary(
+  done: boolean,
+  timeSeconds: number,
+  textLookup: ReadingTextLookup | null,
+): ReadingSummary {
+  if (!done) {
+    return {
+      completed: false,
+      completedCount: 0,
+      totalWords: null,
+      totalMinutes: null,
+      displayLabel: null,
+    };
+  }
+  if (!textLookup) {
+    return {
+      completed: true,
+      completedCount: 1,
+      totalWords: null,
+      totalMinutes: null,
+      displayLabel: null,
+    };
+  }
+  const totalMinutes =
+    timeSeconds > 0
+      ? Math.round(timeSeconds / 60)
+      : textLookup.estimated_minutes ?? null;
+  return {
+    completed: true,
+    completedCount: 1,
+    totalWords: textLookup.word_count ?? null,
+    totalMinutes,
+    displayLabel: textLookup.display_label ?? null,
+  };
+}
+
+function buildListeningSummary(
+  done: boolean,
+  timeSeconds: number,
+  audioLookup: ListeningAudioLookup | null,
+): ListeningSummary {
+  if (!done) {
+    return {
+      completed: false,
+      completedCount: 0,
+      totalMinutes: null,
+      displayLabel: null,
+    };
+  }
+  if (!audioLookup) {
+    return {
+      completed: true,
+      completedCount: 1,
+      totalMinutes: null,
+      displayLabel: null,
+    };
+  }
+  const totalMinutes =
+    listeningMinutes(audioLookup.duration_seconds) ??
+    listeningMinutes(timeSeconds);
+  return {
+    completed: true,
+    completedCount: 1,
+    totalMinutes,
+    displayLabel: audioLookup.display_label,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Pure aggregator: full DailyLoopSummary from already-normalised inputs
+// ---------------------------------------------------------------------------
+
+export type DailyLoopSummaryFlashcardInput = Pick<
+  DailySessionRow,
+  | "flashcard_completed_count"
+  | "flashcard_new_completed_count"
+  | "flashcard_review_completed_count"
+  | "flashcard_attempts_count"
+  | "flashcard_retry_count"
+>;
+
+export type DailyLoopSummaryInput = {
+  flashcards: DailyLoopSummaryFlashcardInput | null;
+  reading: { done: boolean; timeSeconds: number };
+  listening: { done: boolean; timeSeconds: number };
+};
+
+/**
+ * Pure builder used by both /done (`loadDailyLoopSummary`) and the calendar
+ * day-detail aggregator (`buildLoopSummariesByDate`). Caller is responsible
+ * for fetching and normalising the per-text and per-audio lookups; this
+ * function just shapes the result.
+ */
+export function buildDailyLoopSummary(
+  input: DailyLoopSummaryInput,
+  textLookup: ReadingTextLookup | null,
+  audioLookup: ListeningAudioLookup | null,
+): DailyLoopSummary {
+  return {
+    flashcards: computeFlashcardSummary(input.flashcards),
+    reading: buildReadingSummary(input.reading.done, input.reading.timeSeconds, textLookup),
+    listening: buildListeningSummary(
+      input.listening.done,
+      input.listening.timeSeconds,
+      audioLookup,
+    ),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Calendar aggregator: many days, pre-fetched lookup maps
+// ---------------------------------------------------------------------------
+
+export type CalendarLoopSummaryDay = {
+  date: string;
+  usedApp: boolean;
+  flashcardsDone: number;
+  newWords: number;
+  reviewsDone: number;
+  flashcardAttempts: number;
+  retryCount: number;
+  readingCompleted: boolean;
+  readingTextId: string | null;
+  readingTimeSeconds: number;
+  listeningCompleted: boolean;
+  listeningAssetId: string | null;
+  listeningTimeSeconds: number;
+};
+
+/**
+ * Build a `date → DailyLoopSummary` map for the visible calendar range.
+ * Empty days (no app activity) are skipped — the day-detail panel keeps its
+ * "No activity" rendering for those.
+ */
+export function buildLoopSummariesByDate(
+  days: ReadonlyArray<CalendarLoopSummaryDay>,
+  texts: ReadonlyMap<string, ReadingTextLookup>,
+  audios: ReadonlyMap<string, ListeningAudioLookup>,
+): Record<string, DailyLoopSummary> {
+  const out: Record<string, DailyLoopSummary> = {};
+  for (const day of days) {
+    if (!day.usedApp) continue;
+    const text = day.readingTextId ? texts.get(day.readingTextId) ?? null : null;
+    const audio = day.listeningAssetId
+      ? audios.get(day.listeningAssetId) ?? null
+      : null;
+    out[day.date] = buildDailyLoopSummary(
+      {
+        flashcards: {
+          flashcard_completed_count: day.flashcardsDone,
+          flashcard_new_completed_count: day.newWords,
+          flashcard_review_completed_count: day.reviewsDone,
+          flashcard_attempts_count: day.flashcardAttempts,
+          flashcard_retry_count: day.retryCount,
+        },
+        reading: { done: day.readingCompleted, timeSeconds: day.readingTimeSeconds },
+        listening: { done: day.listeningCompleted, timeSeconds: day.listeningTimeSeconds },
+      },
+      text,
+      audio,
+    );
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// /done loader: fetches a single user's text + audio rows then builds.
+// ---------------------------------------------------------------------------
+
+type AudioJoinedTextRow = {
+  id: string;
+  duration_seconds: number | null;
+  text: { display_label: string | null } | { display_label: string | null }[] | null;
+};
+
+function pickJoinedDisplayLabel(text: AudioJoinedTextRow["text"]): string | null {
+  if (!text) return null;
+  if (Array.isArray(text)) return text[0]?.display_label ?? null;
+  return text.display_label ?? null;
 }
 
 /**
@@ -145,8 +321,6 @@ export async function loadDailyLoopSummary(
   supabase: SupabaseClient,
   dailySession: DailySessionRow,
 ): Promise<DailyLoopSummary> {
-  const flashcards = computeFlashcardSummary(dailySession);
-
   const wantReading =
     dailySession.reading_done && Boolean(dailySession.reading_text_id);
   const wantListening =
@@ -169,67 +343,35 @@ export async function loadDailyLoopSummary(
       : Promise.resolve({ data: null, error: null }),
   ]);
 
-  const reading: ReadingSummary = (() => {
-    if (!dailySession.reading_done) {
-      return {
-        completed: false,
-        completedCount: 0,
-        totalWords: null,
-        totalMinutes: null,
-        displayLabel: null,
-      };
-    }
-    const text = (textResult.data as TextLookupRow | null) ?? null;
-    if (!text) {
-      return {
-        completed: true,
-        completedCount: 1,
-        totalWords: null,
-        totalMinutes: null,
-        displayLabel: null,
-      };
-    }
-    const totalMinutes =
-      dailySession.reading_time_seconds > 0
-        ? Math.round(dailySession.reading_time_seconds / 60)
-        : text.estimated_minutes ?? null;
-    return {
-      completed: true,
-      completedCount: 1,
-      totalWords: text.word_count ?? null,
-      totalMinutes,
-      displayLabel: text.display_label ?? null,
-    };
-  })();
+  const text = textResult.data as
+    | { word_count: number | null; estimated_minutes: number | null; display_label: string | null }
+    | null;
+  const audio = audioResult.data as AudioJoinedTextRow | null;
 
-  const listening: ListeningSummary = (() => {
-    if (!dailySession.listening_done) {
-      return {
-        completed: false,
-        completedCount: 0,
-        totalMinutes: null,
-        displayLabel: null,
-      };
-    }
-    const audio = (audioResult.data as AudioLookupRow | null) ?? null;
-    if (!audio) {
-      return {
-        completed: true,
-        completedCount: 1,
-        totalMinutes: null,
-        displayLabel: null,
-      };
-    }
-    const totalMinutes =
-      listeningMinutes(audio.duration_seconds) ??
-      listeningMinutes(dailySession.listening_time_seconds);
-    return {
-      completed: true,
-      completedCount: 1,
-      totalMinutes,
-      displayLabel: pickJoinedDisplayLabel(audio.text),
-    };
-  })();
-
-  return { flashcards, reading, listening };
+  return buildDailyLoopSummary(
+    {
+      flashcards: dailySession,
+      reading: {
+        done: dailySession.reading_done,
+        timeSeconds: dailySession.reading_time_seconds,
+      },
+      listening: {
+        done: dailySession.listening_done,
+        timeSeconds: dailySession.listening_time_seconds,
+      },
+    },
+    text
+      ? {
+          word_count: text.word_count,
+          estimated_minutes: text.estimated_minutes,
+          display_label: text.display_label,
+        }
+      : null,
+    audio
+      ? {
+          duration_seconds: audio.duration_seconds,
+          display_label: pickJoinedDisplayLabel(audio.text),
+        }
+      : null,
+  );
 }
