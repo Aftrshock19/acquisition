@@ -1314,12 +1314,16 @@ export async function extendFlashcardsSession(
 
   const currentDailySession = await getTodayDailySessionRow(supabase, user.id);
   if (!currentDailySession) return { ok: false, reason: "no_session" };
-  if (currentDailySession.stage !== "reading") {
+  if (
+    currentDailySession.stage !== "reading" &&
+    currentDailySession.stage !== "completed"
+  ) {
     return { ok: false, reason: "wrong_stage" };
   }
   if (!currentDailySession.flashcards_completed_at) {
     return { ok: false, reason: "flashcards_not_complete" };
   }
+  const fromCompleted = currentDailySession.stage === "completed";
 
   const currentProgress = getDailySessionProgressState(currentDailySession);
   const nextProgress: DailySessionProgressState = {
@@ -1354,12 +1358,12 @@ export async function extendFlashcardsSession(
         started_at: currentDailySession.started_at ?? now,
         last_active_at: now,
         flashcards_completed_at: null,
-        reading_done: false,
+        reading_done: fromCompleted,
         reading_text_id: currentDailySession.reading_text_id,
         reading_opened_at: currentDailySession.reading_opened_at,
         reading_completed_at: currentDailySession.reading_completed_at,
         reading_time_seconds: currentDailySession.reading_time_seconds ?? 0,
-        listening_done: false,
+        listening_done: fromCompleted,
         listening_asset_id: currentDailySession.listening_asset_id,
         listening_opened_at: currentDailySession.listening_opened_at,
         listening_playback_started_at:
@@ -1375,7 +1379,7 @@ export async function extendFlashcardsSession(
         listening_time_seconds:
           currentDailySession.listening_time_seconds ?? 0,
         completed: false,
-        completed_at: null,
+        completed_at: fromCompleted ? currentDailySession.completed_at : null,
       },
       { onConflict: "user_id,session_date" },
     );

@@ -157,11 +157,7 @@ function HowItWorksPage() {
           title="Reading"
           body="See them again in a short passage at your level."
         />
-        <StepLine
-          n={3}
-          title="Listening"
-          body="Hear them spoken naturally."
-        />
+        <StepLine n={3} title="Listening" body="Hear them spoken naturally." />
       </div>
     </div>
   );
@@ -218,10 +214,12 @@ function FrequencyGraphPage() {
   const sliderValue = Math.round(topNXPosition(topN) * SLIDER_STEPS);
   return (
     <div className="flex flex-col gap-5" data-testid="intro-frequency-page">
-      <h1 className="app-title">How much text opens up as you learn more words</h1>
+      <h1 className="app-title">
+        How much text opens up as you learn more words
+      </h1>
       <p className="text-base leading-relaxed text-zinc-700 dark:text-zinc-300">
         A small set of very common words does most of the work in real Spanish
-        — so learning them first lets you recognise far more of a typical text,
+        so learning them first lets you recognise far more of a typical text,
         far sooner.
       </p>
 
@@ -392,12 +390,7 @@ function CoverageSvg({ topN }: { topN: number }) {
           <circle cx={markerX} cy={markerY} r="4.5" fill="currentColor" />
         </g>
 
-        <text
-          x={padX}
-          y={height - 6}
-          className="fill-zinc-500"
-          fontSize="9"
-        >
+        <text x={padX} y={height - 6} className="fill-zinc-500" fontSize="9">
           Fewer common words
         </text>
         <text

@@ -199,7 +199,6 @@ export function TodaySession({
   const [reviewsExhausted, setReviewsExhausted] = useState(false);
   const [newWordsExhausted, setNewWordsExhausted] = useState(false);
   const [unlimitedMode, setUnlimitedMode] = useState(false);
-  const [comebackDismissed, setComebackDismissed] = useState(false);
   const seenWordIdsRef = useRef<Set<string>>(new Set());
   const initialCompletedCount = Math.max(
     0,
@@ -1061,22 +1060,6 @@ export function TodaySession({
 
   return (
     <div className="flex flex-col gap-6">
-      {workloadPolicy?.isComeback && !comebackDismissed ? (
-        <div className="mx-auto flex w-full min-w-0 max-w-2xl items-start justify-between gap-4 rounded-xl border border-amber-200 bg-amber-50/90 p-4 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
-          <p>
-            Welcome back! You have a larger backlog than usual — today&apos;s session is slightly longer to help you catch up.
-          </p>
-          <button
-            type="button"
-            className="shrink-0 text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200"
-            onClick={() => setComebackDismissed(true)}
-            aria-label="Dismiss"
-          >
-            ✕
-          </button>
-        </div>
-      ) : null}
-
       {phase === "done" && (unlimitedMode || shouldAutoLoadChunk) ? (
         <div className="mx-auto flex w-full min-w-0 max-w-2xl flex-col items-center gap-4 rounded-xl border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900/50">
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
