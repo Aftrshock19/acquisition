@@ -2379,7 +2379,13 @@ export async function suspendWord(
   if (error) return { ok: false, reason: error.message };
   if (!data || data.length === 0) return { ok: false, reason: "not_found" };
 
-  revalidatePath("/today");
+  // Intentionally NO revalidatePath('/today') here. Revalidating refetches
+  // server data and remounts TodaySession with a queue that no longer
+  // includes this word, which unmounts the SuspendWordControl before its
+  // post-success render is visible — the Undo affordance becomes
+  // unreachable. The next natural /today render (Continue / Next / refresh)
+  // picks up the new server state correctly because get_daily_queue gates
+  // on status='suspended'.
   return { ok: true };
 }
 
@@ -2411,6 +2417,8 @@ export async function unsuspendWord(wordId: string): Promise<SuspendWordResult> 
   if (error) return { ok: false, reason: error.message };
   if (!data || data.length === 0) return { ok: false, reason: "not_found" };
 
-  revalidatePath("/today");
+  // Same rationale as suspendWord: no revalidatePath here. The control's
+  // local state machine handles the optimistic Undo flow; the next /today
+  // render reflects the restored row.
   return { ok: true };
 }
