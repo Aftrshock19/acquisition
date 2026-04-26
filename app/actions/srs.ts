@@ -146,7 +146,9 @@ async function enrichWordsByOrder(
   const ids = ordered.map((p) => p.id);
   const { data: enriched } = await supabase
     .from("words")
-    .select("id, lemma, rank, pos, translation, example_sentence, example_sentence_en")
+    .select(
+      "id, lemma, rank, pos, translation, example_sentence, example_sentence_en, lemma_audio_path, lemma_sentence_audio_path",
+    )
     .in("id", ids);
   const byId = new Map<string, Word>();
   for (const row of (enriched ?? []) as Array<{
@@ -157,6 +159,8 @@ async function enrichWordsByOrder(
     translation: string | null;
     example_sentence: string | null;
     example_sentence_en: string | null;
+    lemma_audio_path: string | null;
+    lemma_sentence_audio_path: string | null;
   }>) {
     byId.set(row.id, {
       id: row.id,
@@ -169,6 +173,8 @@ async function enrichWordsByOrder(
       definitionEn: null,
       exampleSentence: row.example_sentence ?? null,
       exampleSentenceEn: row.example_sentence_en ?? null,
+      lemmaAudioPath: row.lemma_audio_path ?? null,
+      lemmaSentenceAudioPath: row.lemma_sentence_audio_path ?? null,
       pos: row.pos ?? null,
     });
   }
@@ -254,6 +260,8 @@ export async function getDailyQueue(
       definitionEn: r.definition_en ?? null,
       exampleSentence: r.example_sentence ?? null,
       exampleSentenceEn: r.example_sentence_en ?? null,
+      lemmaAudioPath: r.lemma_audio_path ?? null,
+      lemmaSentenceAudioPath: r.lemma_sentence_audio_path ?? null,
       user_id: user.id,
       status: "learning",
       pos: r.pos ?? null,
@@ -291,6 +299,8 @@ export async function getDailyQueue(
       definitionEn: r.definition_en ?? null,
       exampleSentence: r.example_sentence ?? null,
       exampleSentenceEn: r.example_sentence_en ?? null,
+      lemmaAudioPath: r.lemma_audio_path ?? null,
+      lemmaSentenceAudioPath: r.lemma_sentence_audio_path ?? null,
       pos: r.pos ?? null,
     }));
 

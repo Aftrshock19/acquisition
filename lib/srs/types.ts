@@ -17,6 +17,8 @@ export type Word = {
   exampleSentence?: string | null;
   exampleSentenceEn?: string | null;
   pos?: string | null;
+  lemmaAudioPath?: string | null;
+  lemmaSentenceAudioPath?: string | null;
   extra?: Record<string, unknown> | null;
 };
 
@@ -59,6 +61,8 @@ export type QueueItem = {
   example_sentence: string | null;
   example_sentence_en: string | null;
   definition: string | null;
+  lemma_audio_path: string | null;
+  lemma_sentence_audio_path: string | null;
 };
 
 export type DueReviewItem = Word & {

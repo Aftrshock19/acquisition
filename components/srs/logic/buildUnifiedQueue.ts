@@ -3,6 +3,7 @@ import {
   buildSentenceMcqOptions,
   buildSentencePrompt,
 } from "@/components/srs/logic/buildSentencePrompt";
+import { storagePublicUrl } from "@/lib/chirp/storage";
 import type { McqQuestionFormat } from "@/lib/settings/mcqQuestionFormats";
 import type { EnabledFlashcardMode } from "@/lib/settings/types";
 import { formatPartOfSpeech } from "@/lib/srs/partOfSpeech";
@@ -56,6 +57,8 @@ export type UnifiedQueueSourceCard = {
   rank?: number;
   pos?: string | null;
   hint?: string | null;
+  lemmaAudioPath?: string | null;
+  lemmaSentenceAudioPath?: string | null;
 };
 
 export type UnifiedQueueCard =
@@ -151,6 +154,8 @@ export function buildUnifiedQueue(
       rank: card.rank,
       pos: card.pos ?? null,
       hint: formatPartOfSpeech(card.pos),
+      lemmaAudioPath: card.lemmaAudioPath ?? null,
+      lemmaSentenceAudioPath: card.lemmaSentenceAudioPath ?? null,
     })),
     ...session.newWords.map((card) => ({
       id: card.id,
@@ -165,6 +170,8 @@ export function buildUnifiedQueue(
       rank: card.rank,
       pos: card.pos ?? null,
       hint: formatPartOfSpeech(card.pos),
+      lemmaAudioPath: card.lemmaAudioPath ?? null,
+      lemmaSentenceAudioPath: card.lemmaSentenceAudioPath ?? null,
     })),
   ];
 
@@ -252,7 +259,7 @@ export function buildUnifiedQueue(
         prompt: "What does this audio mean?",
         options: mcq.options,
         correctOption: mcq.correctOption,
-        audioUrl: null,
+        audioUrl: resolveLemmaAudioUrl(card.lemmaAudioPath),
         audioText: getAudioText(card),
       };
     }
@@ -293,7 +300,14 @@ function isImplementedCardMode(type: EnabledFlashcardMode): type is ImplementedC
 }
 
 function getAudioText(card: UnifiedQueueSourceCard) {
-  return card.exampleSentence ?? card.lemma;
+  return card.lemma;
+}
+
+function resolveLemmaAudioUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!supabaseUrl) return null;
+  return storagePublicUrl(supabaseUrl, path);
 }
 
 /**
