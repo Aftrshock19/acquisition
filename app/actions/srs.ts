@@ -134,11 +134,55 @@ export type CompleteListeningStepResult =
       error: string;
     };
 
+// Hydrate a list of (id, rank) picks into full Word rows in the same order.
+// Used by both the near-frontier picker path and the user-driven fallback
+// path so the substitution into `newWords` is identical.
+async function enrichWordsByOrder(
+  supabase: NonNullable<Awaited<ReturnType<typeof getSupabaseServerContextFast>>["supabase"]>,
+  ordered: ReadonlyArray<{ id: string; rank: number }>,
+  lang: string,
+): Promise<Word[]> {
+  if (ordered.length === 0) return [];
+  const ids = ordered.map((p) => p.id);
+  const { data: enriched } = await supabase
+    .from("words")
+    .select("id, lemma, rank, pos, translation, example_sentence, example_sentence_en")
+    .in("id", ids);
+  const byId = new Map<string, Word>();
+  for (const row of (enriched ?? []) as Array<{
+    id: string;
+    lemma: string;
+    rank: number;
+    pos: string | null;
+    translation: string | null;
+    example_sentence: string | null;
+    example_sentence_en: string | null;
+  }>) {
+    byId.set(row.id, {
+      id: row.id,
+      language: lang,
+      lemma: row.lemma,
+      rank: row.rank,
+      translation: row.translation ?? null,
+      definition: null,
+      definitionEs: null,
+      definitionEn: null,
+      exampleSentence: row.example_sentence ?? null,
+      exampleSentenceEn: row.example_sentence_en ?? null,
+      pos: row.pos ?? null,
+    });
+  }
+  return ordered
+    .map((p) => byId.get(p.id))
+    .filter((w): w is Word => Boolean(w));
+}
+
 export async function getDailyQueue(
   lang: string,
   newLimit?: number,
   reviewLimit?: number,
   excludeWordIds?: string[],
+  userDriven?: boolean,
 ): Promise<GetDailyQueueResult> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -293,40 +337,39 @@ export async function getDailyQueue(
         excludeWordIds: excludeWordIds ?? [],
       });
       if (picked.length > 0) {
-        const pickedIds = picked.map((p) => p.id);
-        const { data: enriched } = await supabase
-          .from("words")
-          .select("id, lemma, rank, pos, translation, example_sentence, example_sentence_en")
-          .in("id", pickedIds);
-        const byId = new Map<string, Word>();
-        for (const row of (enriched ?? []) as Array<{
-          id: string;
-          lemma: string;
-          rank: number;
-          pos: string | null;
-          translation: string | null;
-          example_sentence: string | null;
-          example_sentence_en: string | null;
-        }>) {
-          byId.set(row.id, {
-            id: row.id,
-            language: lang,
-            lemma: row.lemma,
-            rank: row.rank,
-            translation: row.translation ?? null,
-            definition: null,
-            definitionEs: null,
-            definitionEn: null,
-            exampleSentence: row.example_sentence ?? null,
-            exampleSentenceEn: row.example_sentence_en ?? null,
-            pos: row.pos ?? null,
-          });
+        const enriched = await enrichWordsByOrder(supabase, picked, lang);
+        if (enriched.length > 0) {
+          newWords = enriched;
         }
-        const placementOrdered: Word[] = picked
-          .map((p) => byId.get(p.id))
-          .filter((w): w is Word => Boolean(w));
-        if (placementOrdered.length > 0) {
-          newWords = placementOrdered;
+      } else if (userDriven) {
+        // User-driven mode and the rank-window picker exhausted (or its RPC
+        // errored — pickNewWordsNearFrontier logs and returns []). Rather
+        // than silently keep the rank-ASC RPC list (which would serve rank-1
+        // beginner words to a learner whose frontier may be in the
+        // thousands), walk the whole bank by absolute distance to the
+        // frontier and use whatever is closest. newWords is set to [] only
+        // when the fallback genuinely has no rows or its RPC errors.
+        const { data: fallbackRows, error: fallbackError } = await supabase.rpc(
+          "pick_user_driven_fallback",
+          {
+            p_frontier_rank: frontierRank,
+            p_exclude_word_ids: excludeWordIds ?? [],
+            p_limit: limitNew,
+          } as never,
+        );
+        if (fallbackError) {
+          console.warn(
+            "[getDailyQueue] pick_user_driven_fallback RPC error; user-driven queue will be empty",
+            fallbackError,
+          );
+          newWords = [];
+        } else {
+          const fallback = (fallbackRows ?? []) as Array<{ id: string; rank: number }>;
+          if (fallback.length > 0) {
+            newWords = await enrichWordsByOrder(supabase, fallback, lang);
+          } else {
+            newWords = [];
+          }
         }
       }
     }
@@ -446,7 +489,13 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
   };
 
   const __perfPreQueue = performance.now();
-  const queueResult = await getDailyQueue(lang, newLimit, reviewLimit);
+  const queueResult = await getDailyQueue(
+    lang,
+    newLimit,
+    reviewLimit,
+    undefined,
+    isUserDrivenTarget,
+  );
   const __perfQueueDone = performance.now();
 
   if (!queueResult.ok) {
@@ -622,8 +671,17 @@ export type LoadMoreResult =
 export async function loadMoreReviewChunk(
   excludeWordIds: string[],
   lang = "es",
+  userDriven = false,
 ): Promise<LoadMoreResult> {
-  const result = await getDailyQueue(lang, 0, CONTINUATION_REVIEW_CHUNK, excludeWordIds);
+  // Reviews-only chunk; userDriven only affects new-word selection so this
+  // wrapper threads the flag for symmetry with the other continuation paths.
+  const result = await getDailyQueue(
+    lang,
+    0,
+    CONTINUATION_REVIEW_CHUNK,
+    excludeWordIds,
+    userDriven,
+  );
   if (!result.ok) return { ok: false, error: result.error ?? "Failed to load reviews" };
   return { ok: true, dueReviews: result.session.dueReviews, newWords: [] };
 }
@@ -631,23 +689,40 @@ export async function loadMoreReviewChunk(
 export async function loadMoreNewWordsChunk(
   excludeWordIds: string[],
   lang = "es",
+  userDriven = false,
 ): Promise<LoadMoreResult> {
-  const result = await getDailyQueue(lang, CONTINUATION_NEW_CHUNK, 0, excludeWordIds);
+  const result = await getDailyQueue(
+    lang,
+    CONTINUATION_NEW_CHUNK,
+    0,
+    excludeWordIds,
+    userDriven,
+  );
   if (!result.ok) return { ok: false, error: result.error ?? "Failed to load new words" };
   return { ok: true, dueReviews: [], newWords: result.session.newWords };
 }
 
 /**
  * Load a user-chosen number of extra flashcards. Reviews are prioritised;
- * remaining slots are filled with new words.
+ * remaining slots are filled with new words. `userDriven` should be true when
+ * the caller is in manual / override / extended mode so that an exhausted
+ * frontier band falls back to the closest-by-distance picker rather than
+ * rank-1 beginner words.
  */
 export async function loadMoreFlashcards(
   count: number,
   excludeWordIds: string[],
   lang = "es",
+  userDriven = false,
 ): Promise<LoadMoreResult> {
   const safeCount = Math.max(1, Math.min(count, 200));
-  const result = await getDailyQueue(lang, safeCount, safeCount, excludeWordIds);
+  const result = await getDailyQueue(
+    lang,
+    safeCount,
+    safeCount,
+    excludeWordIds,
+    userDriven,
+  );
   if (!result.ok) return { ok: false, error: result.error ?? "Failed to load cards" };
   const reviews = result.session.dueReviews;
   const remainingSlots = Math.max(0, safeCount - reviews.length);

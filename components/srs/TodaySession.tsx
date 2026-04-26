@@ -473,7 +473,12 @@ export function TodaySession({
    */
   async function handleLoadMore(count: number, prefetch = false) {
     setLoadingMore(true);
-    const result = await loadMoreFlashcards(count, [...seenWordIdsRef.current]);
+    const result = await loadMoreFlashcards(
+      count,
+      [...seenWordIdsRef.current],
+      "es",
+      manualTargetMode,
+    );
     setLoadingMore(false);
 
     if (!result.ok) return;
