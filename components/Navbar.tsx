@@ -1,6 +1,5 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { BookOpen, Headphones, Languages } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -15,25 +14,6 @@ const NAVBAR_PATHS = new Set<string>(["/today", "/reading", "/listening"]);
 
 export function Navbar() {
   const pathname = usePathname();
-  const [keyboardOpen, setKeyboardOpen] = useState(false);
-
-  useEffect(() => {
-    const onFocus = (e: FocusEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") setKeyboardOpen(true);
-    };
-    const onBlur = (e: FocusEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") setKeyboardOpen(false);
-    };
-    document.addEventListener("focusin", onFocus);
-    document.addEventListener("focusout", onBlur);
-    return () => {
-      document.removeEventListener("focusin", onFocus);
-      document.removeEventListener("focusout", onBlur);
-    };
-  }, []);
-
   if (!pathname || !NAVBAR_PATHS.has(pathname)) {
     return null;
   }
@@ -41,7 +21,7 @@ export function Navbar() {
   return (
     <>
       {/* Bottom nav */}
-      <nav aria-label="Primary" className={`fixed inset-x-0 bottom-0 z-50 transition-transform duration-200 ${keyboardOpen ? "translate-y-full" : "translate-y-0"}`}>
+      <nav aria-label="Primary" className="fixed inset-x-0 bottom-0 z-50">
         <div className="app-card-strong flex w-full items-stretch justify-between gap-2 rounded-none border-x-0 border-b-0 px-3 py-1.5 shadow-2xl shadow-zinc-900/10 md:px-4 md:py-2">
           {navItems.map((item) => {
             const isActive = pathname === item.href;
