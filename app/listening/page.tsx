@@ -424,7 +424,7 @@ function StageRow({ stage, assetProgressMap }: { stage: ListeningStageGroup; ass
     .join(" · ");
 
   return (
-    <details className="group rounded-lg border border-zinc-200 dark:border-zinc-800">
+    <details className="group min-w-0 rounded-lg border border-zinc-200 dark:border-zinc-800">
       <summary className="flex cursor-pointer items-center gap-3 px-4 py-3 text-sm select-none hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
         <RightIcon className="h-4 w-4 text-zinc-400 transition group-open:rotate-90 dark:text-zinc-500" />
         <span className="inline-block min-w-[3.25rem] whitespace-nowrap font-medium text-zinc-900 dark:text-zinc-100">
@@ -445,16 +445,16 @@ function StageRow({ stage, assetProgressMap }: { stage: ListeningStageGroup; ass
               <p className="text-xs font-medium uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
                 {MODE_LABELS[modeGroup.mode] ?? modeGroup.mode}
               </p>
-              <div className="grid gap-1.5 sm:grid-cols-2">
+              <div className="grid min-w-0 gap-1.5 sm:grid-cols-2">
                 {modeGroup.assets.map((asset) => {
                   const statusLabel = getAssetStatusLabel(asset.id, assetProgressMap);
                   return (
                     <Link
                       key={asset.id}
                       href={`/listening/${asset.id}`}
-                      className={`flex items-center justify-between rounded-md border px-3 py-2 text-sm transition ${getAssetStateClasses(asset.id, assetProgressMap)}`}
+                      className={`min-w-0 flex items-center justify-between rounded-md border px-3 py-2 text-sm transition ${getAssetStateClasses(asset.id, assetProgressMap)}`}
                     >
-                      <span className="truncate text-zinc-900 dark:text-zinc-100">
+                      <span className="min-w-0 flex-1 truncate text-zinc-900 dark:text-zinc-100">
                         {asset.text?.title ?? asset.title}
                       </span>
                       <span className="ml-2 flex shrink-0 items-center gap-2">
