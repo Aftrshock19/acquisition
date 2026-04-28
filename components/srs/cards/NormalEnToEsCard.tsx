@@ -15,6 +15,10 @@ import {
   getEnglishPromptText,
   type UnifiedQueueCard,
 } from "@/components/srs/logic/buildUnifiedQueue";
+import {
+  FLASHCARD_SAVE_FALLBACK,
+  toSafeUserMessage,
+} from "@/lib/errors/userMessages";
 
 type NormalEnToEsCardProps = {
   card: Extract<
@@ -80,7 +84,7 @@ export function NormalEnToEsCard({
 
         {submitError ? (
           <p className="mt-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">
-            {submitError}
+            {toSafeUserMessage(submitError, FLASHCARD_SAVE_FALLBACK)}
           </p>
         ) : null}
       </FlashcardContainer>

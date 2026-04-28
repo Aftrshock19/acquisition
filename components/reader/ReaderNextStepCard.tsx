@@ -4,6 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { completeReadingStep } from "@/app/actions/srs";
+import {
+  READING_SAVE_FALLBACK,
+  toSafeUserMessage,
+} from "@/lib/errors/userMessages";
 
 type ReaderNextStepCardProps = {
   textId: string;
@@ -85,7 +89,10 @@ export function ReaderNextStepCard({
               });
 
               if (!result.ok) {
-                setSubmitError(result.error);
+                console.error("[ReaderNextStepCard] raw error", result.error);
+                setSubmitError(
+                  toSafeUserMessage(result.error, READING_SAVE_FALLBACK),
+                );
                 return;
               }
 

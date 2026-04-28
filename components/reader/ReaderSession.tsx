@@ -12,6 +12,10 @@ import { ReadingQuiz } from "@/components/reader/ReadingQuiz";
 import { CheckIcon } from "@/components/icons/CheckIcon";
 import { InteractiveText } from "@/components/interactive-text/InteractiveText";
 import { InteractiveTextProvider } from "@/components/interactive-text/InteractiveTextProvider";
+import {
+  READING_SAVE_FALLBACK,
+  toSafeUserMessage,
+} from "@/lib/errors/userMessages";
 import { toReadingBlocks } from "@/lib/loop/reader";
 import { tokenize } from "@/lib/reader/tokenize";
 import type { ReaderText } from "@/lib/reader/types";
@@ -109,7 +113,8 @@ export function ReaderSession({
         readingTimeSeconds: getReadingTimeSeconds(),
       });
       if (!result.ok) {
-        setCompletionError(result.error);
+        console.error("[ReaderSession:markComplete] raw error", result.error);
+        setCompletionError(toSafeUserMessage(result.error, READING_SAVE_FALLBACK));
         return;
       }
       setLocalCompleted(true);
@@ -123,7 +128,8 @@ export function ReaderSession({
       setCompletionError(null);
       const result = await uncompleteReadingStep({ textId: text.id });
       if (!result.ok) {
-        setCompletionError(result.error);
+        console.error("[ReaderSession:uncomplete] raw error", result.error);
+        setCompletionError(toSafeUserMessage(result.error, READING_SAVE_FALLBACK));
         return;
       }
       setLocalCompleted(false);

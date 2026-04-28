@@ -6,6 +6,10 @@ import {
   FlashcardSuccessActions,
 } from "@/components/srs/cards/FlashcardContainer";
 import { TextAnswerInput } from "@/components/srs/cards/TextAnswerInput";
+import {
+  FLASHCARD_SAVE_FALLBACK,
+  toSafeUserMessage,
+} from "@/lib/errors/userMessages";
 
 type TypingFlashcardCardProps = {
   typeLabel: string;
@@ -67,7 +71,7 @@ export function TypingFlashcardCard({
         {prompt}
         {submitError ? (
           <p className="mt-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">
-            {submitError}
+            {toSafeUserMessage(submitError, FLASHCARD_SAVE_FALLBACK)}
           </p>
         ) : null}
 

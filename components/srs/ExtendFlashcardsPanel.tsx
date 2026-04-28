@@ -4,6 +4,10 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { extendFlashcardsSession } from "@/app/actions/srs";
 import { FlashcardAmountChooser } from "@/components/srs/FlashcardAmountChooser";
+import {
+  FLASHCARD_EXTEND_FALLBACK,
+  looksLikeRawInfraError,
+} from "@/lib/errors/userMessages";
 
 export function ExtendFlashcardsPanel() {
   const router = useRouter();
@@ -70,6 +74,9 @@ function readableReason(reason: string): string {
     case "listening_already_done":
       return "Your session has moved on. Refresh the page and try again.";
     default:
-      return `Something went wrong: ${reason}. Refresh and try again.`;
+      if (looksLikeRawInfraError(reason)) {
+        console.error("[extendFlashcards] sanitized raw infra error", reason);
+      }
+      return FLASHCARD_EXTEND_FALLBACK;
   }
 }

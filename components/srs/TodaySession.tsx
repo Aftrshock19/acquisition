@@ -11,6 +11,10 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { recordReview, loadMoreFlashcards } from "@/app/actions/srs";
+import {
+  FLASHCARD_SAVE_FALLBACK,
+  toSafeUserMessage,
+} from "@/lib/errors/userMessages";
 import type { WorkloadPolicy } from "@/lib/srs/workloadPolicy";
 import { InteractiveTextProvider } from "@/components/interactive-text/InteractiveTextProvider";
 import { LeftIcon } from "@/components/LeftIcon";
@@ -773,9 +777,9 @@ export function TodaySession({
 
       setPhase("feedback");
     } catch (error) {
-      setSubmitError(
-        error instanceof Error ? error.message : "Failed to submit review",
-      );
+      const raw = error instanceof Error ? error.message : null;
+      if (raw) console.error("[TodaySession:submit] raw error", raw);
+      setSubmitError(toSafeUserMessage(raw, FLASHCARD_SAVE_FALLBACK));
     } finally {
       setBusy(false);
     }
@@ -960,9 +964,9 @@ export function TodaySession({
         scheduleSuccessAdvance();
       }
     } catch (error) {
-      setSubmitError(
-        error instanceof Error ? error.message : "Failed to submit review",
-      );
+      const raw = error instanceof Error ? error.message : null;
+      if (raw) console.error("[TodaySession:normalSubmit] raw error", raw);
+      setSubmitError(toSafeUserMessage(raw, FLASHCARD_SAVE_FALLBACK));
     } finally {
       setBusy(false);
     }

@@ -5,6 +5,10 @@ import { getTodayFlashcards, skipFlashcardsToReading } from "@/app/actions/srs";
 import { ExtendFlashcardsPanel } from "@/components/srs/ExtendFlashcardsPanel";
 import { PracticeCompleteScreen } from "@/components/srs/PracticeCompleteScreen";
 import { TodaySession } from "@/components/srs/TodaySession";
+import {
+  TODAY_QUEUE_FALLBACK,
+  toSafeUserMessage,
+} from "@/lib/errors/userMessages";
 import { getPlacementBannerState } from "@/lib/placement/status";
 import {
   shouldRedirectToIntro,
@@ -164,7 +168,9 @@ export default async function TodayPage() {
           <h2 className="text-xl font-semibold tracking-tight text-red-900 dark:text-red-100">
             Error loading words
           </h2>
-          <p className="text-red-800 dark:text-red-200">{session.error}</p>
+          <p className="text-red-800 dark:text-red-200">
+            {toSafeUserMessage(session.error, TODAY_QUEUE_FALLBACK)}
+          </p>
         </div>
       ) : session.signedIn && enabledTypeCount === 0 ? (
         <div className="app-card flex flex-col gap-4 p-8">

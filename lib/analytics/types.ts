@@ -88,6 +88,11 @@ export type DailyAggregate = {
   session_date: string;
   session_started: boolean;
   session_completed: boolean;
+  // True once the daily loop reached its terminal state at any point today,
+  // even if the row is currently in extra-practice mode (stage='flashcards',
+  // completed=false). Sourced from daily_sessions.completed_at IS NOT NULL.
+  // Use this — not session_completed — for completion badges and progress UI.
+  loop_completed_at_present: boolean;
   stage: DailySessionRow["stage"] | null;
   assigned_flashcard_count: number;
   assigned_new_words_count: number;

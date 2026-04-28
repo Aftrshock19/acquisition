@@ -12,6 +12,10 @@ import {
 import { CheckIcon } from "@/components/icons/CheckIcon";
 import { InteractiveText } from "@/components/interactive-text/InteractiveText";
 import { InteractiveTextProvider } from "@/components/interactive-text/InteractiveTextProvider";
+import {
+  LISTENING_SAVE_FALLBACK,
+  toSafeUserMessage,
+} from "@/lib/errors/userMessages";
 import { toReadingBlocks } from "@/lib/loop/reader";
 import { tokenize } from "@/lib/reader/tokenize";
 
@@ -297,7 +301,8 @@ export function ListeningPlayer({
       });
 
       if (!result.ok) {
-        setSubmitError(result.error);
+        console.error("[ListeningPlayer] raw error", result.error);
+        setSubmitError(toSafeUserMessage(result.error, LISTENING_SAVE_FALLBACK));
         return;
       }
 
@@ -314,7 +319,8 @@ export function ListeningPlayer({
       const result = await uncompleteListeningStep({ assetId: asset.id });
 
       if (!result.ok) {
-        setSubmitError(result.error);
+        console.error("[ListeningPlayer] raw error", result.error);
+        setSubmitError(toSafeUserMessage(result.error, LISTENING_SAVE_FALLBACK));
         return;
       }
 
@@ -338,7 +344,8 @@ export function ListeningPlayer({
       });
 
       if (!result.ok) {
-        setSubmitError(result.error);
+        console.error("[ListeningPlayer] raw error", result.error);
+        setSubmitError(toSafeUserMessage(result.error, LISTENING_SAVE_FALLBACK));
         return;
       }
 
@@ -366,7 +373,8 @@ export function ListeningPlayer({
       });
 
       if (!result.ok) {
-        setSubmitError(result.error);
+        console.error("[ListeningPlayer] raw error", result.error);
+        setSubmitError(toSafeUserMessage(result.error, LISTENING_SAVE_FALLBACK));
         return;
       }
 

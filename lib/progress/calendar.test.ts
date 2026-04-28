@@ -15,6 +15,7 @@ function makeDay(overrides: Partial<DailyAggregate> = {}): DailyAggregate {
     session_date: "2026-04-10",
     session_started: false,
     session_completed: false,
+    loop_completed_at_present: false,
     stage: null,
     assigned_flashcard_count: 0,
     assigned_new_words_count: 0,
@@ -65,7 +66,24 @@ describe("toCalendarDayMetrics status", () => {
     const day = makeDay({
       days_active_flag: true,
       session_completed: true,
+      loop_completed_at_present: true,
       flashcard_completed_count: 10,
+    });
+    expect(toCalendarDayMetrics(day).status).toBe("completed");
+  });
+
+  it("treats mid-extend rows (completed=false but completed_at set) as completed", () => {
+    // Reproduces the post-incident shape: user finished the loop, then
+    // pressed More Practice, so the row reads completed=false / stage='flashcards'
+    // for /today routing — but completed_at is preserved as proof of loop
+    // completion. The badge must still read 'Loop complete'.
+    const day = makeDay({
+      days_active_flag: true,
+      session_completed: false,
+      loop_completed_at_present: true,
+      flashcard_completed_count: 20,
+      reading_completed: true,
+      listening_completed: true,
     });
     expect(toCalendarDayMetrics(day).status).toBe("completed");
   });

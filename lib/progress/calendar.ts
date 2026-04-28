@@ -65,7 +65,14 @@ export type CalendarWeekSummary = CalendarRangeTotals & {
 };
 
 export function toCalendarDayMetrics(day: DailyAggregate): CalendarDayMetrics {
-  const status: CalendarDayStatus = day.session_completed
+  // Use loop_completed_at_present (i.e. completed_at IS NOT NULL) for the
+  // badge so that mid-extend rows — where completed=false is held only for
+  // /today routing — still display as "Loop complete". Fall back to the
+  // legacy session_completed boolean to preserve behaviour on rows from
+  // before completed_at was wired through analytics.
+  const loopCompleted =
+    day.loop_completed_at_present || day.session_completed;
+  const status: CalendarDayStatus = loopCompleted
     ? "completed"
     : day.days_active_flag
       ? "partial"

@@ -280,6 +280,7 @@ export function buildDailyAggregates({
       session_date: sessionDate,
       session_started: Boolean(session?.started_at),
       session_completed: Boolean(session?.completed),
+      loop_completed_at_present: Boolean(session?.completed_at),
       stage: session?.stage ?? null,
       assigned_flashcard_count:
         session?.assigned_flashcard_count ?? session?.new_words_count ?? 0,
