@@ -46,14 +46,18 @@ export function LoginForm() {
         console.warn(`[LoginForm] signIn failed: ${error.message}`);
         setMessage({
           type: "error",
-          text: "Sign-in failed. Please check your email and password.",
+          text: "Sign-in failed. Please check your email and password. If you still cannot get in, email du22662@bristol.ac.uk.",
         });
         return;
       }
       setMessage({ type: "ok", text: "Signed in. Redirecting…" });
       router.replace("/");
     } catch (error) {
-      setMessage({ type: "error", text: getErrorMessage(error) });
+      console.warn(`[LoginForm] signIn threw: ${getErrorMessage(error)}`);
+      setMessage({
+        type: "error",
+        text: "Sign-in failed. Please check your email and password. If you still cannot get in, email du22662@bristol.ac.uk.",
+      });
     } finally {
       setSubmitting(null);
     }
@@ -67,14 +71,17 @@ export function LoginForm() {
       const validate = await validateSignupCode(signupCode, signUpEmail);
 
       if (validate.state === "invalid_or_used") {
-        setMessage({ type: "error", text: "Invalid or already used signup code." });
+        setMessage({
+          type: "error",
+          text: "That signup code isn't valid, or it has been used by a different email. Try signing in if you've already created an account. If you still cannot get in, email du22662@bristol.ac.uk.",
+        });
         return;
       }
 
       if (validate.state === "already_confirmed_same_email") {
         setMessage({
           type: "ok",
-          text: "This account is already confirmed. Please sign in above.",
+          text: "This account is already confirmed. Please sign in above. If you still cannot get in, email du22662@bristol.ac.uk.",
         });
         return;
       }
@@ -83,7 +90,7 @@ export function LoginForm() {
         setConfirmationPending(true);
         setMessage({
           type: "ok",
-          text: "Your account was already created but still needs email confirmation. Please check your inbox (and spam folder), or use the resend option below.",
+          text: "Your account was already created but still needs email confirmation. Please check your inbox and spam folder, or use the resend option below. If you still cannot get in, email du22662@bristol.ac.uk.",
         });
         return;
       }
@@ -101,12 +108,15 @@ export function LoginForm() {
         console.warn(`[LoginForm] signUp failed: ${error.message}`);
         setMessage({
           type: "error",
-          text: "We couldn't create your account. Please check your details and try again.",
+          text: "We couldn't create your account. Please check your details and try again. If you still cannot get in, email du22662@bristol.ac.uk.",
         });
         return;
       }
       if (data.user && data.user.identities && data.user.identities.length === 0) {
-        setMessage({ type: "error", text: "An account with this email already exists." });
+        setMessage({
+          type: "error",
+          text: "An account with this email already exists. Try signing in, or use the resend option below if you never confirmed it. If you still cannot get in, email du22662@bristol.ac.uk.",
+        });
         return;
       }
       if (data.user) {
@@ -132,7 +142,10 @@ export function LoginForm() {
       router.refresh();
     } catch (error) {
       console.warn(`[LoginForm] signUp threw: ${getErrorMessage(error)}`);
-      setMessage({ type: "error", text: "Something went wrong. Please try again." });
+      setMessage({
+        type: "error",
+        text: "Something went wrong. Please try again. If you still cannot get in, email du22662@bristol.ac.uk.",
+      });
     } finally {
       setSubmitting(null);
     }

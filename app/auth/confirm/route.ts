@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { getAppUrl } from "@/lib/url";
 
 const GENERIC_ERROR =
-  "Confirmation link expired or invalid. Please request a new confirmation email.";
+  "This confirmation link is no longer valid. Try signing in — if your email is already confirmed it will work. Otherwise, request a new confirmation email below. If you still cannot get in, email du22662@bristol.ac.uk.";
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
@@ -60,6 +60,19 @@ export async function GET(request: NextRequest) {
   } else {
     console.warn(
       `[auth/confirm] verifyOtp succeeded but no user id resolved (token=${tokenHash.slice(0, 8)})`,
+    );
+  }
+
+  // Clear the session that verifyOtp just established in this browser/webview.
+  // Email-app webviews are typically a different cookie jar from the user's
+  // PWA/Safari, so we don't want to leave them "signed in" here and have the
+  // /login page auto-redirect them past the "Email confirmed" banner.
+  const { error: signOutError } = await supabase.auth.signOut({
+    scope: "local",
+  });
+  if (signOutError) {
+    console.warn(
+      `[auth/confirm] signOut after verifyOtp failed: ${signOutError.message}`,
     );
   }
 

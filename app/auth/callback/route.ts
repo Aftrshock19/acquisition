@@ -9,7 +9,7 @@ import {
 import { getAppUrl } from "@/lib/url";
 
 const GENERIC_ERROR =
-  "Confirmation link expired or invalid. Please request a new confirmation email.";
+  "This confirmation link is no longer valid. Try signing in — if your email is already confirmed it will work. Otherwise, request a new confirmation email below. If you still cannot get in, email du22662@bristol.ac.uk.";
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);

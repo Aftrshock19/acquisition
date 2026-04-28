@@ -42,6 +42,7 @@ export default async function LoginPage({
   const { user, error } = await getSupabaseUser(supabase);
 
   if (error) {
+    console.warn(`[login] getSupabaseUser error: ${error}`);
     return (
       <main className="app-shell">
         <section className="app-hero">
@@ -54,7 +55,9 @@ export default async function LoginPage({
           <h2 className="text-xl font-semibold tracking-tight text-red-900 dark:text-red-100">
             Authentication unavailable
           </h2>
-          <p className="text-red-800 dark:text-red-200">{error}</p>
+          <p className="text-red-800 dark:text-red-200">
+            We can&apos;t reach the authentication service right now. Please try again in a moment. If you still cannot get in, email du22662@bristol.ac.uk.
+          </p>
         </div>
         <p className="text-sm text-zinc-500">
           <Link href="/" className="underline">Back to home</Link>
