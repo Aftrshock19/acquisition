@@ -11,9 +11,14 @@
   --border: rgba(24, 24, 27, 0.08);
   --border-strong: rgba(24, 24, 27, 0.14);
   --shadow: 0 20px 60px rgba(24, 24, 27, 0.08);
+  --navbar-clearance: calc(env(safe-area-inset-bottom) + 4.5rem);
   --app-gradient:
     radial-gradient(circle at top, rgba(255, 255, 255, 0.92), transparent 34%),
-    radial-gradient(circle at 20% 20%, rgba(212, 212, 216, 0.24), transparent 28%),
+    radial-gradient(
+      circle at 20% 20%,
+      rgba(212, 212, 216, 0.24),
+      transparent 28%
+    ),
     linear-gradient(180deg, #fafaf9 0%, #f4f4f3 50%, #efefee 100%);
 }
 
@@ -40,7 +45,11 @@
     --shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
     --app-gradient:
       radial-gradient(circle at top, rgba(63, 63, 70, 0.22), transparent 26%),
-      radial-gradient(circle at 80% 10%, rgba(82, 82, 91, 0.12), transparent 24%),
+      radial-gradient(
+        circle at 80% 10%,
+        rgba(82, 82, 91, 0.12),
+        transparent 24%
+      ),
       linear-gradient(180deg, #101013 0%, #0d0d10 52%, #09090b 100%);
   }
 }
@@ -55,11 +64,11 @@ html {
 
 body {
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--background);
   background-image: var(--app-gradient);
   color: var(--foreground);
   font-family: var(--font-geist-sans), sans-serif;
-  padding-bottom: calc(env(safe-area-inset-bottom) + 4.5rem);
 }
 
 a,
@@ -81,9 +90,20 @@ select {
 
 @layer components {
   .app-shell {
-    @apply mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 px-6 py-10 md:px-8 md:py-16;
+    @apply mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 pt-10 md:px-8 md:pt-16;
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding-bottom: var(--navbar-clearance);
+    box-sizing: border-box;
   }
-
+  html.flashcard-no-bounce,
+  body.flashcard-no-bounce {
+    overscroll-behavior: none;
+    overflow: hidden;
+    position: fixed;
+    inset: 0;
+    width: 100%;
+  }
   .app-hero {
     @apply flex flex-col gap-2;
   }
