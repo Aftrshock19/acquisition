@@ -9,6 +9,9 @@ import { validateSignupCode, claimSignupCode } from "@/app/actions/signup-code";
 
 const EMAIL_REDIRECT_TO = `${getAppUrl()}/auth/callback`;
 
+const RESEND_INFO_MESSAGE =
+  "If an account exists for this email, we'll send a new confirmation email. Please check your inbox and spam folder.";
+
 export function LoginForm() {
   const router = useRouter();
   const [signInEmail, setSignInEmail] = useState("");
@@ -23,6 +26,12 @@ export function LoginForm() {
   const [confirmationPending, setConfirmationPending] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(false);
 
+  const [resendEmail, setResendEmail] = useState("");
+  const [resendSubmitting, setResendSubmitting] = useState(false);
+  const [resendMessage, setResendMessage] = useState<
+    { type: "ok" | "error"; text: string } | null
+  >(null);
+
   async function handleSignIn(e: React.FormEvent) {
     e.preventDefault();
     setMessage(null);
@@ -34,7 +43,11 @@ export function LoginForm() {
         password: signInPassword,
       });
       if (error) {
-        setMessage({ type: "error", text: error.message });
+        console.warn(`[LoginForm] signIn failed: ${error.message}`);
+        setMessage({
+          type: "error",
+          text: "Sign-in failed. Please check your email and password.",
+        });
         return;
       }
       setMessage({ type: "ok", text: "Signed in. Redirecting…" });
@@ -51,11 +64,31 @@ export function LoginForm() {
     setMessage(null);
     setSubmitting("signUp");
     try {
-      const codeResult = await validateSignupCode(signupCode);
-      if (!codeResult.ok) {
+      const validate = await validateSignupCode(signupCode, signUpEmail);
+
+      if (validate.state === "invalid_or_used") {
         setMessage({ type: "error", text: "Invalid or already used signup code." });
         return;
       }
+
+      if (validate.state === "already_confirmed_same_email") {
+        setMessage({
+          type: "ok",
+          text: "This account is already confirmed. Please sign in above.",
+        });
+        return;
+      }
+
+      if (validate.state === "pending_same_email") {
+        setConfirmationPending(true);
+        setMessage({
+          type: "ok",
+          text: "Your account was already created but still needs email confirmation. Please check your inbox (and spam folder), or use the resend option below.",
+        });
+        return;
+      }
+
+      // state === "unused" — proceed with signUp
       const supabase = createSupabaseBrowserClient();
       const { data, error } = await supabase.auth.signUp({
         email: signUpEmail,
@@ -65,7 +98,11 @@ export function LoginForm() {
         },
       });
       if (error) {
-        setMessage({ type: "error", text: error.message });
+        console.warn(`[LoginForm] signUp failed: ${error.message}`);
+        setMessage({
+          type: "error",
+          text: "We couldn't create your account. Please check your details and try again.",
+        });
         return;
       }
       if (data.user && data.user.identities && data.user.identities.length === 0) {
@@ -73,7 +110,11 @@ export function LoginForm() {
         return;
       }
       if (data.user) {
-        const claimResult = await claimSignupCode(signupCode, data.user.id);
+        const claimResult = await claimSignupCode(
+          signupCode,
+          data.user.id,
+          signUpEmail,
+        );
         if (!claimResult.ok) {
           console.warn("Signup code claim failed:", claimResult.error);
         }
@@ -90,7 +131,8 @@ export function LoginForm() {
       });
       router.refresh();
     } catch (error) {
-      setMessage({ type: "error", text: getErrorMessage(error) });
+      console.warn(`[LoginForm] signUp threw: ${getErrorMessage(error)}`);
+      setMessage({ type: "error", text: "Something went wrong. Please try again." });
     } finally {
       setSubmitting(null);
     }
@@ -110,13 +152,41 @@ export function LoginForm() {
         },
       });
       if (error) {
-        setMessage({ type: "error", text: error.message });
-      } else {
-        setMessage({ type: "ok", text: "Confirmation email resent. Please check your inbox." });
+        console.warn(`[LoginForm] resend (post-signup) failed: ${error.message}`);
       }
+      setMessage({ type: "ok", text: RESEND_INFO_MESSAGE });
     } catch (error) {
-      setMessage({ type: "error", text: getErrorMessage(error) });
+      console.warn(`[LoginForm] resend (post-signup) threw: ${getErrorMessage(error)}`);
+      setMessage({ type: "ok", text: RESEND_INFO_MESSAGE });
     } finally {
+      setTimeout(() => setResendCooldown(false), 30_000);
+    }
+  }
+
+  async function handleStandaloneResend(e: React.FormEvent) {
+    e.preventDefault();
+    if (resendCooldown || !resendEmail) return;
+    setResendCooldown(true);
+    setResendSubmitting(true);
+    setResendMessage(null);
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: resendEmail,
+        options: {
+          emailRedirectTo: EMAIL_REDIRECT_TO,
+        },
+      });
+      if (error) {
+        console.warn(`[LoginForm] resend (standalone) failed: ${error.message}`);
+      }
+      setResendMessage({ type: "ok", text: RESEND_INFO_MESSAGE });
+    } catch (error) {
+      console.warn(`[LoginForm] resend (standalone) threw: ${getErrorMessage(error)}`);
+      setResendMessage({ type: "ok", text: RESEND_INFO_MESSAGE });
+    } finally {
+      setResendSubmitting(false);
       setTimeout(() => setResendCooldown(false), 30_000);
     }
   }
@@ -253,6 +323,42 @@ export function LoginForm() {
           {resendCooldown ? "Resend available in 30s" : "Resend confirmation email"}
         </button>
       )}
+
+      <form
+        onSubmit={handleStandaloneResend}
+        className="flex flex-col gap-3 border-t border-zinc-200 pt-6 dark:border-zinc-800"
+      >
+        <h2 className="text-lg font-semibold">Didn&apos;t get the confirmation email?</h2>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          Enter the email you used to sign up and we&apos;ll resend the confirmation link.
+        </p>
+        <input
+          type="email"
+          placeholder="Email"
+          value={resendEmail}
+          onChange={(e) => setResendEmail(e.target.value)}
+          required
+          autoComplete="email"
+          className="app-input"
+          suppressHydrationWarning
+        />
+        <button
+          type="submit"
+          disabled={resendSubmitting || resendCooldown || !resendEmail}
+          className="app-button-secondary"
+        >
+          {resendCooldown
+            ? "Resend available in 30s"
+            : resendSubmitting
+              ? "…"
+              : "Resend confirmation email"}
+        </button>
+        {resendMessage && (
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            {resendMessage.text}
+          </p>
+        )}
+      </form>
     </div>
   );
 }

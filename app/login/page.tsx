@@ -7,9 +7,9 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; confirmed?: string }>;
 }) {
-  const { error: callbackError } = await searchParams;
+  const { error: callbackError, confirmed } = await searchParams;
   const supabase = await createSupabaseServerClient();
 
   if (!supabase) {
@@ -75,6 +75,13 @@ export default async function LoginPage({
           Sign in or create an account to use daily reviews and new words.
         </p>
       </section>
+      {confirmed === "true" && (
+        <div className="app-card-strong flex flex-col gap-2 border-emerald-200 bg-emerald-50/90 p-6 dark:border-emerald-900/50 dark:bg-emerald-950/30">
+          <p className="text-emerald-800 dark:text-emerald-200">
+            Email confirmed. You can now sign in.
+          </p>
+        </div>
+      )}
       {callbackError && (
         <div className="app-card-strong flex flex-col gap-2 border-red-200 bg-red-50/90 p-6 dark:border-red-900/50 dark:bg-red-950/30">
           <p className="text-red-800 dark:text-red-200">{callbackError}</p>

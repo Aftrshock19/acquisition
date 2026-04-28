@@ -1,4 +1,5 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { markSignupCodeConfirmed } from "@/app/actions/signup-code";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import {
@@ -6,6 +7,9 @@ import {
   shouldRedirectToPlacement,
 } from "@/lib/onboarding/state";
 import { getAppUrl } from "@/lib/url";
+
+const GENERIC_ERROR =
+  "Confirmation link expired or invalid. Please request a new confirmation email.";
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
@@ -20,10 +24,10 @@ export async function GET(request: NextRequest) {
     `[auth/callback] hit code=${code ? code.slice(0, 8) : "none"} ua=${request.headers.get("user-agent") ?? "unknown"} ip=${request.headers.get("x-forwarded-for") ?? "unknown"} t=${Date.now()}`,
   );
 
-  // Surface Supabase-level errors (e.g. expired or invalid confirmation link)
   if (errorParam) {
+    console.warn(`[auth/callback] provider error: ${errorParam}`);
     const loginUrl = new URL("/login", origin);
-    loginUrl.searchParams.set("error", errorParam);
+    loginUrl.searchParams.set("error", GENERIC_ERROR);
     return NextResponse.redirect(loginUrl);
   }
 
@@ -36,7 +40,9 @@ export async function GET(request: NextRequest) {
           `[auth/callback] code exchange failed: ${error.message} — checking for existing session`,
         );
 
-        // The code may have already been consumed by a prefetcher/link scanner.
+        // The code may have already been consumed by a prefetcher/link scanner,
+        // OR the verifier cookie is missing because the link opened in a
+        // different browser/webview than the one that started signup.
         // If the user's browser already holds a valid session cookie, let them through.
         const {
           data: { user },
@@ -46,22 +52,21 @@ export async function GET(request: NextRequest) {
           console.log(
             `[auth/callback] existing session found for ${user.id}, proceeding despite code exchange failure`,
           );
+          await markSignupCodeConfirmed(user.id);
         } else {
           console.error(
             `[auth/callback] no existing session — redirecting to login`,
           );
           const loginUrl = new URL("/login", origin);
-          const isAlreadyUsed =
-            error.message.toLowerCase().includes("already used") ||
-            error.message.toLowerCase().includes("expired") ||
-            error.message.toLowerCase().includes("invalid");
-          loginUrl.searchParams.set(
-            "error",
-            isAlreadyUsed
-              ? "Confirmation link expired or already used. Please try again."
-              : error.message,
-          );
+          loginUrl.searchParams.set("error", GENERIC_ERROR);
           return NextResponse.redirect(loginUrl);
+        }
+      } else {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (user) {
+          await markSignupCodeConfirmed(user.id);
         }
       }
     }
