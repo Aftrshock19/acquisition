@@ -5,7 +5,59 @@ import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { getAppUrl } from "@/lib/url";
 import { useRouter } from "next/navigation";
-import { validateSignupCode, claimSignupCode } from "@/app/actions/signup-code";
+type ValidateState =
+  | "unused"
+  | "pending_same_email"
+  | "already_confirmed_same_email"
+  | "invalid_or_used";
+
+async function validateSignupCode(
+  code: string,
+  email: string,
+): Promise<{ state: ValidateState }> {
+  try {
+    const res = await fetch("/api/signup-code/validate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code, email }),
+      cache: "no-store",
+    });
+    if (!res.ok) return { state: "invalid_or_used" };
+    const data = (await res.json()) as { state?: unknown };
+    if (
+      data.state === "unused" ||
+      data.state === "pending_same_email" ||
+      data.state === "already_confirmed_same_email" ||
+      data.state === "invalid_or_used"
+    ) {
+      return { state: data.state };
+    }
+    return { state: "invalid_or_used" };
+  } catch {
+    return { state: "invalid_or_used" };
+  }
+}
+
+async function claimSignupCode(
+  code: string,
+  userId: string,
+  email: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch("/api/signup-code/claim", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code, userId, email }),
+      cache: "no-store",
+    });
+    if (!res.ok) return { ok: false, error: `http_${res.status}` };
+    const data = (await res.json()) as { ok?: unknown };
+    return { ok: data.ok === true };
+  } catch (err) {
+    console.warn("[LoginForm] claim signup code request failed", err);
+    return { ok: false, error: "request_failed" };
+  }
+}
 
 const EMAIL_REDIRECT_TO = `${getAppUrl()}/auth/callback`;
 

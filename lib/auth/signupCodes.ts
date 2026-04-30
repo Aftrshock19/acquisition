@@ -1,4 +1,4 @@
-"use server";
+import "server-only";
 
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 
@@ -8,7 +8,7 @@ export type SignupCodeValidateResult =
   | { state: "already_confirmed_same_email" }
   | { state: "invalid_or_used" };
 
-export type SignupCodeResult = { ok: true } | { ok: false; error: string };
+export type SignupCodeClaimResult = { ok: true } | { ok: false; error: string };
 
 function normalizeCode(code: string) {
   return code.replace(/\s+/g, "");
@@ -57,7 +57,7 @@ export async function claimSignupCode(
   code: string,
   userId: string,
   email: string,
-): Promise<SignupCodeResult> {
+): Promise<SignupCodeClaimResult> {
   const normalizedCode = normalizeCode(code);
   const normalizedEmail = normalizeEmail(email);
 

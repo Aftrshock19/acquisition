@@ -1,5 +1,5 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { markSignupCodeConfirmed } from "@/app/actions/signup-code";
+import { markSignupCodeConfirmed } from "@/lib/auth/signupCodes";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import {
