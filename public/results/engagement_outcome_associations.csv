@@ -1,0 +1,6 @@
+engagement_measure,outcome_change,rho,p
+Active-day rate,Total receptive gain,0.45,0.222
+Completed-loop rate,Total receptive gain,-0.18,0.651
+Flashcard-review rate,UoS gain,0.07,0.865
+Reading-completion rate,Reading gain,0.09,0.815
+Listening-completion rate,Listening gain,0.42,0.265

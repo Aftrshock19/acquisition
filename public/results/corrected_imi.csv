@@ -1,0 +1,4 @@
+sample_name,n,participants,acquisition_median,duolingo_median,mean_difference,direction,wilcoxon_w,z,p,r,sample_note
+Primary H2 participants,12,P035; P044; P045; P046; P047; P055; P057; P059; P060; P063; P080; P083,31.00,26.50,+4.17,"8 positive, 2 ties, 2 negative",4.50,2.29,.022,.73,Participants included in the main H2 analysis.
+H1-complete participants,10,P035; P044; P045; P046; P047; P057; P059; P063; P080; P083,31.00,26.50,+4.80,"7 positive, 2 ties, 1 negative",2.00,2.17,.030,.77,Sensitivity check restricted to participants also included in the H1 receptive analysis.
+Questionnaire prior-use subset,8,P044; P045; P047; P057; P059; P060; P063; P080,31.00,26.50,+5.25,"5 positive, 2 ties, 1 negative",1.00,1.89,.059,.77,Sensitivity check using the stricter questionnaire prior-Duolingo subset with meaningful Acquisition engagement.
