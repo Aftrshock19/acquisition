@@ -149,13 +149,13 @@ Run this immediately after the deploy that introduces `/auth/confirm`:
 - [ ] **Desktop:** Sign up with a test email — confirmation email arrives, link goes to `/auth/confirm?token_hash=...`, lands on `/login?confirmed=true` showing "Email confirmed. You can now sign in."
 - [ ] **Mobile (Outlook / Gmail webview):** Sign up on mobile Safari, open the confirmation email in the email-app webview — confirmation completes and lands on `/login?confirmed=true`. Sign in inside the actual PWA reaches the correct onboarding/placement/home route.
 - [ ] Re-clicking an already-used or expired confirmation link shows the friendly "Confirmation link expired or invalid…" message — no raw Supabase error is shown
-- [ ] Standalone "Resend confirmation email" form on `/login` works without re-entering the signup code, respects 30-second cooldown, and shows a generic message regardless of whether the email exists
-- [ ] Same email + same already-consumed signup code shows the recovery path ("already created but still needs confirmation" or "already confirmed, please sign in"), not "Invalid or already used signup code."
-- [ ] A different email cannot reuse a consumed code — shows "Invalid or already used signup code."
+- [ ] Standalone "Resend confirmation email" form on `/login` works, respects 30-second cooldown, and shows a generic message regardless of whether the email exists
 - [ ] Existing `/auth/callback` still handles old (pre-deploy) confirmation links without crashing
-- [ ] Existing `/auth/callback` calls `markSignupCodeConfirmed` after successful old-style confirmation (check `signup_codes.confirmed_at` on the test user)
-- [ ] Backfilled `signup_codes` rows show `confirmed_at` for confirmed users and `null` for the unconfirmed Apple Private Relay user
 - [ ] If email does not arrive: check Supabase auth logs and SMTP provider logs
+
+> Note: signup codes were removed from the app (July 2026). Registration
+> no longer requires a code; the historical `signup_codes` table is kept
+> in Supabase as study data but nothing in the app reads or writes it.
 
 ## Email Delivery — External Dependencies
 

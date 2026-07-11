@@ -1,5 +1,4 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { markSignupCodeConfirmed } from "@/lib/auth/signupCodes";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import {
@@ -52,7 +51,6 @@ export async function GET(request: NextRequest) {
           console.log(
             `[auth/callback] existing session found for ${user.id}, proceeding despite code exchange failure`,
           );
-          await markSignupCodeConfirmed(user.id);
         } else {
           console.error(
             `[auth/callback] no existing session — redirecting to login`,
@@ -60,13 +58,6 @@ export async function GET(request: NextRequest) {
           const loginUrl = new URL("/login", origin);
           loginUrl.searchParams.set("error", GENERIC_ERROR);
           return NextResponse.redirect(loginUrl);
-        }
-      } else {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (user) {
-          await markSignupCodeConfirmed(user.id);
         }
       }
     }

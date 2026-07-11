@@ -5,59 +5,6 @@ import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { getAppUrl } from "@/lib/url";
 import { useRouter } from "next/navigation";
-type ValidateState =
-  | "unused"
-  | "pending_same_email"
-  | "already_confirmed_same_email"
-  | "invalid_or_used";
-
-async function validateSignupCode(
-  code: string,
-  email: string,
-): Promise<{ state: ValidateState }> {
-  try {
-    const res = await fetch("/api/signup-code/validate", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code, email }),
-      cache: "no-store",
-    });
-    if (!res.ok) return { state: "invalid_or_used" };
-    const data = (await res.json()) as { state?: unknown };
-    if (
-      data.state === "unused" ||
-      data.state === "pending_same_email" ||
-      data.state === "already_confirmed_same_email" ||
-      data.state === "invalid_or_used"
-    ) {
-      return { state: data.state };
-    }
-    return { state: "invalid_or_used" };
-  } catch {
-    return { state: "invalid_or_used" };
-  }
-}
-
-async function claimSignupCode(
-  code: string,
-  userId: string,
-  email: string,
-): Promise<{ ok: boolean; error?: string }> {
-  try {
-    const res = await fetch("/api/signup-code/claim", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code, userId, email }),
-      cache: "no-store",
-    });
-    if (!res.ok) return { ok: false, error: `http_${res.status}` };
-    const data = (await res.json()) as { ok?: unknown };
-    return { ok: data.ok === true };
-  } catch (err) {
-    console.warn("[LoginForm] claim signup code request failed", err);
-    return { ok: false, error: "request_failed" };
-  }
-}
 
 const EMAIL_REDIRECT_TO = `${getAppUrl()}/auth/callback`;
 
@@ -68,7 +15,6 @@ export function LoginForm() {
   const router = useRouter();
   const [signInEmail, setSignInEmail] = useState("");
   const [signInPassword, setSignInPassword] = useState("");
-  const [signupCode, setSignupCode] = useState("");
   const [signUpEmail, setSignUpEmail] = useState("");
   const [signUpPassword, setSignUpPassword] = useState("");
   const [showLoginPassword, setShowLoginPassword] = useState(false);
@@ -120,34 +66,6 @@ export function LoginForm() {
     setMessage(null);
     setSubmitting("signUp");
     try {
-      const validate = await validateSignupCode(signupCode, signUpEmail);
-
-      if (validate.state === "invalid_or_used") {
-        setMessage({
-          type: "error",
-          text: "That signup code isn't valid, or it has been used by a different email. Try signing in if you've already created an account. If you still cannot get in, email du22662@bristol.ac.uk.",
-        });
-        return;
-      }
-
-      if (validate.state === "already_confirmed_same_email") {
-        setMessage({
-          type: "ok",
-          text: "This account is already confirmed. Please sign in above. If you still cannot get in, email du22662@bristol.ac.uk.",
-        });
-        return;
-      }
-
-      if (validate.state === "pending_same_email") {
-        setConfirmationPending(true);
-        setMessage({
-          type: "ok",
-          text: "Your account was already created but still needs email confirmation. Please check your inbox and spam folder, or use the resend option below. If you still cannot get in, email du22662@bristol.ac.uk.",
-        });
-        return;
-      }
-
-      // state === "unused" — proceed with signUp
       const supabase = createSupabaseBrowserClient();
       const { data, error } = await supabase.auth.signUp({
         email: signUpEmail,
@@ -170,16 +88,6 @@ export function LoginForm() {
           text: "An account with this email already exists. Try signing in, or use the resend option below if you never confirmed it. If you still cannot get in, email du22662@bristol.ac.uk.",
         });
         return;
-      }
-      if (data.user) {
-        const claimResult = await claimSignupCode(
-          signupCode,
-          data.user.id,
-          signUpEmail,
-        );
-        if (!claimResult.ok) {
-          console.warn("Signup code claim failed:", claimResult.error);
-        }
       }
       if (data.session) {
         setMessage({ type: "ok", text: "Account created. Redirecting…" });
@@ -336,27 +244,6 @@ export function LoginForm() {
             {showSignUpPassword ? "Hide" : "Show"}
           </button>
         </div>
-        <label htmlFor="signup-code" className="sr-only">
-          Signup code
-        </label>
-        <input
-          id="signup-code"
-          type="text"
-          placeholder="Enter your signup code"
-          value={signupCode}
-          onChange={(e) => setSignupCode(e.target.value)}
-          required
-          autoComplete="off"
-          spellCheck={false}
-          className="app-input"
-          suppressHydrationWarning
-        />
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          If you forgot your signup code please email{" "}
-          <a href="mailto:du22662@bristol.ac.uk" className="underline">
-            du22662@bristol.ac.uk
-          </a>
-        </p>
         <button
           type="submit"
           disabled={submitting !== null}

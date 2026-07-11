@@ -1,5 +1,4 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { markSignupCodeConfirmed } from "@/lib/auth/signupCodes";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { getAppUrl } from "@/lib/url";
@@ -37,7 +36,7 @@ export async function GET(request: NextRequest) {
     return loginRedirect({ error: GENERIC_ERROR });
   }
 
-  const { data, error } = await supabase.auth.verifyOtp({
+  const { error } = await supabase.auth.verifyOtp({
     token_hash: tokenHash,
     type: "email",
   });
@@ -45,22 +44,6 @@ export async function GET(request: NextRequest) {
   if (error) {
     console.warn(`[auth/confirm] verifyOtp failed: ${error.message}`);
     return loginRedirect({ error: GENERIC_ERROR });
-  }
-
-  let userId = data?.user?.id ?? null;
-  if (!userId) {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    userId = user?.id ?? null;
-  }
-
-  if (userId) {
-    await markSignupCodeConfirmed(userId);
-  } else {
-    console.warn(
-      `[auth/confirm] verifyOtp succeeded but no user id resolved (token=${tokenHash.slice(0, 8)})`,
-    );
   }
 
   // Clear the session that verifyOtp just established in this browser/webview.
