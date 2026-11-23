@@ -60,7 +60,7 @@ The lexicon underneath is 35,000+ Spanish lemmas, built from Wiktextract/Kaikki,
 
 ### Adaptive placement
 
-A short vocabulary-frontier test runs before the first session. Length is dynamic (10 to 26 items) with stopping rules for precision, max items, bottom-out failure, and top-of-bank performance.
+A short vocabulary-frontier test runs before the first session. Length is dynamic (7 to 26 items) with stopping rules for precision, consecutive wrong answers, bottom-out failure, and max items. The nominal minimum is 10 items, but the test stops as early as item 7 once it has a definitive bracket: a cleared floor directly below a failed floor. A top-of-bank rule also exists, but it cannot fire with the default settings because climbing from the start checkpoint to the top takes more than 26 items.
 
 The engine is designed to resist lucky guesses. It weights floor modules around vocabulary checkpoints, discounts cognate-heavy answers, and requires morphological evidence for non-cognate support. Onboarding includes a short Zipf's law explanation so the learner understands why a frontier-based test matters.
 
@@ -237,11 +237,13 @@ Intended for dissertation reviewers reproducing the project, not general public 
 git clone https://github.com/Aftrshock19/acquisition.git
 cd acquisition
 npm install
-cp .env.example .env.local   # fill in Supabase keys
-supabase link && supabase db push
-npm run seed
+supabase start   # local Supabase in Docker; applies supabase/migrations
+# create .env.local with the variables below (`supabase status` prints the local URL and keys)
+npm run seed     # needs supabase/seed/new_spa.csv, which is not committed
 npm run dev
 ```
+
+`npm run seed` targets the local stack. Only the `--target linked` flag, which `npm run seed:remote` passes, reaches a hosted project; environment variables never change the target. It adds missing words and fills empty fields, and never deletes. `npm run seed:remote` refuses the production project unless the same command also passes `--confirm-project-ref` with the production ref. The `--overwrite` and `--prune` flags bring back the old destructive import. See [supabase/README.md](supabase/README.md) before using either.
 
 Required environment variables:
 
@@ -263,7 +265,8 @@ Useful commands:
 | Production build          | `npm run build`             |
 | Lint                      | `npm run lint`              |
 | Tests                     | `npm run test`              |
-| Seed vocabulary           | `npm run seed`              |
+| Seed vocabulary (local)   | `npm run seed`              |
+| Seed linked project       | `npm run seed:remote`       |
 | Import passages           | `npm run import:passages`   |
 | Synthesise TTS audio      | `npm run generate:audio`    |
 | Backfill audio duration   | `npm run backfill:duration` |

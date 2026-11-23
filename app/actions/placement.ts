@@ -385,6 +385,9 @@ export async function submitPlacementAnswer(
   const plan = planNextItem(responses);
   const isDone = plan.stage === "done";
   const confidence = statusToConfidence(estimate.estimateStatus);
+  // Shared so the run's completed_at and user_settings.placement_baseline_at
+  // agree exactly.
+  const completedAt = new Date().toISOString();
 
   await supabase
     .from("baseline_test_runs")
@@ -431,7 +434,7 @@ export async function submitPlacementAnswer(
         selectionSeed,
       }),
       status: isDone ? "completed" : "in_progress",
-      completed_at: isDone ? new Date().toISOString() : null,
+      completed_at: isDone ? completedAt : null,
     })
     .eq("id", input.runId);
 
@@ -448,9 +451,12 @@ export async function submitPlacementAnswer(
           placement_confidence: confidence,
           placement_status: "estimated",
           placement_source: "baseline_only",
-          placement_last_recalibrated_at: new Date().toISOString(),
+          // New baseline (first run or retake): recalibration measures its
+          // decay from here.
+          placement_baseline_at: completedAt,
+          placement_last_recalibrated_at: completedAt,
           has_seen_intro: true,
-          onboarding_completed_at: new Date().toISOString(),
+          onboarding_completed_at: completedAt,
           onboarding_entry_mode: "baseline",
         },
         { onConflict: "user_id" },
@@ -513,6 +519,9 @@ export async function discardPlacementResult(): Promise<
         placement_confidence: null,
         placement_status: "unknown",
         placement_source: null,
+        // The old estimate is gone, so recalibration restarts its decay from
+        // here. Re-certifying or a new placement run overwrites this.
+        placement_baseline_at: new Date().toISOString(),
       },
       { onConflict: "user_id" },
     );
@@ -521,8 +530,8 @@ export async function discardPlacementResult(): Promise<
 
   revalidatePath("/placement");
   revalidatePath("/today");
-  revalidatePath("/reading");
-  revalidatePath("/listening");
+  revalidatePath("/reading"); // perf-ok: /reading derives the user's CEFR band from current_frontier_rank, cleared above
+  revalidatePath("/listening"); // perf-ok: /listening derives the user's CEFR band from current_frontier_rank, cleared above
   return { ok: true };
 }
 

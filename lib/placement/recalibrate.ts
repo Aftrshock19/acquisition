@@ -143,7 +143,7 @@ export async function recalibratePlacementForUser(
   const { data: settings } = await supabase
     .from("user_settings")
     .select(
-      "current_frontier_rank, placement_confidence, placement_last_recalibrated_at, baseline_test_run_id, placement_recalibration_trace",
+      "current_frontier_rank, placement_confidence, placement_baseline_at, onboarding_completed_at, placement_last_recalibrated_at, baseline_test_run_id, placement_recalibration_trace",
     )
     .eq("user_id", userId)
     .maybeSingle();
@@ -199,7 +199,17 @@ export async function recalibratePlacementForUser(
       ? sessionRows.filter((r) => r.completed).length / sessionRows.length
       : null;
 
-  const baselineAt = settings.placement_last_recalibrated_at as string | null;
+  // Measure from when the current starting estimate was established, not
+  // from the last recalibration: this function overwrites
+  // placement_last_recalibrated_at below, so using it here pinned
+  // daysSinceBaseline at ~1 for daily users (gain never decayed, status never
+  // reached 'stable'). placement_baseline_at is only written by the
+  // placement / onboarding actions. onboarding_completed_at covers rows
+  // onboarded by older code before that column existed.
+  const baselineAt =
+    (settings.placement_baseline_at as string | null) ??
+    (settings.onboarding_completed_at as string | null) ??
+    (settings.placement_last_recalibrated_at as string | null);
   const daysSinceBaseline = baselineAt
     ? Math.max(0, (Date.now() - new Date(baselineAt).getTime()) / 86_400_000)
     : 0;
@@ -233,6 +243,7 @@ export async function recalibratePlacementForUser(
       placement_confidence: result.nextConfidence,
       placement_status: result.status,
       placement_source: result.source,
+      // "Last ran" marker only. Never touch placement_baseline_at here.
       placement_last_recalibrated_at: new Date().toISOString(),
       placement_recalibration_trace: nextTrace,
     })

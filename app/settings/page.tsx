@@ -8,6 +8,7 @@ import { resolveEffectiveSettings } from '@/lib/settings/resolveEffectiveSetting
 import { FlashcardSettingsForm } from '@/components/settings/FlashcardSettingsForm';
 import { getSupabaseServerContextFast } from '@/lib/supabase/server';
 import { getTodaySessionDate } from '@/lib/loop/dailySessions';
+import { getFlashcardAttemptsCount } from '@/lib/loop/dailySessionStage';
 
 async function getTodaySessionSnapshot(): Promise<{
   completedCount: number;
@@ -32,19 +33,22 @@ async function getTodaySessionSnapshot(): Promise<{
   const { data } = await supabase
     .from('daily_sessions')
     .select(
-      'flashcard_completed_count, effective_daily_target_mode, assigned_flashcard_count, recommended_target_at_creation',
+      'flashcard_attempts_count, flashcard_completed_count, effective_daily_target_mode, assigned_flashcard_count, recommended_target_at_creation',
     )
     .eq('user_id', user.id)
     .eq('session_date', getTodaySessionDate())
     .maybeSingle();
   const row = data as {
+    flashcard_attempts_count: number | null;
     flashcard_completed_count: number | null;
     effective_daily_target_mode: 'recommended' | 'manual' | null;
     assigned_flashcard_count: number | null;
     recommended_target_at_creation: number | null;
   } | null;
   return {
-    completedCount: row?.flashcard_completed_count ?? 0,
+    // Attempts (main + retry): the unit the stage rule and the settings
+    // action's minimum-target guard count against the target.
+    completedCount: getFlashcardAttemptsCount(row),
     effectiveDailyTargetMode: row?.effective_daily_target_mode ?? null,
     assignedFlashcardCount: row?.assigned_flashcard_count ?? null,
     recommendedTargetAtCreation: row?.recommended_target_at_creation ?? null,

@@ -18,12 +18,16 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect } from "vitest";
+import { getLiveFunctionDefinition } from "./migrationSql.testSupport";
 
 const MIGRATION_PATH = resolve(
   __dirname,
   "../../supabase/migrations/20260426140000_add_word_suspend.sql",
 );
 const sql = readFileSync(MIGRATION_PATH, "utf-8");
+// get_daily_queue was redefined after the suspend migration (e.g. to add
+// audio paths); the queue assertions must hold for the live definition.
+const liveQueueSql = getLiveFunctionDefinition("get_daily_queue").definition;
 
 describe("word-suspend migration", () => {
   it("adds suspended_at and suspended_reason columns to user_words", () => {
@@ -55,10 +59,10 @@ describe("word-suspend migration", () => {
     // The full review-branch WHERE block must contain the status gate.
     // Match across the whole CREATE OR REPLACE so the regex isn't sensitive
     // to whitespace / inline comments.
-    expect(sql).toMatch(
+    expect(liveQueueSql).toMatch(
       /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.get_daily_queue/i,
     );
-    expect(sql).toMatch(
+    expect(liveQueueSql).toMatch(
       /COALESCE\(uw\.status,\s*'new'\)\s*<>\s*'suspended'/,
     );
   });
@@ -66,7 +70,7 @@ describe("word-suspend migration", () => {
   it("get_daily_queue new-word branch is unchanged: NOT EXISTS user_words covers suspended", () => {
     // The new-word branch must keep the existing NOT EXISTS guard, so a
     // suspended row keeps blocking a word from being re-introduced as new.
-    expect(sql).toMatch(
+    expect(liveQueueSql).toMatch(
       /NOT\s+EXISTS\s*\(\s*SELECT\s+1\s+FROM\s+public\.user_words\s+uw2/i,
     );
   });
@@ -74,9 +78,9 @@ describe("word-suspend migration", () => {
   it("review branch keeps next_due, last_review_at, and exclude-id guards alongside the status gate", () => {
     // Defence-in-depth: confirm the migration didn't accidentally drop the
     // pre-existing eligibility filters when adding the suspend gate.
-    expect(sql).toMatch(/uw\.next_due\s*<=\s*now\(\)/);
-    expect(sql).toMatch(/uw\.last_review_at\s+IS\s+NOT\s+NULL/i);
-    expect(sql).toMatch(/NOT\s*\(uw\.word_id\s*=\s*ANY\(p_exclude_word_ids\)\)/);
+    expect(liveQueueSql).toMatch(/uw\.next_due\s*<=\s*now\(\)/);
+    expect(liveQueueSql).toMatch(/uw\.last_review_at\s+IS\s+NOT\s+NULL/i);
+    expect(liveQueueSql).toMatch(/NOT\s*\(uw\.word_id\s*=\s*ANY\(p_exclude_word_ids\)\)/);
   });
 });
 

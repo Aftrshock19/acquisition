@@ -139,7 +139,8 @@ const reviewEvents: AnalyticsReviewEventRow[] = [
     created_at: `${TODAY}T08:10:18.000Z`,
     user_answer: "got it",
     expected: ["adios"],
-    delta_hours: 26,
+    // Same-session retry ~10 minutes after the main-queue miss (review-2).
+    delta_hours: 0.17,
     first_try: false,
     retry_index: 1,
     scheduler_outcome: "rescued_success",
@@ -192,7 +193,8 @@ describe("analytics service", () => {
       total_time_seconds: 224,
     });
     expect(dailyAggregates[0].flashcard_accuracy).toBeCloseTo(0.75);
-    expect(dailyAggregates[0].review_correctness_proxy).toBeCloseTo(2 / 3);
+    // Main-queue review attempts only: review-2 (wrong), review-3 (right).
+    expect(dailyAggregates[0].review_correctness_proxy).toBeCloseTo(1 / 2);
   });
 
   it("summarizes totals and builds the today snapshot from those aggregates", () => {
@@ -215,7 +217,8 @@ describe("analytics service", () => {
     expect(summary.flashcard_accuracy).toBeCloseTo(0.75);
     expect(summary.total_flashcard_retries).toBe(1);
     expect(summary.total_reader_saved_words).toBe(2);
-    expect(summary.review_retention_proxy.review_accuracy).toBeCloseTo(2 / 3);
+    expect(summary.review_retention_proxy.review_attempts).toBe(2);
+    expect(summary.review_retention_proxy.review_accuracy).toBeCloseTo(1 / 2);
 
     expect(today).not.toBeNull();
     expect(today).toMatchObject({
@@ -226,5 +229,101 @@ describe("analytics service", () => {
       reader_completed: true,
       listening_completed: true,
     });
+  });
+
+  function summarize(session: AnalyticsSessionRow, events = reviewEvents) {
+    const dailyAggregates = buildDailyAggregates({
+      range: { from: TODAY, to: TODAY },
+      sessions: [session],
+      reviewEvents: events,
+      savedWords,
+    });
+    const summary = buildAnalyticsSummary({
+      sessions: [session],
+      reviewEvents: events,
+      savedWords,
+      dailyAggregates,
+    });
+    return { day: dailyAggregates[0], summary };
+  }
+
+  it("counts a day finished with retries as completed even when completed=false", () => {
+    // Pilot bug: client counted the retry towards the 4-card target, server
+    // counted only 3 first attempts, so the row stayed at stage='flashcards'
+    // with completed=false after reading and listening were done.
+    const { day, summary } = summarize({
+      ...sampleSession,
+      stage: "flashcards",
+      assigned_flashcard_count: 4,
+      flashcard_completed_count: 3,
+      flashcard_attempts_count: 4,
+      flashcard_retry_count: 1,
+      flashcards_completed_at: null,
+      completed: false,
+      completed_at: null,
+    });
+
+    expect(day.session_completed).toBe(true);
+    expect(summary.total_sessions_completed).toBe(1);
+    expect(summary.daily_session_completion_rate).toBe(1);
+    expect(summary.stage_totals.flashcards_completed).toBe(1);
+    expect(summary.stage_totals.completed).toBe(1);
+  });
+
+  it("counts an extended day (completed=false, completed_at set) as completed", () => {
+    // "Do more flashcards" after finishing: routed back to flashcards with
+    // completed=false, a raised target, but completed_at kept.
+    const { day, summary } = summarize({
+      ...sampleSession,
+      stage: "flashcards",
+      assigned_flashcard_count: 13,
+      flashcards_completed_at: null,
+      completed: false,
+    });
+
+    expect(day.session_completed).toBe(true);
+    expect(day.loop_completed_at_present).toBe(true);
+    expect(summary.total_sessions_completed).toBe(1);
+    expect(summary.daily_session_completion_rate).toBe(1);
+    expect(summary.stage_totals.completed).toBe(1);
+  });
+
+  it("does not count a day whose flashcard target was not met", () => {
+    const { day, summary } = summarize({
+      ...sampleSession,
+      stage: "flashcards",
+      assigned_flashcard_count: 10,
+      flashcard_attempts_count: 4,
+      flashcards_completed_at: null,
+      completed: false,
+      completed_at: null,
+    });
+
+    expect(day.session_completed).toBe(false);
+    expect(summary.total_sessions_completed).toBe(0);
+    expect(summary.daily_session_completion_rate).toBe(0);
+    expect(summary.stage_totals.flashcards_completed).toBe(0);
+    expect(summary.stage_totals.completed).toBe(0);
+  });
+
+  it("excludes same-session retries from the retention proxy and mean delta", () => {
+    const { day, summary } = summarize(sampleSession);
+    const proxy = summary.review_retention_proxy;
+
+    expect(proxy.review_attempts).toBe(2);
+    expect(proxy.correct_review_attempts).toBe(1);
+    expect(proxy.review_accuracy).toBeCloseTo(1 / 2);
+    // Main-queue review deltas 26h and 48h; the 0.17h retry is excluded.
+    expect(proxy.average_delta_hours).toBeCloseTo(37);
+    expect(day.review_correctness_proxy).toBeCloseTo(1 / 2);
+
+    const retriesOnly = summarize(
+      sampleSession,
+      reviewEvents.filter((event) => event.queue_source === "retry"),
+    );
+    expect(retriesOnly.summary.review_retention_proxy.review_attempts).toBe(0);
+    expect(retriesOnly.summary.review_retention_proxy.review_accuracy).toBeNull();
+    expect(retriesOnly.summary.review_retention_proxy.average_delta_hours).toBeNull();
+    expect(retriesOnly.day.review_correctness_proxy).toBeNull();
   });
 });

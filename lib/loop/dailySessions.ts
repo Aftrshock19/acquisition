@@ -14,11 +14,19 @@ export async function getTodayDailySessionRow(
   supabase: SupabaseServerClient,
   userId: string,
 ): Promise<DailySessionRow | null> {
+  return getDailySessionRowForDate(supabase, userId, getTodaySessionDate());
+}
+
+export async function getDailySessionRowForDate(
+  supabase: SupabaseServerClient,
+  userId: string,
+  sessionDate: string,
+): Promise<DailySessionRow | null> {
   const { data, error } = await supabase
     .from("daily_sessions")
     .select("*")
     .eq("user_id", userId)
-    .eq("session_date", getTodaySessionDate())
+    .eq("session_date", sessionDate)
     .maybeSingle();
 
   if (error) {

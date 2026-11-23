@@ -88,6 +88,8 @@ export async function completeOnboardingAsBeginner(): Promise<MarkIntroSeenResul
         current_frontier_rank_high: BEGINNER_DEFAULT_FRONTIER.frontierRankHigh,
         placement_status: "estimated",
         placement_source: "usage_only",
+        // New starting estimate: recalibration measures its decay from here.
+        placement_baseline_at: now,
         placement_last_recalibrated_at: now,
         // Clear any prior placement reference so "never placed" SQL predicates
         // (baseline_test_run_id IS NULL) correctly identify this user.
@@ -135,6 +137,8 @@ export async function completeOnboardingAsSelfCertified(
         current_frontier_rank_high: option.frontierRankHigh,
         placement_status: "estimated",
         placement_source: "usage_only",
+        // New starting estimate: recalibration measures its decay from here.
+        placement_baseline_at: now,
         placement_last_recalibrated_at: now,
         // Clear any prior placement reference so "never placed" SQL predicates
         // (baseline_test_run_id IS NULL) correctly identify this user.

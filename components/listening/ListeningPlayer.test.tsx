@@ -1,5 +1,16 @@
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// The real next/link schedules prefetching through browser-only globals, which
+// the mounted tests below do not provide. A plain anchor is enough here.
+vi.mock("next/link", async () => {
+  const { createElement } = await import("react");
+  return {
+    default: ({ href, children, ...rest }: { href: string; children?: React.ReactNode }) =>
+      createElement("a", { href, ...rest }, children),
+  };
+});
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -23,26 +34,28 @@ vi.mock("@/components/interactive-text/InteractiveTextProvider", () => ({
   InteractiveTextProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
-vi.mock("@/components/interactive-text/InteractiveText", () => ({
-  InteractiveText: ({ tokens }: { tokens: Array<{ surface: string; isWord: boolean }> }) => {
-    const React = require("react");
-    return React.createElement(
-      React.Fragment,
-      null,
-      tokens.map((t: { surface: string; isWord: boolean }, i: number) =>
-        t.isWord
-          ? React.createElement("button", {
-              key: i,
-              "data-interactive-word": "true",
-              type: "button",
-            }, t.surface)
-          : React.createElement("span", { key: i }, t.surface),
+vi.mock("@/components/interactive-text/InteractiveText", async () => {
+  const { createElement, Fragment } = await import("react");
+  return {
+    InteractiveText: ({ tokens }: { tokens: Array<{ surface: string; isWord: boolean }> }) =>
+      createElement(
+        Fragment,
+        null,
+        tokens.map((t: { surface: string; isWord: boolean }, i: number) =>
+          t.isWord
+            ? createElement("button", {
+                key: i,
+                "data-interactive-word": "true",
+                type: "button",
+              }, t.surface)
+            : createElement("span", { key: i }, t.surface),
+        ),
       ),
-    );
-  },
-}));
+  };
+});
 
-import React from "react";
+import React, { act } from "react";
+import { completeListeningStep } from "@/app/actions/srs";
 import { ListeningPlayer } from "./ListeningPlayer";
 
 const baseAsset = {
@@ -585,5 +598,372 @@ describe("ListeningPlayer", () => {
     const next = html.match(/<button[^>]*data-testid="next-item-button"[^>]*>/);
     expect(next).not.toBeNull();
     expect(next![0]).not.toMatch(/disabled=""/);
+  });
+});
+
+// ── Minimal in-memory DOM ─────────────────────────────────────
+//
+// vitest runs in the node environment and the repo has no DOM library, so the
+// mounted tests below render with react-dom/client into this stand-in. It has
+// just enough node, attribute and event plumbing for React to commit, for
+// clicks to reach React's root listener, and for the player's own audio
+// listeners to receive media events.
+
+const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
+
+type FakeListener = { fn: (event: FakeEvent) => void; capture: boolean };
+type ListenerOptions = boolean | { capture?: boolean };
+
+class FakeEvent {
+  readonly type: string;
+  readonly bubbles: boolean;
+  readonly cancelable = true;
+  readonly timeStamp = Date.now();
+  target: FakeNode | null = null;
+  currentTarget: FakeNode | null = null;
+  defaultPrevented = false;
+  propagationStopped = false;
+
+  constructor(type: string, bubbles = false) {
+    this.type = type;
+    this.bubbles = bubbles;
+  }
+
+  preventDefault() {
+    this.defaultPrevented = true;
+  }
+
+  stopPropagation() {
+    this.propagationStopped = true;
+  }
+}
+
+class FakeNode {
+  readonly nodeType: number;
+  readonly nodeName: string;
+  readonly ownerDocument: FakeDocument | null;
+  parentNode: FakeNode | null = null;
+  childNodes: FakeNode[] = [];
+  private readonly listeners = new Map<string, FakeListener[]>();
+
+  constructor(nodeType: number, nodeName: string, ownerDocument: FakeDocument | null) {
+    this.nodeType = nodeType;
+    this.nodeName = nodeName;
+    this.ownerDocument = ownerDocument;
+  }
+
+  get firstChild(): FakeNode | null {
+    return this.childNodes[0] ?? null;
+  }
+
+  get lastChild(): FakeNode | null {
+    return this.childNodes[this.childNodes.length - 1] ?? null;
+  }
+
+  get nextSibling(): FakeNode | null {
+    const siblings = this.parentNode?.childNodes ?? [];
+    return siblings[siblings.indexOf(this) + 1] ?? null;
+  }
+
+  get textContent(): string {
+    return this.childNodes.map((child) => child.textContent).join("");
+  }
+
+  set textContent(value: string) {
+    for (const child of this.childNodes) child.parentNode = null;
+    this.childNodes = [];
+    if (value && this.ownerDocument) {
+      this.appendChild(this.ownerDocument.createTextNode(value));
+    }
+  }
+
+  appendChild(child: FakeNode) {
+    return this.insertBefore(child, null);
+  }
+
+  insertBefore(child: FakeNode, before: FakeNode | null) {
+    child.parentNode?.removeChild(child);
+    const index = before ? this.childNodes.indexOf(before) : -1;
+    if (index === -1) this.childNodes.push(child);
+    else this.childNodes.splice(index, 0, child);
+    child.parentNode = this;
+    return child;
+  }
+
+  removeChild(child: FakeNode) {
+    this.childNodes = this.childNodes.filter((node) => node !== child);
+    child.parentNode = null;
+    return child;
+  }
+
+  addEventListener(type: string, fn: FakeListener["fn"], options?: ListenerOptions) {
+    const capture = typeof options === "boolean" ? options : Boolean(options?.capture);
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), { fn, capture }]);
+  }
+
+  removeEventListener(type: string, fn: FakeListener["fn"], options?: ListenerOptions) {
+    const capture = typeof options === "boolean" ? options : Boolean(options?.capture);
+    this.listeners.set(
+      type,
+      (this.listeners.get(type) ?? []).filter(
+        (listener) => listener.fn !== fn || listener.capture !== capture,
+      ),
+    );
+  }
+
+  // Capture from the root down to the target, then bubble back up (or stop at
+  // the target for non-bubbling events such as media events).
+  dispatchEvent(event: FakeEvent) {
+    event.target = this;
+    const path: FakeNode[] = [this];
+    for (let node = this.parentNode; node; node = node.parentNode) path.push(node);
+    const phases: Array<[FakeNode, boolean]> = [
+      ...[...path].reverse().map((node): [FakeNode, boolean] => [node, true]),
+      ...(event.bubbles ? path : [this]).map((node): [FakeNode, boolean] => [node, false]),
+    ];
+    for (const [node, capture] of phases) {
+      if (event.propagationStopped) break;
+      event.currentTarget = node;
+      for (const listener of node.listeners.get(event.type) ?? []) {
+        if (listener.capture === capture) listener.fn(event);
+      }
+    }
+    event.currentTarget = null;
+    return !event.defaultPrevented;
+  }
+}
+
+class FakeText extends FakeNode {
+  nodeValue: string;
+
+  constructor(text: string, ownerDocument: FakeDocument) {
+    super(3, "#text", ownerDocument);
+    this.nodeValue = text;
+  }
+
+  get textContent(): string {
+    return this.nodeValue;
+  }
+
+  set textContent(value: string) {
+    this.nodeValue = value;
+  }
+}
+
+class FakeElement extends FakeNode {
+  readonly tagName: string;
+  readonly namespaceURI: string;
+  private readonly attributeMap = new Map<string, string>();
+
+  constructor(tagName: string, namespaceURI: string, ownerDocument: FakeDocument) {
+    super(1, tagName, ownerDocument);
+    this.tagName = tagName;
+    this.namespaceURI = namespaceURI;
+  }
+
+  getAttribute(name: string) {
+    return this.attributeMap.get(name) ?? null;
+  }
+
+  hasAttribute(name: string) {
+    return this.attributeMap.has(name);
+  }
+
+  setAttribute(name: string, value: unknown) {
+    this.attributeMap.set(name, String(value));
+  }
+
+  removeAttribute(name: string) {
+    this.attributeMap.delete(name);
+  }
+}
+
+// Media state the player reads from its <audio> element; tests set it directly.
+class FakeAudioElement extends FakeElement {
+  duration = Number.NaN;
+  currentTime = 0;
+  playbackRate = 1;
+
+  constructor(ownerDocument: FakeDocument) {
+    super("AUDIO", HTML_NAMESPACE, ownerDocument);
+  }
+}
+
+class FakeDocument extends FakeNode {
+  readonly documentElement: FakeElement;
+  readonly body: FakeElement;
+  activeElement: FakeElement;
+  defaultView: object | null = null;
+
+  constructor() {
+    super(9, "#document", null);
+    this.documentElement = this.createElement("html");
+    this.body = this.createElement("body");
+    this.appendChild(this.documentElement);
+    this.documentElement.appendChild(this.body);
+    this.activeElement = this.body;
+  }
+
+  createElement(tagName: string): FakeElement {
+    return tagName === "audio"
+      ? new FakeAudioElement(this)
+      : new FakeElement(tagName.toUpperCase(), HTML_NAMESPACE, this);
+  }
+
+  createElementNS(namespaceURI: string, tagName: string) {
+    return new FakeElement(tagName, namespaceURI, this);
+  }
+
+  createTextNode(text: string) {
+    return new FakeText(text, this);
+  }
+}
+
+function installFakeDom() {
+  const fakeDocument = new FakeDocument();
+  const fakeWindow = {
+    document: fakeDocument,
+    event: undefined,
+    HTMLIFrameElement: class {},
+  };
+  fakeDocument.defaultView = fakeWindow;
+  vi.stubGlobal("window", fakeWindow);
+  vi.stubGlobal("document", fakeDocument);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  return fakeDocument;
+}
+
+function findNode(root: FakeNode, predicate: (node: FakeNode) => boolean): FakeNode | null {
+  if (predicate(root)) return root;
+  for (const child of root.childNodes) {
+    const found = findNode(child, predicate);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findByTestId(root: FakeNode, testId: string) {
+  const found = findNode(
+    root,
+    (node) => node instanceof FakeElement && node.getAttribute("data-testid") === testId,
+  );
+  if (!found) throw new Error(`No element with data-testid="${testId}"`);
+  return found;
+}
+
+describe("ListeningPlayer auto-complete when the audio ends", () => {
+  type CompleteResult = Awaited<ReturnType<typeof completeListeningStep>>;
+  const okResult = { ok: true, nextPath: "/done", dailySession: {} } as unknown as CompleteResult;
+
+  let fakeDocument: FakeDocument;
+  let root: Root | null = null;
+
+  beforeEach(() => {
+    fakeDocument = installFakeDom();
+    vi.mocked(completeListeningStep).mockReset().mockResolvedValue(okResult);
+  });
+
+  afterEach(async () => {
+    const mounted = root;
+    root = null;
+    if (mounted) await act(async () => mounted.unmount());
+    vi.unstubAllGlobals();
+  });
+
+  async function mount(props: Partial<Parameters<typeof ListeningPlayer>[0]> = {}) {
+    const container = fakeDocument.body.appendChild(fakeDocument.createElement("div"));
+    const mountedRoot = createRoot(container as unknown as HTMLElement);
+    root = mountedRoot;
+    await act(async () => {
+      mountedRoot.render(
+        <ListeningPlayer
+          asset={baseAsset}
+          completedForToday={false}
+          initialCompletion={defaultCompletion}
+          {...props}
+        />,
+      );
+    });
+    const audio = findNode(container, (node) => node instanceof FakeAudioElement);
+    if (!(audio instanceof FakeAudioElement)) throw new Error("No <audio> element rendered");
+    return { container, audio };
+  }
+
+  async function click(container: FakeNode, testId: string) {
+    await act(async () => {
+      findByTestId(container, testId).dispatchEvent(new FakeEvent("click", true));
+    });
+  }
+
+  async function fire(audio: FakeAudioElement, type: string) {
+    await act(async () => {
+      audio.dispatchEvent(new FakeEvent(type));
+    });
+  }
+
+  it("records the transcript and playback rate chosen after mount", async () => {
+    const { container, audio } = await mount();
+    audio.duration = 120;
+
+    await click(container, "transcript-toggle");
+    await click(container, "speed-preset-1.5");
+    await click(container, "speed-decrease");
+    expect(audio.playbackRate).toBe(1.45);
+
+    await fire(audio, "ended");
+
+    expect(completeListeningStep).toHaveBeenCalledTimes(1);
+    expect(completeListeningStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: "asset-1",
+        transcriptOpened: true,
+        playbackRate: 1.45,
+        maxPositionSeconds: 120,
+        requiredListenSeconds: 108,
+      }),
+    );
+  });
+
+  it("uses the duration loaded after mount for the required listen time", async () => {
+    const { audio } = await mount({ asset: { ...baseAsset, durationSeconds: null } });
+    audio.duration = 200;
+
+    await fire(audio, "loadedmetadata");
+    await fire(audio, "ended");
+
+    expect(completeListeningStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxPositionSeconds: 200,
+        requiredListenSeconds: 180,
+      }),
+    );
+  });
+
+  it("does not auto-complete again once listening is logged", async () => {
+    const { container, audio } = await mount();
+    audio.duration = 120;
+
+    await fire(audio, "ended");
+    expect(findByTestId(container, "complete-indicator")).toBeTruthy();
+    await fire(audio, "ended");
+
+    expect(completeListeningStep).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not auto-complete while another save is in flight", async () => {
+    let resolveSave: (result: CompleteResult) => void = () => {};
+    vi.mocked(completeListeningStep).mockReturnValueOnce(
+      new Promise<CompleteResult>((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+    const { container, audio } = await mount();
+    audio.duration = 120;
+
+    await click(container, "mark-complete-button");
+    await fire(audio, "ended");
+
+    expect(completeListeningStep).toHaveBeenCalledTimes(1);
+    await act(async () => resolveSave(okResult));
   });
 });

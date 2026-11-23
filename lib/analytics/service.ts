@@ -22,6 +22,54 @@ type SupabaseServerClient = NonNullable<
   Awaited<ReturnType<typeof createSupabaseServerClient>>
 >;
 
+type LoopCompletionFields = Pick<
+  AnalyticsSessionRow,
+  | "completed_at"
+  | "reading_done"
+  | "listening_done"
+  | "flashcards_completed_at"
+  | "flashcard_attempts_count"
+  | "assigned_flashcard_count"
+>;
+
+// Research definition of "flashcard stage completed". Retries count towards
+// the target (flashcard_attempts_count), matching the client session cap.
+// Mirrored in analysis/ — keep the two in sync.
+export function isFlashcardStageCompleted(session: LoopCompletionFields) {
+  return (
+    Boolean(session.flashcards_completed_at) ||
+    (session.flashcard_attempts_count ?? 0) >= (session.assigned_flashcard_count ?? 0)
+  );
+}
+
+// Research definition of "daily loop completed". Do not use the raw
+// `completed` flag for research metrics: "Do more flashcards" resets it to
+// false, and pilot rows where the server counted only first attempts stayed
+// completed=false after reading and listening were done. "Do more
+// flashcards" keeps completed_at. Two pilot-era paths cleared it:
+// un-marking listening (uncompleteListeningStep), and raising the daily
+// target in Settings above flashcard_completed_count (app/actions/settings.ts),
+// which also cleared flashcards_completed_at and raised
+// assigned_flashcard_count. A finished day re-opened that way counts only if
+// attempts reached the raised target, so this under-counts those days.
+// Uses only columns present on historical rows.
+// Mirrored in analysis/ — keep the two in sync.
+export function isLoopCompleted(session: LoopCompletionFields) {
+  return (
+    Boolean(session.completed_at) ||
+    (Boolean(session.reading_done) &&
+      Boolean(session.listening_done) &&
+      isFlashcardStageCompleted(session))
+  );
+}
+
+// Retention proxy events: main-queue review cards only. Same-session retries
+// (queue_source='retry') follow a miss minutes earlier, so their correctness
+// and delta_hours do not reflect spaced recall.
+function isRetentionProxyEvent(event: AnalyticsReviewEventRow) {
+  return event.queue_kind === "review" && event.queue_source === "main";
+}
+
 export async function getUserAnalyticsBundle(
   supabase: SupabaseServerClient,
   userId: string,
@@ -248,9 +296,7 @@ export function buildDailyAggregates({
       dayReviewEvents.reduce((total, event) => total + Math.max(0, event.ms_spent), 0) /
         1000,
     );
-    const reviewAttempts = dayReviewEvents.filter(
-      (event) => event.queue_kind === "review",
-    );
+    const reviewAttempts = dayReviewEvents.filter(isRetentionProxyEvent);
     const reviewCorrect = reviewAttempts.filter((event) => event.correct).length;
     const readerSavedWordsCount = daySavedWords.filter(
       (row) => row.added_via === "reader",
@@ -279,7 +325,7 @@ export function buildDailyAggregates({
     return {
       session_date: sessionDate,
       session_started: Boolean(session?.started_at),
-      session_completed: Boolean(session?.completed),
+      session_completed: session ? isLoopCompleted(session) : false,
       loop_completed_at_present: Boolean(session?.completed_at),
       stage: session?.stage ?? null,
       assigned_flashcard_count:
@@ -343,7 +389,7 @@ export function buildAnalyticsSummary({
   dailyAggregates: DailyAggregate[];
 }): AnalyticsSummary {
   const totalSessionsStarted = sessions.filter((session) => session.started_at).length;
-  const totalSessionsCompleted = sessions.filter((session) => session.completed).length;
+  const totalSessionsCompleted = sessions.filter((session) => isLoopCompleted(session)).length;
   const totalFlashcardAttempts = reviewEvents.length;
   const correctAttempts = reviewEvents.filter((event) => event.correct).length;
   const totalFlashcardRetries = reviewEvents.filter(
@@ -417,16 +463,14 @@ export function buildTodaySnapshot(
 function buildStageTotals(sessions: AnalyticsSessionRow[]): StageTotals {
   return {
     started: sessions.filter((session) => session.started_at).length,
-    flashcards_completed: sessions.filter(
-      (session) =>
-        Boolean(session.flashcards_completed_at) ||
-        session.flashcard_completed_count >= session.assigned_flashcard_count,
+    flashcards_completed: sessions.filter((session) =>
+      isFlashcardStageCompleted(session),
     ).length,
     reading_completed: sessions.filter((session) => session.reading_done).length,
     listening_completed: sessions.filter(
       (session) => session.listening_asset_id && session.listening_done,
     ).length,
-    completed: sessions.filter((session) => session.completed).length,
+    completed: sessions.filter((session) => isLoopCompleted(session)).length,
   };
 }
 
@@ -452,7 +496,7 @@ function buildStageDropOff(stageTotals: StageTotals, sessions: AnalyticsSessionR
 }
 
 function buildRetentionProxy(reviewEvents: AnalyticsReviewEventRow[]): RetentionProxySummary {
-  const reviewAttempts = reviewEvents.filter((event) => event.queue_kind === "review");
+  const reviewAttempts = reviewEvents.filter(isRetentionProxyEvent);
   const correctReviewAttempts = reviewAttempts.filter((event) => event.correct).length;
   const deltas = reviewAttempts
     .map((event) => event.delta_hours)

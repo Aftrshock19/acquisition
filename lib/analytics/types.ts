@@ -87,11 +87,13 @@ export type AnalyticsExportRunRow = {
 export type DailyAggregate = {
   session_date: string;
   session_started: boolean;
+  // Research "loop completed" (isLoopCompleted in service.ts), not the raw
+  // daily_sessions.completed flag. Exported a second time as loop_completed.
   session_completed: boolean;
-  // True once the daily loop reached its terminal state at any point today,
-  // even if the row is currently in extra-practice mode (stage='flashcards',
-  // completed=false). Sourced from daily_sessions.completed_at IS NOT NULL.
-  // Use this — not session_completed — for completion badges and progress UI.
+  // Just daily_sessions.completed_at IS NOT NULL (true while the row is in
+  // extra-practice mode after a completed loop). session_completed already
+  // includes it and is the broader value; use session_completed for
+  // completion badges, progress UI and research completion.
   loop_completed_at_present: boolean;
   stage: DailySessionRow["stage"] | null;
   assigned_flashcard_count: number;

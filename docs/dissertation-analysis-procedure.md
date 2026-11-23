@@ -46,7 +46,7 @@ The analysis is performed by a Python script (`analysis/build_report.py`) that c
 
 The pipeline proceeds as follows:
 
-1. **Load and validate** the JSON export bundle.
+1. **Load and validate** the JSON export bundle, apply the completion and retention-proxy definitions to the raw rows, and recompute the summary from them (see [Metric computation location](#metric-computation-location)).
 2. **Parse dates** from ISO 8601 strings into Python date objects.
 3. **Generate 14 figures** covering session completion, flashcard performance, stage usage, saved-word behaviour, logged active time, and the review-correctness proxy. All figures use an academic-style format with serif fonts, minimal axis decoration, and neutral colour palettes. Figures are saved as PNG files at 150 DPI.
 4. **Generate summary tables** as both CSV (for further analysis or appendix inclusion) and Markdown (for draft chapter text).
@@ -61,10 +61,10 @@ All outputs are written to predictable directories (`analysis/figures/` for figu
 
 Reproducibility is ensured through four mechanisms:
 
-1. **Single-source derivation.** The application's server-side analytics service is the sole implementation of metric computation. The analysis pipeline consumes pre-computed aggregates from the export rather than re-implementing metric formulas, eliminating the risk of divergence between the application and the analysis.
+1. **Mirrored metric definitions.** The application's server-side analytics service (`lib/analytics/service.ts`) computes the daily aggregates and summary metrics shown on the progress page and written to the export. When it loads an export, the analysis pipeline applies the completion and retention-proxy definitions again to the raw rows. It does this in `analysis/metrics.py`, which mirrors `isFlashcardStageCompleted`, `isLoopCompleted` and `isRetentionProxyEvent` in the service, and then recomputes the summary from those rows. This lets exports made before the 2026-11-02 corrections be analysed under the corrected definitions. These definitions therefore exist twice, once in TypeScript and once in Python, and the two must be kept identical. Each has unit tests (`lib/analytics/service.test.ts` and `analysis/tests/test_cohort_pipeline.py`). Where an export already carries a `loop_completed` value, the pipeline uses that value instead of its own.
 2. **Schema validation.** The pipeline validates the export schema before proceeding, so changes to the export format cause an immediate, visible failure rather than silent data corruption.
 3. **Deterministic rendering.** The matplotlib backend is set to `Agg` (non-interactive), and all figure parameters (size, DPI, font, colour) are fixed in the script. No random seeds, sampling, or interactive adjustments are involved.
-4. **Version-stamped exports.** Each export includes a `format_version` field (`dissertation-metrics-v1`) and an `exported_at` timestamp, allowing the analysis outputs to be traced back to the exact export that produced them.
+4. **Version-stamped exports.** Each export includes a `format_version` field (currently `dissertation-metrics-v2`) and an `exported_at` timestamp, allowing the analysis outputs to be traced back to the exact export that produced them. Exports stamped `dissertation-metrics-v1` predate the 2026-11-02 corrections to the completion and retention-proxy definitions (see [`dissertation-metrics.md`](./dissertation-metrics.md#changed-2026-11-02)). Their completion and proxy values should be recomputed, not reused.
 
 To reproduce the analysis:
 
@@ -84,6 +84,8 @@ Session dates are computed using the `Intl.DateTimeFormat` API with the configur
 
 The analysis pipeline preserves this by reading session dates as pre-computed strings from the export and parsing them into Python date objects without applying any additional time zone conversion. No date arithmetic is performed on raw timestamps; all date grouping uses the pre-computed `session_date` field.
 
+One limitation applies to the pilot data. Each flashcard answer took the session date at the moment it was submitted, so a single sitting that continued past local midnight was split across two session dates. The answers after midnight were attributed to the following day's session.
+
 ---
 
 ## Consistency checks
@@ -92,7 +94,7 @@ The application includes an in-app consistency check page (`/progress/debug`) th
 
 - Duplicate review attempt identifiers (indicating potential deduplication failures).
 - Review events without a linked daily session (indicating orphaned records).
-- Impossible session state combinations (e.g., a session marked as at the flashcards stage after a later stage has been completed).
+- Impossible session state combinations (e.g., a session marked as at the flashcards stage after a later stage has been completed, unless `completed_at` is set, which marks extra practice after a completed loop).
 - Missing completion timestamps where completion flags are set.
 - Flashcard completion counts exceeding assigned counts.
 - Review timing values outside the expected range (e.g., negative `ms_spent` or single-attempt times exceeding 30 minutes).
@@ -106,10 +108,13 @@ These checks run on the same analytics bundle used by the progress page and expo
 
 ## Metric computation location
 
-A deliberate design decision was made to compute all derived metrics (daily aggregates, summary statistics, and the review-correctness proxy) on the server side within the application's analytics service, rather than in the analysis script. The analysis script consumes these pre-computed values directly. This means:
+Derived metrics (daily aggregates, summary statistics, and the review-correctness proxy) are computed on the server side by the application's analytics service. The export carries both these values and the raw rows they were computed from. The progress page and the export therefore show values from the same implementation.
 
-- There is no risk of the analysis script computing a metric differently from the application.
+The analysis script does not take the exported summary as given. On load (`analysis/load_export.py`), it applies the research definitions in `analysis/metrics.py` to the raw `sessions` and `review_events` rows. These definitions are `loop_completed`, stage-level flashcards completed, and the main-queue-only retention proxy and mean inter-review interval. It then recomputes the summary from those rows. Rates are ratios of counts summed across participants, never averages of per-participant rates. The exported summary is kept, as `exported_summary`, for comparison only. This means:
+
+- The completion and retention-proxy definitions are implemented twice, in `lib/analytics/service.ts` and in `analysis/metrics.py`. A change to one must be made to the other, and both test suites should be run.
+- Exports stamped `dissertation-metrics-v1` were made before the definitions were corrected on 2026-11-02. They are still analysed under the corrected definitions, because every column the rules need is in the raw datasets.
 - The analysis script does not need access to the database or any application secrets.
-- The same metric values that the user sees on the progress page during the study are the values that appear in the evaluation.
+- For a single-participant `dissertation-metrics-v2` export, the recomputed completion and retention-proxy values should equal those in `exported_summary`, and so those on the progress page. A difference means the two implementations have diverged.
 
-The analysis script does perform its own data quality checks on the exported data, but it does not re-derive any metric that the application already computes.
+The analysis script also performs its own data quality checks on the exported data.

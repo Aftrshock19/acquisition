@@ -21,7 +21,7 @@ The canonical machine-readable source of truth is
 | **Review card** | A flashcard attempt for a previously introduced word returning for spaced review (`queue_kind='review'`). |
 | **Session date** | The calendar date in the configured app time zone (default `Europe/London`) to which a daily session belongs. |
 | **Started session** | A daily session where `started_at IS NOT NULL`, indicating the user opened and interacted with the session. Auto-created sessions that were never opened are excluded. |
-| **Completed session** | A daily session where `completed=true`, meaning all assigned stages were finished. |
+| **Completed session** | A daily session where `loop_completed` is true: `completed_at IS NOT NULL OR (reading_done AND listening_done AND (flashcards_completed_at IS NOT NULL OR flashcard_attempts_count >= assigned_flashcard_count))`. The raw `completed` flag is not used, because "Do more flashcards" resets it and pilot rows with retries kept it `false` after the loop was finished. Limitation: during the pilot, raising the daily target in Settings on a finished day cleared `completed_at` and `flashcards_completed_at` and raised the target, so such a day counts only if the raised target was then reached. |
 | **Stage** | One phase of the daily learning loop: flashcards, reading, listening, complete. |
 | **Logged active time** | The sum of client-recorded time components. Does not include idle time, navigation time, or abandoned views. |
 
@@ -31,12 +31,12 @@ The canonical machine-readable source of truth is
 
 ### 1. Daily session completion rate
 
-- **Definition:** Proportion of started sessions that reached the completed state.
-- **Numerator:** `count(daily_sessions WHERE completed = true)`
+- **Definition:** Proportion of started sessions in which the daily loop was completed.
+- **Numerator:** `count(daily_sessions WHERE loop_completed)`, with `loop_completed` as defined under Terminology.
 - **Denominator:** `count(daily_sessions WHERE started_at IS NOT NULL)`
 - **Source:** `daily_sessions`
 - **Limitations:** Auto-created sessions with no user interaction are excluded from the denominator. This means the rate reflects engagement among users who actively opened a session, not among all potential session slots.
-- **Wording rationale:** Using "started" rather than "created" prevents inflating the denominator with sessions that were never seen by the user.
+- **Wording rationale:** Using "started" rather than "created" prevents inflating the denominator with sessions that were never seen by the user. Using `loop_completed` rather than `completed = true` avoids under-counting the most active participants (those with retries, or who did extra flashcards after finishing). Exports with `format_version` `dissertation-metrics-v1` used `completed = true`.
 
 ### 2. Flashcard attempt accuracy (all queues)
 
@@ -115,18 +115,18 @@ The canonical machine-readable source of truth is
 
 ### 13. Review-card correctness (retention proxy)
 
-- **Definition:** Proportion of correct attempts among review-card attempts (`queue_kind='review'`), used as a behavioural proxy for retention.
-- **Numerator:** `count(review_events WHERE queue_kind='review' AND correct = true)`
-- **Denominator:** `count(review_events WHERE queue_kind='review')`
+- **Definition:** Proportion of correct attempts among main-queue review-card attempts (`queue_kind='review'` and `queue_source='main'`), used as a behavioural proxy for retention. Same-session retries are excluded.
+- **Numerator:** `count(review_events WHERE queue_kind='review' AND queue_source='main' AND correct = true)`
+- **Denominator:** `count(review_events WHERE queue_kind='review' AND queue_source='main')`
 - **Source:** `review_events`
-- **Limitations:** This is a behavioural proxy derived from in-app review correctness. It does not measure recall outside the app, transfer to naturalistic contexts, or long-term retention beyond the SRS schedule. The proxy assumes that higher review correctness correlates with better retention, which is plausible but unvalidated for this specific implementation.
+- **Limitations:** This is a behavioural proxy derived from in-app review correctness. Retries are excluded because they come minutes after a miss and reflect short-term memory of the answer just shown; exports with `format_version` `dissertation-metrics-v1` included them. It does not measure recall outside the app, transfer to naturalistic contexts, or long-term retention beyond the SRS schedule. The proxy assumes that higher review correctness correlates with better retention, which is plausible but unvalidated for this specific implementation.
 - **Wording rationale:** Changed from "review retention proxy accuracy" to "review-card correctness (retention proxy)" to foreground what is actually measured (correctness) and relegate the interpretive claim (retention) to a parenthetical qualifier.
 
 ### 14. Sessions reaching each stage milestone
 
-- **Definition:** Count of sessions that reached each milestone: started, flashcards completed, reading completed, listening completed, fully completed.
+- **Definition:** Count of sessions that reached each milestone: started (`started_at IS NOT NULL`), flashcards completed (`flashcards_completed_at IS NOT NULL OR flashcard_attempts_count >= assigned_flashcard_count`), reading completed (`reading_done`), listening completed (`listening_done` with a listening asset), fully completed (`loop_completed`).
 - **Source:** `daily_sessions`
-- **Limitations:** Listening milestone is only counted for sessions where a listening asset was assigned.
+- **Limitations:** Listening milestone is only counted for sessions where a listening asset was assigned. During the pilot, "Do more flashcards" cleared `flashcards_completed_at` and raised the target, so an extended day left unfinished counts as fully completed but not as flashcards completed.
 
 ### 15. Stage drop-off
 
@@ -147,14 +147,14 @@ The canonical machine-readable source of truth is
 | Metric | Definition |
 |---|---|
 | Total sessions with recorded start | `count(daily_sessions WHERE started_at IS NOT NULL)` in the selected range |
-| Total sessions completed | `count(daily_sessions WHERE completed = true)` in the selected range |
+| Total sessions completed | `count(daily_sessions WHERE loop_completed)` in the selected range |
 | Total flashcard attempts | `count(review_events)` in the selected range |
 | Total retry-queue attempts | `count(review_events WHERE queue_source='retry')` in the selected range |
 | Total reader-saved words | `count(user_deck_words WHERE added_via='reader')` in the selected range |
 | Total reading stage completions | `count(daily_sessions WHERE reading_done = true)` in the selected range |
 | Total listening stage completions | `count(daily_sessions WHERE listening_done = true)` in the selected range |
 | Total logged active time | Sum of `total_time_seconds` across all daily aggregates in the selected range |
-| Mean inter-review interval | Mean of `delta_hours` across review-card attempts in the selected range |
+| Mean inter-review interval | Mean of `delta_hours` across main-queue review-card attempts (`queue_kind='review' AND queue_source='main'`, retries excluded) in the selected range |
 
 ---
 

@@ -12,6 +12,7 @@ import {
 } from '@/lib/settings/mcqQuestionFormats';
 import { recommendSettings } from '@/lib/settings/recommendSettings';
 import { getTodaySessionDate } from '@/lib/loop/dailySessions';
+import { getFlashcardAttemptsCount } from '@/lib/loop/dailySessionStage';
 import type { UserSettingsRow } from '@/lib/settings/types';
 import { revalidatePath } from 'next/cache';
 
@@ -104,7 +105,7 @@ export async function updateUserSettingsAction(
       const { data: todayRow, error: todayRowError } = await supabase
         .from('daily_sessions')
         .select(
-          'flashcard_completed_count, recommended_target_at_creation, session_date, assigned_flashcard_count, effective_daily_target_mode',
+          'flashcard_attempts_count, flashcard_completed_count, recommended_target_at_creation, session_date, assigned_flashcard_count, effective_daily_target_mode',
         )
         .eq('user_id', user.id)
         .eq('session_date', sessionDate)
@@ -125,8 +126,14 @@ export async function updateUserSettingsAction(
         const currentLimit = (currentSettings as { manual_daily_card_limit: number | null })
           .manual_daily_card_limit;
 
-        const completedCount = (todayRow as { flashcard_completed_count: number | null })
-          .flashcard_completed_count ?? 0;
+        // Attempts (main + retry), the unit record_review's stage rule counts
+        // against assigned_flashcard_count.
+        const completedCount = getFlashcardAttemptsCount(
+          todayRow as {
+            flashcard_attempts_count: number | null;
+            flashcard_completed_count: number | null;
+          },
+        );
         const snapshotted = (todayRow as { recommended_target_at_creation: number | null })
           .recommended_target_at_creation;
         const assignedCount = (todayRow as { assigned_flashcard_count: number | null })
@@ -250,17 +257,18 @@ export async function updateUserSettingsAction(
       assigned_flashcard_count: pendingTargetUpdate.newTarget,
     };
 
-    // Raising the target above current completed count re-opens the flashcard
-    // phase. Without resetting stage and flashcards_completed_at, the page
-    // continues to render the 'Reading is next' gate using the stale stage
-    // column and the user cannot resume flashcards.
+    // Raising the target above today's attempts re-opens the flashcard phase.
+    // Without resetting stage (and clearing any "Continue to reading" skip,
+    // which the stage rule honours), the page continues to render the
+    // 'Reading is next' gate and the user cannot resume flashcards.
+    // flashcards_completed_at and completed_at are first-reached timestamps
+    // and are kept; only stage/completed step back for routing.
     const willReopenFlashcards =
       pendingTargetUpdate.newTarget > pendingTargetUpdate.completedCount;
     if (willReopenFlashcards) {
       updatePayload.stage = 'flashcards';
-      updatePayload.flashcards_completed_at = null;
+      updatePayload.flashcards_skipped_at = null;
       updatePayload.completed = false;
-      updatePayload.completed_at = null;
     }
 
     const { error: targetUpdateError } = await supabase

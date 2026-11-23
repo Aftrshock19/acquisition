@@ -47,7 +47,13 @@ export function getConsistencyIssues(
 
   const impossibleSessionStates = bundle.sessions.flatMap((session) => {
     const reasons: string[] = [];
-    if (session.stage === "flashcards" && (session.reading_done || session.listening_done)) {
+    // "Do more flashcards" after a completed loop legitimately returns to
+    // stage='flashcards' with reading/listening done; completed_at marks it.
+    if (
+      session.stage === "flashcards" &&
+      (session.reading_done || session.listening_done) &&
+      !session.completed_at
+    ) {
       reasons.push("stage is flashcards after later-stage completion");
     }
     if (session.stage === "reading" && session.listening_done && !session.reading_done) {

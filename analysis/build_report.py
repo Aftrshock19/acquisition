@@ -64,12 +64,13 @@ plt.rcParams.update({
 # Main
 # ---------------------------------------------------------------------------
 
-def main() -> None:
-    if len(sys.argv) < 2:
+def main(argv: list[str] | None = None) -> None:
+    argv = sys.argv[1:] if argv is None else argv
+    if len(argv) < 1:
         print("Usage: python build_report.py <path-to-export.json>")
         sys.exit(1)
 
-    export_path = Path(sys.argv[1])
+    export_path = Path(argv[0])
     bundle = load_bundle(export_path)
 
     # Validate
@@ -101,9 +102,11 @@ def main() -> None:
 
     # For cohort exports, aggregate per-date across participants so that the
     # existing plotting functions work without modification.
+    participant_days = None
     if bundle.is_cohort and "anonymous_user_id" in da.columns:
         # Save per-participant data for CSV export
         _write_per_participant_table(da)
+        participant_days = da
         da = _aggregate_cohort_daily(da)
 
     # Convert session_date to proper datetime for plotting
@@ -139,7 +142,7 @@ def main() -> None:
     _write_summary(bundle, da, warnings)
 
     # Chapter support summary with actual values filled in
-    _write_chapter_support_summary(bundle, da, warnings)
+    _write_chapter_support_summary(bundle, da, warnings, participant_days)
 
     print(f"\nDone. Figures saved to {FIGURES_DIR}/")
     print(f"Tables and summary saved to {OUTPUT_DIR}/")
@@ -153,11 +156,20 @@ def _aggregate_cohort_daily(da: pd.DataFrame) -> pd.DataFrame:
     """Aggregate per-participant daily rows into cohort-level daily totals.
 
     Sum-able columns are summed; rate columns are recomputed from the
-    aggregated numerators/denominators.
+    aggregated numerators/denominators (the count columns added by
+    metrics.annotate_daily_aggregates), never by averaging rates.
     """
+    da = da.copy()
+    # Attempts on days with a defined accuracy (i.e. with raw review events),
+    # so the accuracy denominator matches its numerator.
+    scored = da["flashcard_accuracy"].notna()
+    da["_scored_attempts"] = da["flashcard_attempts_count"].where(scored, 0)
+    da["_scored_correct"] = da["flashcard_correct_count"].where(scored, 0)
+
     sum_cols = [
         "session_started",
         "session_completed",
+        "loop_completed",
         "assigned_flashcard_count",
         "assigned_new_words_count",
         "assigned_review_cards_count",
@@ -175,6 +187,11 @@ def _aggregate_cohort_daily(da: pd.DataFrame) -> pd.DataFrame:
         "total_time_seconds",
         "workload_assigned_units",
         "workload_completed_units",
+        "flashcard_correct_count",
+        "review_proxy_attempts",
+        "review_proxy_correct",
+        "_scored_attempts",
+        "_scored_correct",
     ]
     # Only include columns that exist
     available_sum = [c for c in sum_cols if c in da.columns]
@@ -184,26 +201,16 @@ def _aggregate_cohort_daily(da: pd.DataFrame) -> pd.DataFrame:
         if da[col].dtype == bool:
             da[col] = da[col].astype(int)
 
-    agg = da.groupby("session_date", as_index=False)[available_sum].sum()
+    agg = da.groupby("session_date")[available_sum].sum()
 
-    # Recompute rate columns from totals
-    agg["flashcard_accuracy"] = agg.apply(
-        lambda r: None if r["flashcard_attempts_count"] == 0 else None, axis=1
-    )
-    # We need correct counts — not available after aggregation, so use a
-    # weighted average from the per-participant data
-    correct_by_date = (
-        da.assign(
-            _correct=da["flashcard_accuracy"].fillna(0) * da["flashcard_attempts_count"]
-        )
-        .groupby("session_date")["_correct"]
-        .sum()
-    )
-    agg = agg.set_index("session_date")
+    # Recompute rate columns from summed counts
     agg["flashcard_accuracy"] = (
-        correct_by_date / agg["flashcard_attempts_count"].replace(0, float("nan"))
+        agg["_scored_correct"] / agg["_scored_attempts"].where(agg["_scored_attempts"] > 0)
     )
-    agg["review_correctness_proxy"] = None  # Cannot recompute without raw review events
+    agg["review_correctness_proxy"] = (
+        agg["review_proxy_correct"] / agg["review_proxy_attempts"].where(agg["review_proxy_attempts"] > 0)
+    )
+    agg = agg.drop(columns=["_scored_attempts", "_scored_correct"])
     agg["days_active_flag"] = (
         (agg["flashcard_attempts_count"] > 0)
         | (agg["reader_saved_words_count"] > 0)
@@ -235,7 +242,8 @@ def _write_per_participant_table(da: pd.DataFrame) -> None:
             "total_days": len(group),
             "active_days": len(active_days),
             "total_sessions_started": int(group["session_started"].sum()),
-            "total_sessions_completed": int(group["session_completed"].sum()),
+            # loop_completed, not the raw completed flag (see metrics.py)
+            "total_sessions_completed": int(group["loop_completed"].sum()),
             "total_flashcard_attempts": int(group["flashcard_attempts_count"].sum()),
             "total_time_seconds": int(group["total_time_seconds"].sum()),
             "total_reader_saved_words": int(group["reader_saved_words_count"].sum()),
@@ -258,12 +266,12 @@ def _plot_sessions_started_vs_completed(da: pd.DataFrame) -> None:
         label="Sessions with recorded start", alpha=0.7, color="#4A90D9",
     )
     ax.bar(
-        da["date"], da["session_completed"].astype(int),
-        label="Sessions completed", alpha=0.9, color="#2E5A88",
+        da["date"], da["loop_completed"].astype(int),
+        label="Sessions completed (loop_completed)", alpha=0.9, color="#2E5A88",
     )
     ax.set_title("Daily sessions: started vs. completed")
     ax.set_xlabel("Session date")
-    ax.set_ylabel("Count (0 or 1 per day)")
+    ax.set_ylabel("Sessions")
     ax.legend()
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%d %b"))
     ax.xaxis.set_major_locator(mdates.AutoDateLocator())
@@ -274,13 +282,16 @@ def _plot_sessions_started_vs_completed(da: pd.DataFrame) -> None:
 
 
 def _plot_session_completion_rate(da: pd.DataFrame) -> None:
-    started = da[da["session_started"]].copy()
+    # session_started is a bool per day for a single user but a per-day count
+    # after cohort aggregation, so compare numerically (a bare integer Series
+    # used as a mask is read as column labels and raises KeyError).
+    started = da[da["session_started"].astype(int) > 0].copy()
     if started.empty:
         return
     # Cumulative completion rate
     started = started.sort_values("date")
-    started["cum_started"] = range(1, len(started) + 1)
-    started["cum_completed"] = started["session_completed"].astype(int).cumsum()
+    started["cum_started"] = started["session_started"].astype(int).cumsum()
+    started["cum_completed"] = started["loop_completed"].astype(int).cumsum()
     started["cum_rate"] = started["cum_completed"] / started["cum_started"]
 
     fig, ax = plt.subplots(figsize=FIGURE_SIZE)
@@ -538,7 +549,7 @@ def _write_summary_metrics_table(bundle: ExportBundle, da: pd.DataFrame) -> None
         ("Sessions with recorded start", str(total_started)),
         ("Sessions completed", str(total_completed)),
         ("Session completion rate", _fmt_pct(completion_rate)),
-        ("Days with recorded activity", str(s.get("days_active", 0))),
+        (_days_active_label(bundle), str(s.get("days_active", 0))),
         ("Total flashcard attempts", str(s.get("total_flashcard_attempts", 0))),
         ("Total retry-queue attempts", str(s.get("total_flashcard_retries", 0))),
         ("Flashcard attempt accuracy (all queues)", _fmt_pct(accuracy)),
@@ -566,7 +577,7 @@ def _write_summary_metrics_table(bundle: ExportBundle, da: pd.DataFrame) -> None
 def _write_daily_aggregates_table(da: pd.DataFrame) -> None:
     """Write the daily aggregates as a CSV for appendix use."""
     export_cols = [
-        "session_date", "session_started", "session_completed",
+        "session_date", "session_started", "session_completed", "loop_completed",
         "assigned_flashcard_count", "flashcard_completed_count",
         "flashcard_new_completed_count", "flashcard_review_completed_count",
         "flashcard_attempts_count", "flashcard_retry_count",
@@ -585,7 +596,15 @@ def _write_metric_definitions_table(bundle: ExportBundle) -> None:
     if not defs:
         return
 
-    md_lines = [
+    md_lines = []
+    if bundle.meta.get("format_version") == "dissertation-metrics-v1":
+        md_lines += [
+            "> These definitions are as exported (dissertation-metrics-v1). The report "
+            "recomputes session completion with loop_completed and the retention proxy "
+            "from main-queue review cards only; see analysis/README.md.",
+            "",
+        ]
+    md_lines += [
         "| ID | Label | Description | Limitations |",
         "|---|---|---|---|",
     ]
@@ -604,6 +623,20 @@ def _write_metric_definitions_table(bundle: ExportBundle) -> None:
 
 def _check_data_quality(bundle: ExportBundle, da: pd.DataFrame) -> list[str]:
     warnings: list[str] = []
+
+    # Sessions where the raw completed flag disagrees with loop_completed
+    # (flag reset by "Do more flashcards", or stuck at the flashcard stage
+    # because the server counted only first attempts).
+    sessions = bundle.sessions
+    if not sessions.empty and {"completed", "loop_completed"} <= set(sessions.columns):
+        raw = sessions["completed"].eq(True)
+        loop = sessions["loop_completed"].eq(True)
+        n_loop_only = int((loop & ~raw).sum())
+        if n_loop_only > 0:
+            warnings.append(
+                f"{n_loop_only} session(s) count as completed (loop_completed) but have "
+                "completed=false; metrics based on the raw completed flag would under-count them."
+            )
 
     # Check for days with attempts > assigned
     if not da.empty:
@@ -654,7 +687,7 @@ def _write_summary(bundle: ExportBundle, da: pd.DataFrame, warnings: list[str]) 
         f"- Sessions with recorded start: {s.get('total_sessions_started', 0)}",
         f"- Sessions completed: {s.get('total_sessions_completed', 0)}",
         f"- Session completion rate: {_fmt_pct(s.get('daily_session_completion_rate'))}",
-        f"- Days with recorded activity: {s.get('days_active', 0)}",
+        f"- {_days_active_label(bundle)}: {s.get('days_active', 0)}",
         f"- Total flashcard attempts: {s.get('total_flashcard_attempts', 0)}",
         f"- Total retry-queue attempts: {s.get('total_flashcard_retries', 0)}",
         f"- Flashcard attempt accuracy (all queues): {_fmt_pct(s.get('flashcard_accuracy'))}",
@@ -667,7 +700,9 @@ def _write_summary(bundle: ExportBundle, da: pd.DataFrame, warnings: list[str]) 
         "",
         "## Proxy and measurement notes",
         "",
-        '- "Review-card correctness" is a behavioural proxy for retention derived from in-app review accuracy. It is not a direct measure of learning outcomes or long-term retention.',
+        '- "Sessions completed" uses loop_completed: completed_at was set, or reading and listening are done and the flashcard target was met (flashcards_completed_at set, or flashcard_attempts_count >= assigned_flashcard_count, retries included). The raw completed flag is not used.',
+        f"- Completion and retention-proxy metrics are recomputed from the raw rows at analysis time (export format: {bundle.meta.get('format_version', 'unknown')}).",
+        '- "Review-card correctness" is a behavioural proxy for retention derived from in-app review accuracy on main-queue review cards (queue_kind=\'review\' AND queue_source=\'main\'); same-session retries are excluded, as they are from the mean inter-review interval. It is not a direct measure of learning outcomes or long-term retention.',
         '- "Logged active time" sums submitted-attempt time, client-recorded reading time, and client-recorded listening time. It excludes idle time, navigation, and abandoned views.',
         '- "Flashcard attempt accuracy" includes both main-queue and retry-queue attempts in the denominator.',
         '- Reading and listening completions are binary flags per session, not measures of comprehension.',
@@ -738,13 +773,20 @@ def _write_summary(bundle: ExportBundle, da: pd.DataFrame, warnings: list[str]) 
 # ---------------------------------------------------------------------------
 
 def _write_chapter_support_summary(
-    bundle: ExportBundle, da: pd.DataFrame, warnings: list[str]
+    bundle: ExportBundle,
+    da: pd.DataFrame,
+    warnings: list[str],
+    participant_days: pd.DataFrame | None = None,
 ) -> None:
     """
     Write a lightly templated chapter support file that fills in actual
     metric values from the export, leaving only figure/table numbers as
     placeholders.  This sits between the raw summary.md and the full
     results scaffold in docs/.
+
+    For a cohort, ``da`` has one row per calendar date summed over
+    participants, so active-day counts and per-day means are taken over
+    ``participant_days`` (one row per participant per date) instead.
     """
     s = bundle.summary
     rp = s.get("review_retention_proxy", {})
@@ -773,15 +815,28 @@ def _write_chapter_support_summary(
     rd_time_min = _fmt_num(da["reading_time_seconds"].sum() / 60.0) if not da.empty else "N/A"
     ls_time_min = _fmt_num(da["listening_time_seconds"].sum() / 60.0) if not da.empty else "N/A"
 
+    # Day counts and per-day means: participant-days for a cohort
+    cohort = participant_days is not None
+    days = participant_days if cohort else da
+    unit = "participant-day" if cohort else "day"
+    if cohort:
+        n_participants = participant_days["anonymous_user_id"].nunique()
+        activity = (
+            f"Across the {n_participants} participants, there was recorded activity "
+            f"on {n_active} of {len(days)} participant-days."
+        )
+    else:
+        activity = f"The user was active on {n_active} of {n_days} days."
+
     # Active-day averages
-    active_days = da[da["days_active_flag"]].copy() if not da.empty else pd.DataFrame()
+    active_days = days[days["days_active_flag"].eq(True)].copy() if not days.empty else pd.DataFrame()
     n_active_days = len(active_days)
     avg_time = _fmt_num(active_days["total_time_seconds"].mean() / 60.0) if n_active_days > 0 else "N/A"
     avg_saved = _fmt_num(active_days["reader_saved_words_count"].mean()) if n_active_days > 0 else "N/A"
 
     # Reading/listening days
-    n_reading_days = int(da["reading_completed"].sum()) if not da.empty else 0
-    n_listening_days = int(da["listening_completed"].sum()) if not da.empty else 0
+    n_reading_days = int(days["reading_completed"].sum()) if not days.empty else 0
+    n_listening_days = int(days["listening_completed"].sum()) if not days.empty else 0
 
     warn_section = ""
     if warnings:
@@ -814,8 +869,7 @@ dissertation's numbering.
 
 The evaluation covers **{date_from}** to **{date_to}** ({n_days} calendar days).
 During this period, {n_started} daily sessions were opened (had a recorded start)
-and {n_completed} were completed through all assigned stages. The user was active
-on {n_active} of {n_days} days.
+and {n_completed} were completed through all assigned stages. {activity}
 
 ## Session completion
 
@@ -845,13 +899,13 @@ Drop-off:
 
 ## Reading and listening
 
-- Reading stage completions: **{total_reading}** (on {n_reading_days} days)
-- Listening stage completions: **{total_listening}** (on {n_listening_days} days)
+- Reading stage completions: **{total_reading}** (on {n_reading_days} {unit}s)
+- Listening stage completions: **{total_listening}** (on {n_listening_days} {unit}s)
 
 ## Saved words
 
 - Total reader-saved words: **{total_saved}**
-- Mean saved words per active day: **{avg_saved}**
+- Mean saved words per active {unit}: **{avg_saved}**
 
 ## Logged active time
 
@@ -859,7 +913,7 @@ Drop-off:
 - Flashcard time: {fc_time_min} minutes
 - Reading time: {rd_time_min} minutes
 - Listening time: {ls_time_min} minutes
-- Mean per active day: **{avg_time} minutes**
+- Mean per active {unit}: **{avg_time} minutes**
 {warn_section}
 ## Proxy and measurement reminders
 
@@ -880,6 +934,13 @@ Drop-off:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _days_active_label(bundle: ExportBundle) -> str:
+    # summary["days_active"] counts participant-days for a cohort.
+    if bundle.is_cohort:
+        return "Participant-days with recorded activity"
+    return "Days with recorded activity"
+
 
 def _fmt_pct(value: float | None) -> str:
     if value is None or not isinstance(value, (int, float)):

@@ -100,6 +100,8 @@ export type DailySessionRow = {
   last_resumed_at: string | null;
   resume_count: number;
   flashcards_completed_at: string | null;
+  /** Set by "Continue to reading" when no more words are available; cleared by "Do more flashcards". */
+  flashcards_skipped_at?: string | null;
   reading_done: boolean;
   reading_text_id: string | null;
   reading_opened_at: string | null;
@@ -192,6 +194,8 @@ export type RecordReviewPayload = {
   msSpent: number;
   userAnswer: string;
   expected: string[];
+  /** session_date of the daily_sessions row the client loaded (YYYY-MM-DD). */
+  sessionDate?: string | null;
 };
 
 export type RecordExposurePayload = {
