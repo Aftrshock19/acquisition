@@ -248,7 +248,7 @@ export default async function TodayPage() {
             </Link>
           </div>
         ) : dailySession &&
-          dailySession.flashcard_completed_count >=
+          dailySession.flashcard_attempts_count >=
             effectiveSettings.dailyLimit ? (
           <PracticeCompleteScreen
             cardsPracticed={dailySession.flashcard_completed_count}
@@ -257,9 +257,10 @@ export default async function TodayPage() {
             accuracy={null}
             timeOnTaskMs={computeDailySessionElapsedMs(dailySession)}
           />
-        ) : dailySession &&
-          dailySession.stage === "flashcards" &&
-          dailySession.flashcard_completed_count > 0 ? (
+        ) : dailySession && dailySession.stage === "flashcards" ? (
+          // Flashcards are still pending (attempts < target) but no cards are
+          // available. Offer the skip even at 0 practised: a manual target is
+          // stored in full, so without it an empty queue would be a dead end.
           <div className="app-card flex flex-col gap-4 p-8">
             <h2 className="text-xl font-semibold tracking-tight">
               No more words available

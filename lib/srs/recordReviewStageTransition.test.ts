@@ -8,15 +8,19 @@
  * Per the pre-push audit's PART 7 fallback, this file exercises the same
  * stage-transition logic that broke production by:
  *
- *   1. Mirroring the SQL `v_session_stage` CASE expression and the subsequent
- *      `v_session.completed` / `v_session.completed_at` updates as a pure TS
- *      function, then driving a fixture set that includes Daisy's exact
- *      mid-extend shape (assigned=21, completed_count incrementing through
- *      20 → 21 with `reading_done`/`listening_done` already true,
- *      `completed_at` preserved from initial completion).
- *   2. Reading the active record_review body out of the fix-drift migration
- *      and asserting the SQL CASE branches still end with `'completed'`,
+ *   1. Driving the shared TS stage rule (lib/loop/dailySessionStage.ts, which
+ *      mirrors the SQL `v_session_stage` CASE) plus the subsequent
+ *      `v_session.completed` / `completed_at` / `flashcards_completed_at`
+ *      updates through a fixture set that includes Daisy's exact mid-extend
+ *      shape (assigned=21, attempts incrementing through 20 → 21 with
+ *      `reading_done`/`listening_done` already true, `completed_at` preserved
+ *      from initial completion).
+ *   2. Reading the LIVE record_review body (the newest migration that creates
+ *      it) and asserting the SQL CASE branches still end with `'completed'`,
  *      not the legacy `'complete'`.
+ *
+ * Since 20261102120000 the stage rule counts flashcard ATTEMPTS (main +
+ * retry) and honours flashcards_skipped_at (contract A).
  *
  * If the SQL function or the TS mirror drift, both layers fail loudly. If the
  * SQL CASE flips back to `'complete'`, item (2) catches it; if anyone changes
@@ -29,40 +33,35 @@
  * test account are wired up. See the audit report for the full BLOCKED list.
  */
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-
-const FIX_DRIFT_PATH = resolve(
-  __dirname,
-  "../../supabase/migrations/20260428130000_fix_daily_sessions_stage_drift.sql",
-);
+import {
+  getDailySessionProgressState,
+  resolveDailySessionStage,
+} from "@/lib/loop/dailySessionStage";
+import { getLiveFunctionDefinition } from "./migrationSql.testSupport";
 
 // ---------------------------------------------------------------------------
-// Pure TS mirror of the SQL CASE inside record_review (post-fix).
-// Source of truth: `v_session_stage` block + completion-flag update in the
-// active 18-param record_review overload, supabase/migrations/20260428130000.
+// TS side of the record_review session transition. The stage rule is the
+// shared resolveDailySessionStage (parity with the SQL CASE is asserted in
+// sqlParity.test.ts); the timestamp updates mirror the SQL IF blocks.
 // ---------------------------------------------------------------------------
 
 type SessionShape = {
   flashcard_completed_count: number;
+  flashcard_attempts_count: number;
   assigned_flashcard_count: number;
+  flashcards_skipped_at: string | null;
   reading_done: boolean;
   listening_done: boolean;
   completed: boolean;
   completed_at: string | null;
+  flashcards_completed_at: string | null;
 };
 
 type SessionStage = "flashcards" | "reading" | "listening" | "completed";
 
-function resolveStage(s: Pick<
-  SessionShape,
-  "flashcard_completed_count" | "assigned_flashcard_count" | "reading_done" | "listening_done"
->): SessionStage {
-  if (s.flashcard_completed_count < s.assigned_flashcard_count) return "flashcards";
-  if (!s.reading_done) return "reading";
-  if (!s.listening_done) return "listening";
-  return "completed";
+function resolveStage(s: SessionShape): SessionStage {
+  return resolveDailySessionStage(getDailySessionProgressState(s));
 }
 
 function applyRecordReviewTransition(
@@ -73,10 +72,25 @@ function applyRecordReviewTransition(
   const completed = stage === "completed";
   const completedAt =
     completed && before.completed_at === null ? now : before.completed_at;
+  const flashcardsCompletedAt =
+    stage !== "flashcards" && before.flashcards_completed_at === null
+      ? now
+      : before.flashcards_completed_at;
   return {
     ...before,
     completed,
     completed_at: completedAt,
+    flashcards_completed_at: flashcardsCompletedAt,
+  };
+}
+
+/** One submitted answer as record_review counts it. */
+function answer(before: SessionShape, queueSource: "main" | "retry"): SessionShape {
+  return {
+    ...before,
+    flashcard_attempts_count: before.flashcard_attempts_count + 1,
+    flashcard_completed_count:
+      before.flashcard_completed_count + (queueSource === "main" ? 1 : 0),
   };
 }
 
@@ -88,15 +102,23 @@ const NOW = "2026-04-28T09:24:31.000Z";
 const ORIGINAL_COMPLETED_AT = "2026-04-28T09:17:04.562Z";
 
 function freshSession(overrides: Partial<SessionShape> = {}): SessionShape {
-  return {
+  const base: SessionShape = {
     flashcard_completed_count: 0,
+    flashcard_attempts_count: 0,
     assigned_flashcard_count: 10,
+    flashcards_skipped_at: null,
     reading_done: false,
     listening_done: false,
     completed: false,
     completed_at: null,
-    ...overrides,
+    flashcards_completed_at: null,
   };
+  const merged = { ...base, ...overrides };
+  // Attempts are main + retry, so never fewer than main-queue completions.
+  if (overrides.flashcard_attempts_count === undefined) {
+    merged.flashcard_attempts_count = merged.flashcard_completed_count;
+  }
+  return merged;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +126,7 @@ function freshSession(overrides: Partial<SessionShape> = {}): SessionShape {
 // ---------------------------------------------------------------------------
 
 describe("record_review stage CASE — TS mirror", () => {
-  it("returns 'flashcards' while assigned > completed (initial review)", () => {
+  it("returns 'flashcards' while assigned > attempts (initial review)", () => {
     expect(resolveStage(freshSession({ flashcard_completed_count: 0, assigned_flashcard_count: 10 })))
       .toBe("flashcards");
     expect(resolveStage(freshSession({ flashcard_completed_count: 5, assigned_flashcard_count: 10 })))
@@ -113,7 +135,7 @@ describe("record_review stage CASE — TS mirror", () => {
       .toBe("flashcards");
   });
 
-  it("transitions to 'reading' once assigned <= completed and reading_done=false", () => {
+  it("transitions to 'reading' once assigned <= attempts and reading_done=false", () => {
     expect(
       resolveStage(
         freshSession({
@@ -152,6 +174,32 @@ describe("record_review stage CASE — TS mirror", () => {
     ).toBe("completed");
   });
 
+  it("a day with mistakes leaves 'flashcards' once main + retry attempts reach the target", () => {
+    // 10 assigned, 3 mistakes retried: the client ends the session after the
+    // 10th submitted answer (7 main + 3 retry), so the server must too.
+    let s = freshSession({ assigned_flashcard_count: 10 });
+    for (let i = 0; i < 7; i += 1) s = applyRecordReviewTransition(answer(s, "main"), NOW);
+    for (let i = 0; i < 2; i += 1) s = applyRecordReviewTransition(answer(s, "retry"), NOW);
+    expect(resolveStage(s)).toBe("flashcards");
+    s = applyRecordReviewTransition(answer(s, "retry"), NOW);
+    expect(s.flashcard_completed_count).toBe(7);
+    expect(s.flashcard_attempts_count).toBe(10);
+    expect(resolveStage(s)).toBe("reading");
+    expect(s.flashcards_completed_at).toBe(NOW);
+  });
+
+  it("a persisted skip ends the flashcard stage below target", () => {
+    const skipped = freshSession({
+      flashcard_completed_count: 4,
+      assigned_flashcard_count: 50,
+      flashcards_skipped_at: "2026-04-28T09:00:00.000Z",
+    });
+    expect(resolveStage(skipped)).toBe("reading");
+    expect(resolveStage({ ...skipped, reading_done: true, listening_done: true })).toBe(
+      "completed",
+    );
+  });
+
   it("never returns the legacy 'complete' literal", () => {
     const cases: SessionShape[] = [
       freshSession(),
@@ -185,11 +233,14 @@ describe("record_review transition — Daisy-shaped mid-extend rows", () => {
   function daisyMidExtend(): SessionShape {
     return {
       flashcard_completed_count: 20,
+      flashcard_attempts_count: 20,
       assigned_flashcard_count: 21,
+      flashcards_skipped_at: null,
       reading_done: true,
       listening_done: true,
       completed: false,
       completed_at: ORIGINAL_COMPLETED_AT,
+      flashcards_completed_at: ORIGINAL_COMPLETED_AT,
     };
   }
 
@@ -201,6 +252,7 @@ describe("record_review transition — Daisy-shaped mid-extend rows", () => {
     const before: SessionShape = {
       ...daisyMidExtend(),
       flashcard_completed_count: 21, // simulate +1 from record_review
+      flashcard_attempts_count: 21,
     };
     const after = applyRecordReviewTransition(before, NOW);
     expect(after.flashcard_completed_count).toBe(21);
@@ -212,6 +264,7 @@ describe("record_review transition — Daisy-shaped mid-extend rows", () => {
     const before: SessionShape = {
       ...daisyMidExtend(),
       flashcard_completed_count: 21,
+      flashcard_attempts_count: 21,
     };
     const after = applyRecordReviewTransition(before, NOW);
     // The IF v_session.completed_at IS NULL THEN := v_now branch must NOT fire
@@ -230,6 +283,7 @@ describe("record_review transition — Daisy-shaped mid-extend rows", () => {
     const between: SessionShape = {
       ...before,
       flashcard_completed_count: 19,
+      flashcard_attempts_count: 19,
     };
     const after = applyRecordReviewTransition(between, NOW);
     expect(resolveStage(after)).toBe("flashcards");
@@ -255,7 +309,11 @@ describe("record_review transition — Daisy-shaped mid-extend rows", () => {
   it("Daisy-shaped row at 21/21 satisfies daily_sessions_completed_stage_check", () => {
     // The live invariant: (completed = false) OR (stage = 'completed').
     // After the final extra card, completed=true must coincide with stage='completed'.
-    const before: SessionShape = { ...daisyMidExtend(), flashcard_completed_count: 21 };
+    const before: SessionShape = {
+      ...daisyMidExtend(),
+      flashcard_completed_count: 21,
+      flashcard_attempts_count: 21,
+    };
     const after = applyRecordReviewTransition(before, NOW);
     const stage = resolveStage(after);
     const satisfies = after.completed === false || stage === "completed";
@@ -265,17 +323,12 @@ describe("record_review transition — Daisy-shaped mid-extend rows", () => {
 
 describe("record_review SQL body parity — migration source of truth", () => {
   // The TS mirror above is only as good as its agreement with the actual SQL.
-  // These checks read the migration file and confirm the CASE block in the
-  // active 18-param overload still ends with 'completed' and writes
-  // (v_session_stage = 'completed') for the completion flag.
+  // These checks read the live definition (newest migration creating
+  // record_review) and confirm the CASE block still ends with 'completed'
+  // and writes (v_session_stage = 'completed') for the completion flag.
 
   function readActiveOverloadBody(): string {
-    const sql = readFileSync(FIX_DRIFT_PATH, "utf8");
-    const start = sql.indexOf("CREATE OR REPLACE FUNCTION public.record_review(");
-    expect(start).toBeGreaterThan(-1);
-    const end = sql.indexOf("\n$$;", start);
-    expect(end).toBeGreaterThan(start);
-    return sql.slice(start, end);
+    return getLiveFunctionDefinition("record_review").definition;
   }
 
   it("active overload's CASE terminates with 'completed', not 'complete'", () => {

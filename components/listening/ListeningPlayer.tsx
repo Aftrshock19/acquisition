@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import {
   completeListeningStep,
@@ -82,17 +89,73 @@ export function ListeningPlayer({
   );
   const [audioError, setAudioError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [localCompleted, setLocalCompleted] = useState(initialCompletion.completed);
   const playbackStartedLoggedRef = useRef(false);
   const playStartedAtRef = useRef<number | null>(null);
   const accumulatedPlayMsRef = useRef(0);
-  const localCompletedRef = useRef(initialCompletion.completed);
-  const pendingRef = useRef(false);
+
+  // ── Derived state ───────────────────────────────────────────
+
+  const effectiveDuration =
+    duration > 0 ? duration : Math.max(0, asset.durationSeconds ?? 0);
+  const requiredListenSeconds =
+    effectiveDuration > 0 ? effectiveDuration * 0.9 : 30;
+  const thresholdMet = maxPositionSeconds >= requiredListenSeconds;
+  const transcriptBlocks = useMemo(
+    () => {
+      const source = asset.transcript ?? asset.text?.content;
+      return source
+        ? toReadingBlocks(source).map((block) => tokenize(block))
+        : [];
+    },
+    [asset.transcript, asset.text?.content],
+  );
+  const transcriptLang = asset.text?.lang ?? "es";
+
+  function getListeningTimeSeconds() {
+    const liveMs =
+      playStartedAtRef.current === null ? 0 : Date.now() - playStartedAtRef.current;
+    return getRoundedSeconds(accumulatedPlayMsRef.current + liveMs);
+  }
 
   // ── Side effects ────────────────────────────────────────────
 
   useEffect(() => {
     void markListeningOpened({ assetId: asset.id });
   }, [asset.id]);
+
+  // Called from the audio "ended" listener below, which is registered once
+  // per asset. As an effect event it reads the latest render's
+  // transcriptOpen, playbackRate, maxPositionSeconds, requiredListenSeconds
+  // and completion state, rather than the values captured at mount.
+  const autoCompleteOnEnd = useEffectEvent((finalTime: number) => {
+    if (localCompleted || pending) return;
+
+    startTransition(async () => {
+      setSubmitError(null);
+      const liveMs =
+        playStartedAtRef.current === null ? 0 : Date.now() - playStartedAtRef.current;
+      const listeningTimeSeconds = getRoundedSeconds(accumulatedPlayMsRef.current + liveMs);
+
+      const result = await completeListeningStep({
+        assetId: asset.id,
+        maxPositionSeconds: Math.max(maxPositionSeconds, finalTime),
+        requiredListenSeconds,
+        transcriptOpened: transcriptOpen,
+        playbackRate,
+        listeningTimeSeconds,
+      });
+
+      if (!result.ok) {
+        console.error("[ListeningPlayer] raw error", result.error);
+        setSubmitError(toSafeUserMessage(result.error, LISTENING_SAVE_FALLBACK));
+        return;
+      }
+
+      setLocalCompleted(true);
+      router.refresh();
+    });
+  });
 
   useEffect(() => {
     const audioElement = audioRef.current;
@@ -149,9 +212,7 @@ export function ListeningPlayer({
         Math.max(currentMax, audioElement.duration || 0),
       );
       // Auto-complete when the passage finishes playing
-      if (!localCompletedRef.current && !pendingRef.current) {
-        autoCompleteOnEnd(finalTime);
-      }
+      autoCompleteOnEnd(finalTime);
     };
 
     const handleError = () => {
@@ -191,30 +252,6 @@ export function ListeningPlayer({
     if (!audioElement) return;
     audioElement.playbackRate = playbackRate;
   }, [playbackRate]);
-
-  // ── Derived state ───────────────────────────────────────────
-
-  const effectiveDuration =
-    duration > 0 ? duration : Math.max(0, asset.durationSeconds ?? 0);
-  const requiredListenSeconds =
-    effectiveDuration > 0 ? effectiveDuration * 0.9 : 30;
-  const thresholdMet = maxPositionSeconds >= requiredListenSeconds;
-  const transcriptBlocks = useMemo(
-    () => {
-      const source = asset.transcript ?? asset.text?.content;
-      return source
-        ? toReadingBlocks(source).map((block) => tokenize(block))
-        : [];
-    },
-    [asset.transcript, asset.text?.content],
-  );
-  const transcriptLang = asset.text?.lang ?? "es";
-
-  function getListeningTimeSeconds() {
-    const liveMs =
-      playStartedAtRef.current === null ? 0 : Date.now() - playStartedAtRef.current;
-    return getRoundedSeconds(accumulatedPlayMsRef.current + liveMs);
-  }
 
   // ── Handlers ────────────────────────────────────────────────
 
@@ -281,33 +318,6 @@ export function ListeningPlayer({
     if (!audioElement.paused) return;
     void audioElement.play().catch(() => {
       setAudioError("Playback did not start. Try again once the file finishes loading.");
-    });
-  }
-
-  function autoCompleteOnEnd(finalTime: number) {
-    startTransition(async () => {
-      setSubmitError(null);
-      const liveMs =
-        playStartedAtRef.current === null ? 0 : Date.now() - playStartedAtRef.current;
-      const listeningTimeSeconds = getRoundedSeconds(accumulatedPlayMsRef.current + liveMs);
-
-      const result = await completeListeningStep({
-        assetId: asset.id,
-        maxPositionSeconds: Math.max(maxPositionSeconds, finalTime),
-        requiredListenSeconds,
-        transcriptOpened: transcriptOpen,
-        playbackRate,
-        listeningTimeSeconds,
-      });
-
-      if (!result.ok) {
-        console.error("[ListeningPlayer] raw error", result.error);
-        setSubmitError(toSafeUserMessage(result.error, LISTENING_SAVE_FALLBACK));
-        return;
-      }
-
-      setLocalCompleted(true);
-      router.refresh();
     });
   }
 
@@ -386,12 +396,6 @@ export function ListeningPlayer({
       router.push("/done");
     });
   }
-
-  // ── Derived state ───────────────────────────────────────────
-
-  const [localCompleted, setLocalCompleted] = useState(initialCompletion.completed);
-  localCompletedRef.current = localCompleted;
-  pendingRef.current = pending;
 
   return (
     <InteractiveTextProvider

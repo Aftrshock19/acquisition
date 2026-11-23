@@ -97,6 +97,16 @@ export type PlacementEstimate = {
 
 export type PlacementStageName = "coarse" | "refine" | "done";
 
+/**
+ * With DEFAULT_PLACEMENT_CONFIG and the default cold start (checkpoint 4),
+ * two of these never fire (verified by enumerating every answer path):
+ *   - floor_unresolved: an unresolved floor above a cleared floor always
+ *     forms a bracket of width ≤ precisionBracketWidth, so precision_reached
+ *     fires first.
+ *   - top_of_bank_reached: climbing out of floors 4–9 takes at least 4
+ *     items each (24) and clearing the top floor needs 5 more, so maxItems
+ *     (26) is hit first. topOfBankReached is therefore always false.
+ */
 export type PlacementStopReason =
   | "in_progress"
   | "precision_reached"
@@ -178,7 +188,12 @@ export type AdaptivePlacementEstimate = {
 };
 
 export type PlacementAlgorithmConfig = {
-  /** Don't stop before this many items, even if precision is reached. */
+  /**
+   * Don't stop before this many items, unless a definitive bracket (a
+   * cleared floor directly below a failed floor) already exists — see
+   * decideStop in adaptive.ts. That bypass needs only 4 correct + 3 wrong,
+   * so with the default config a run is 7–26 items, not 10–26.
+   */
   minItems: number;
   /** Hard cap on items administered. */
   maxItems: number;

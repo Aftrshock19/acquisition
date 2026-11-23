@@ -54,10 +54,10 @@ export default function AppendixH2SensitivityPage() {
           Exploratory engagement outcome associations
         </h1>
         <p className="text-sm text-neutral-600">
-          Spearman associations for the log-verified H1 subset, n = 9. P083 was
-          excluded from this log-based table because their engagement logs were
-          inconsistent with interview evidence of app use. These associations are
-          descriptive only.
+          Spearman associations for the log-verified H1 subset, n = 9. One
+          participant was excluded from this log-based table because their
+          engagement logs were inconsistent with interview evidence of app use.
+          These associations are descriptive only.
         </p>
       </div>
 

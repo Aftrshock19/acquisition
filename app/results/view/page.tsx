@@ -10,13 +10,9 @@ export const metadata: Metadata = {
 }
 
 const ALLOWED = new Set([
-  "h1_participant_scores.csv",
-  "engagement_profile.csv",
   "h1_anchor_form_summary.csv",
   "engagement_outcome_associations.csv",
-  "interest_enjoyment_ratings.csv",
   "corrected_imi.csv",
-  "usability_scores.csv",
 ])
 
 type Kind = "csv" | "pdf" | "png"

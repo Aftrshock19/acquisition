@@ -65,11 +65,12 @@ export type CalendarWeekSummary = CalendarRangeTotals & {
 };
 
 export function toCalendarDayMetrics(day: DailyAggregate): CalendarDayMetrics {
-  // Use loop_completed_at_present (i.e. completed_at IS NOT NULL) for the
-  // badge so that mid-extend rows — where completed=false is held only for
-  // /today routing — still display as "Loop complete". Fall back to the
-  // legacy session_completed boolean to preserve behaviour on rows from
-  // before completed_at was wired through analytics.
+  // session_completed is the research loop_completed (isLoopCompleted in
+  // lib/analytics/service.ts), which already includes completed_at IS NOT
+  // NULL, so mid-extend rows (completed=false held only for /today routing)
+  // and pilot days left stage='flashcards' by the retry-count bug both show
+  // as "Loop complete". loop_completed_at_present is therefore redundant
+  // here and kept only as a harmless guard.
   const loopCompleted =
     day.loop_completed_at_present || day.session_completed;
   const status: CalendarDayStatus = loopCompleted

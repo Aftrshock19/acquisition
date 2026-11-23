@@ -21,7 +21,18 @@ No measure in this evaluation makes a direct claim about vocabulary acquisition,
 
 ### Daily session completion rate
 
-The daily session completion rate is defined as the proportion of started sessions that reached the completed state. The numerator is the count of `daily_sessions` rows where `completed = true`. The denominator is the count of rows where `started_at IS NOT NULL`, meaning the user opened and interacted with the session at least once (e.g., by loading flashcards). Sessions that were created automatically by the system but never opened by the user are excluded from the denominator to avoid inflating the rate with unused session slots.
+The daily session completion rate is defined as the proportion of started sessions in which the daily loop was completed. The numerator is the count of `daily_sessions` rows where the loop was completed, defined as:
+
+```
+loop_completed := completed_at IS NOT NULL
+                  OR (reading_done AND listening_done
+                      AND (flashcards_completed_at IS NOT NULL
+                           OR flashcard_attempts_count >= assigned_flashcard_count))
+```
+
+In words, a loop counts as completed if a completion time is present on the row, or if the reading and listening stages are done and the flashcard target was met with retries counted towards it. The denominator is the count of rows where `started_at IS NOT NULL`, meaning the user opened and interacted with the session at least once (e.g., by loading flashcards). Sessions that were created automatically by the system but never opened by the user are excluded from the denominator to avoid inflating the rate with unused session slots.
+
+The stored `completed` flag is deliberately not used. Choosing "Do more flashcards" after finishing sets it back to `false`. During the pilot it also stayed `false` on finished days that included retries, because the server counted only first attempts towards the flashcard target while the application counted retries as well. Both cases affected the most active participants, so the raw flag would bias the rate against them. The `completed_at` timestamp is kept when extra flashcards are requested, and the rule above uses only columns recorded throughout the pilot. Two other actions during the pilot did clear `completed_at`: un-marking the listening step, and raising the daily flashcard target in Settings on a finished day. The Settings change also cleared `flashcards_completed_at` and raised `assigned_flashcard_count` while leaving reading and listening marked as done, so such a day counts as completed only if the participant went on to reach the raised target. The rate therefore still under-counts completion for participants who raised their target after finishing.
 
 **Source table:** `daily_sessions`
 
@@ -29,7 +40,7 @@ The daily session completion rate is defined as the proportion of started sessio
 
 ### Sessions with recorded start / sessions completed
 
-These are the raw counts behind the completion rate. "Sessions with recorded start" counts rows in `daily_sessions` where `started_at IS NOT NULL`. "Sessions completed" counts rows where `completed = true`. Both are scoped to the selected date range.
+These are the raw counts behind the completion rate. "Sessions with recorded start" counts rows in `daily_sessions` where `started_at IS NOT NULL`. "Sessions completed" counts rows where `loop_completed` (defined above) is true. Both are scoped to the selected date range.
 
 ---
 
@@ -91,7 +102,7 @@ This measure counts the number of daily sessions where the listening stage was m
 
 ### Sessions reaching each stage milestone
 
-This measure counts the number of sessions that reached each of the following milestones: started (the user opened the session), flashcards completed (the assigned flashcard workload was finished), reading completed (`reading_done = true`), listening completed (`listening_done = true` with a listening asset assigned), and fully completed (`completed = true`). The listening milestone is only counted for sessions where a listening asset was assigned.
+This measure counts the number of sessions that reached each of the following milestones: started (the user opened the session), flashcards completed (`flashcards_completed_at IS NOT NULL` or `flashcard_attempts_count >= assigned_flashcard_count`, so retries count towards the target), reading completed (`reading_done = true`), listening completed (`listening_done = true` with a listening asset assigned), and fully completed (`loop_completed`, as defined above). The listening milestone is only counted for sessions where a listening asset was assigned.
 
 **Source table:** `daily_sessions`
 
@@ -135,10 +146,14 @@ Logged active time is defined as the sum of three client-recorded time component
 
 ### Review-card correctness (retention proxy)
 
-Review-card correctness is defined as the proportion of correct attempts among review-card attempts (`queue_kind = 'review'`). This metric is used as a behavioural proxy for retention under the assumption that higher correctness on spaced-review cards correlates with better retention of the reviewed vocabulary. This assumption is plausible given the spaced repetition literature but has not been independently validated for this specific implementation.
+Review-card correctness is defined as the proportion of correct attempts among main-queue review-card attempts (`queue_kind = 'review'` and `queue_source = 'main'`). This metric is used as a behavioural proxy for retention under the assumption that higher correctness on spaced-review cards correlates with better retention of the reviewed vocabulary. This assumption is plausible given the spaced repetition literature but has not been independently validated for this specific implementation.
 
-**Numerator:** `count(review_events WHERE queue_kind='review' AND correct=true)`
-**Denominator:** `count(review_events WHERE queue_kind='review')`
+Same-session retries (`queue_source = 'retry'`) are excluded. A retry is shown a few minutes after the learner missed the card, so its correctness reflects short-term memory of the answer just seen rather than recall after a spaced interval.
+
+**Numerator:** `count(review_events WHERE queue_kind='review' AND queue_source='main' AND correct=true)`
+**Denominator:** `count(review_events WHERE queue_kind='review' AND queue_source='main')`
+
+The accompanying mean inter-review interval is the mean of `delta_hours` (hours since the word was last reviewed) over the same main-queue review-card attempts. Including retries would add intervals of a few minutes and pull the mean down.
 
 **Source table:** `review_events`
 

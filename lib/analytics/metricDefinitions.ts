@@ -1,4 +1,10 @@
-export const EXPORT_FORMAT_VERSION = "dissertation-metrics-v1";
+// v2 (2026-11-02): completion metrics use loop_completed instead of the raw
+// completed flag; retention proxy and mean delta_hours exclude retries;
+// loop_completed column added to daily_aggregates and sessions.
+export const EXPORT_FORMAT_VERSION = "dissertation-metrics-v2";
+
+const LOOP_COMPLETED_FORMULA =
+  "loop_completed := completed_at IS NOT NULL OR (reading_done AND listening_done AND (flashcards_completed_at IS NOT NULL OR flashcard_attempts_count >= assigned_flashcard_count))";
 
 export type MetricDefinitionId =
   | "daily_session_completion_rate"
@@ -34,11 +40,11 @@ export const METRIC_DEFINITIONS: Record<MetricDefinitionId, MetricDefinition> = 
     id: "daily_session_completion_rate",
     label: "Daily session completion rate",
     description:
-      "Proportion of daily sessions with a recorded started_at timestamp that subsequently reached the completed state (completed=true). Sessions created automatically but never interacted with (started_at IS NULL) are excluded from the denominator.",
-    formula: "count(daily_sessions where completed=true) / count(daily_sessions where started_at IS NOT NULL)",
+      "Proportion of daily sessions with a recorded started_at timestamp in which the daily loop was completed (loop_completed). A loop is completed if completed_at is set (\"Do more flashcards\" keeps it), or if reading and listening are done and the flashcard target was met counting retries. The raw completed flag is not used: it is reset by \"Do more flashcards\" and stayed false on pilot rows where the server counted only first attempts. Sessions created automatically but never interacted with (started_at IS NULL) are excluded from the denominator.",
+    formula: `count(daily_sessions where loop_completed) / count(daily_sessions where started_at IS NOT NULL), where ${LOOP_COMPLETED_FORMULA}`,
     sourceTables: ["daily_sessions"],
     limitations:
-      "The denominator excludes auto-created sessions that were never opened. A session counts as started when started_at is set on first flashcard interaction or explicit session open.",
+      "The denominator excludes auto-created sessions that were never opened. A session counts as started when started_at is set on first flashcard interaction or explicit session open. Exports with format_version dissertation-metrics-v1 used completed=true instead, which under-counts completion for sessions with retries or extra practice. During the pilot, raising the daily target in Settings on a finished day cleared completed_at and flashcards_completed_at and raised assigned_flashcard_count; such a day counts as completed only if attempts then reached the raised target, so completion is still under-counted for those days.",
   },
   flashcard_accuracy: {
     id: "flashcard_accuracy",
@@ -153,19 +159,19 @@ export const METRIC_DEFINITIONS: Record<MetricDefinitionId, MetricDefinition> = 
     id: "total_sessions_completed",
     label: "Total sessions completed",
     description:
-      "Count of daily sessions where completed=true within the selected date range. A session is completed when all assigned stages (flashcards, reading, and listening if assigned) are finished.",
-    formula: "count(daily_sessions where completed=true)",
+      "Count of daily sessions where the daily loop was completed (loop_completed) within the selected date range. A loop is completed once flashcards (retries count towards the target), reading, and listening are all finished; later extra practice does not undo it.",
+    formula: `count(daily_sessions where loop_completed), where ${LOOP_COMPLETED_FORMULA}`,
     sourceTables: ["daily_sessions"],
   },
   completion_by_stage: {
     id: "completion_by_stage",
     label: "Sessions reaching each stage milestone",
     description:
-      "Count of sessions that reached each stage milestone: started (started_at set), flashcards completed (flashcards_completed_at set or completed count >= assigned count), reading completed (reading_done=true), listening completed (listening_done=true with a listening asset assigned), and fully completed (completed=true).",
-    formula: "count of sessions meeting each milestone condition",
+      "Count of sessions that reached each stage milestone: started (started_at set), flashcards completed (flashcards_completed_at set or flashcard_attempts_count >= assigned_flashcard_count, so retries count towards the target), reading completed (reading_done=true), listening completed (listening_done=true with a listening asset assigned), and fully completed (loop_completed).",
+    formula: `count of sessions meeting each milestone condition; fully completed uses ${LOOP_COMPLETED_FORMULA}`,
     sourceTables: ["daily_sessions"],
     limitations:
-      "Listening milestone is only counted for sessions where a listening asset was assigned (listening_asset_id IS NOT NULL).",
+      "Listening milestone is only counted for sessions where a listening asset was assigned (listening_asset_id IS NOT NULL). Before the 2026-11 fix, \"Do more flashcards\" cleared flashcards_completed_at and raised assigned_flashcard_count, so an extended session left unfinished can count as fully completed (via completed_at) without counting as flashcards completed.",
   },
   stage_drop_off: {
     id: "stage_drop_off",
@@ -201,11 +207,11 @@ export const METRIC_DEFINITIONS: Record<MetricDefinitionId, MetricDefinition> = 
     id: "review_correctness_proxy",
     label: "Review-card correctness (retention proxy)",
     description:
-      "Proportion of correct attempts among review-card attempts (queue_kind='review'), used as a behavioural proxy for retention. This is not a direct measure of learning outcomes or long-term retention.",
+      "Proportion of correct attempts among main-queue review-card attempts (queue_kind='review' AND queue_source='main'), used as a behavioural proxy for retention. Same-session retries are excluded because they follow a miss minutes earlier. The summary's mean inter-review interval (average_delta_hours) uses the same events. This is not a direct measure of learning outcomes or long-term retention.",
     formula:
-      "count(review_events where queue_kind='review' AND correct=true) / count(review_events where queue_kind='review')",
+      "count(review_events where queue_kind='review' AND queue_source='main' AND correct=true) / count(review_events where queue_kind='review' AND queue_source='main'); average_delta_hours = mean(delta_hours) over the same events",
     sourceTables: ["review_events"],
     limitations:
-      "This is a behavioural proxy derived from in-app review correctness. It does not measure recall outside the app, transfer to naturalistic contexts, or long-term retention beyond the SRS schedule. The proxy assumes that higher review correctness correlates with better retention, which is plausible but unvalidated for this specific implementation.",
+      "This is a behavioural proxy derived from in-app review correctness. It does not measure recall outside the app, transfer to naturalistic contexts, or long-term retention beyond the SRS schedule. The proxy assumes that higher review correctness correlates with better retention, which is plausible but unvalidated for this specific implementation. Exports with format_version dissertation-metrics-v1 included same-session retry attempts and their minutes-long delta_hours, so their values are not comparable and should be recomputed.",
   },
 };

@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: Typecheck, test, lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit -p .
+
+      - name: Unit tests
+        run: npx vitest run
+
+      - name: Lint
+        run: npx eslint .
+
+      - name: Migration filenames
+        run: node scripts/check-migration-names.mjs
+
+      # `npm run perf:check` is deliberately not run here yet: five
+      # router.refresh() calls after optimistic completion updates
+      # (components/listening/ListeningPlayer.tsx, components/reader/ReaderSession.tsx)
+      # have no justification and still trip it. Add the step once they are
+      # resolved. `next build` is also omitted because it needs Supabase env.
+
+  analysis:
+    name: Analysis pipeline tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: analysis/requirements.txt
+
+      - run: pip install -r analysis/requirements.txt
+
+      # The test that needs the local-only dose_analysis_export_v3.csv skips
+      # itself when the file is absent, as it is in CI.
+      - name: Tests
+        run: python -m pytest analysis/tests -q

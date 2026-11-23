@@ -15,7 +15,9 @@ export function ReadingQuiz({ textId, questions, onComplete }: ReadingQuizProps)
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [score, setScore] = useState(0);
   const [finished, setFinished] = useState(false);
-  const questionShownAtRef = useRef<number>(Date.now());
+  // Lazy initializer reads the clock once, on first render.
+  const [mountedAt] = useState(Date.now);
+  const questionShownAtRef = useRef<number>(mountedAt);
 
   const question = questions[currentIndex];
 
@@ -50,6 +52,7 @@ export function ReadingQuiz({ textId, questions, onComplete }: ReadingQuizProps)
 
   function handleSelect(optionIndex: number) {
     if (isAnswered) return;
+    // eslint-disable-next-line react-hooks/purity -- click handler, not render; the compiler flags it because it is called from a closure created inside .map
     const responseMs = Date.now() - questionShownAtRef.current;
     setSelectedOption(optionIndex);
     if (optionIndex === question.correctOptionIndex) {

@@ -15,11 +15,14 @@
  *      drops both the rogue and the legacy stage check.
  *   4. No remaining migration installs a stage CHECK that contains the
  *      legacy 'complete' literal.
+ *   5. The LIVE record_review (newest migration that creates it, not the
+ *      fix-drift file) still writes the canonical 'completed' literal.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { getLiveFunctionDefinition } from "./migrationSql.testSupport";
 
 const MIGRATIONS_DIR = resolve(__dirname, "../../supabase/migrations");
 const FIX_DRIFT_FILE = "20260428130000_fix_daily_sessions_stage_drift.sql";
@@ -76,11 +79,10 @@ describe("daily_sessions stage canonical values", () => {
     );
   });
 
-  it("fix-drift migration recreates the active 18-param record_review with 'completed' terminal stage", () => {
-    const sql = readFixDriftMigration();
-    // Strip line comments so doc text mentioning "ELSE 'complete'" doesn't
-    // confuse the literal scan.
-    const sqlNoComments = sql.replace(/--[^\n]*\n/g, "\n");
+  it("live 18-param record_review (newest defining migration) uses the 'completed' terminal stage", () => {
+    // getLiveFunctionDefinition already strips line comments so doc text
+    // mentioning "ELSE 'complete'" doesn't confuse the literal scan.
+    const sqlNoComments = getLiveFunctionDefinition("record_review").definition;
 
     expect(sqlNoComments).toContain(
       "CREATE OR REPLACE FUNCTION public.record_review(",
@@ -95,15 +97,7 @@ describe("daily_sessions stage canonical values", () => {
     expect(sqlNoComments).toContain("(v_session_stage = 'completed')");
     // The new body must NOT contain the legacy literal as a stage value.
     // Strip 'completed' tokens so we can grep for an isolated 'complete'.
-    // The DO-block dynamic patch search/replace strings DO contain
-    // `ELSE 'complete'` and `(v_session_stage = 'complete')` literally —
-    // those are inputs to PostgreSQL's `replace()`. Strip the surrounding
-    // dollar-quoted wrappers (`$lit$...$lit$`) before checking the body.
-    const sqlNoDollarQuotes = sqlNoComments.replace(
-      /\$lit\$[^$]*\$lit\$/g,
-      "''",
-    );
-    const stripped = sqlNoDollarQuotes.replace(/'completed'/g, "'__OK__'");
+    const stripped = sqlNoComments.replace(/'completed'/g, "'__OK__'");
     expect(stripped).not.toMatch(/ELSE\s+'complete'/);
     expect(stripped).not.toMatch(/v_session_stage\s*=\s*'complete'/);
   });

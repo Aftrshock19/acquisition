@@ -1,15 +1,18 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { LoginForm } from "@/components/LoginForm";
+import { loginErrorMessage } from "@/lib/errors/userMessages";
 import { getSupabaseUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; confirmed?: string }>;
+  searchParams: Promise<{ error?: string | string[]; confirmed?: string }>;
 }) {
-  const { error: callbackError, confirmed } = await searchParams;
+  const { error: errorCode, confirmed } = await searchParams;
+  // ?error= carries a short code; arbitrary text is never rendered.
+  const callbackError = loginErrorMessage(errorCode);
   const supabase = await createSupabaseServerClient();
 
   if (!supabase) {

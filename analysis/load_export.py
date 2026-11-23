@@ -10,6 +10,11 @@ dataset.  Cohort exports (identified by a top-level ``participants`` array)
 are automatically merged into combined DataFrames with an
 ``anonymous_user_id`` column distinguishing participants.
 
+On load, the research definitions in metrics.py (loop_completed, main-queue
+retention proxy) are applied to the raw rows and ``summary`` is recomputed
+from them, so v1 exports are analysed with the same definitions as v2 ones.
+The summary as exported is kept in ``exported_summary``.
+
 Schema validation raises immediately if the export shape has changed.
 """
 
@@ -21,6 +26,8 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+from metrics import annotate_daily_aggregates, annotate_sessions, compute_summary
 
 # ---------------------------------------------------------------------------
 # Expected column sets — kept in sync with lib/analytics/export.ts
@@ -112,8 +119,18 @@ class ExportBundle:
         self.saved_words = saved_words
         self.reading_events = reading_events
         self.listening_events = listening_events
-        self.summary = summary
+        # Summary as written by the app (single-user: one dict; cohort:
+        # {participant_id: dict}).  Not used for reported metrics.
+        self.exported_summary = summary
         self.metric_definitions = metric_definitions
+
+        # Apply the research definitions to the raw rows and recompute the
+        # summary from them (counts are summed, never per-participant rates).
+        annotate_sessions(self.sessions)
+        annotate_daily_aggregates(self.daily_aggregates, self.sessions, self.review_events)
+        self.summary = compute_summary(
+            self.sessions, self.review_events, self.saved_words, self.daily_aggregates
+        )
 
     @property
     def date_range(self) -> tuple[str, str]:
@@ -255,11 +272,14 @@ def _load_cohort_bundle(raw: dict[str, Any]) -> ExportBundle:
         "range": raw.get("range", {}),
     }
 
-    # Build an aggregated summary across all participants
-    summary: dict[str, Any] = {}
-    per_participant_summaries = [p.get("summary", {}) for p in participants if p.get("summary")]
-    if per_participant_summaries:
-        summary = _merge_summaries(per_participant_summaries)
+    # The cohort summary is recomputed from the merged raw rows in
+    # ExportBundle (correct attempts are counted, not rebuilt from each
+    # participant's rate).  Keep the exported per-participant summaries.
+    summary = {
+        p.get("anonymous_user_id", "unknown"): p.get("summary", {})
+        for p in participants
+        if p.get("summary")
+    }
 
     return ExportBundle(
         meta=meta,
@@ -272,44 +292,6 @@ def _load_cohort_bundle(raw: dict[str, Any]) -> ExportBundle:
         summary=summary,
         metric_definitions=metric_definitions,
     )
-
-
-def _merge_summaries(summaries: list[dict[str, Any]]) -> dict[str, Any]:
-    """Merge per-participant summaries into cohort-level totals."""
-    merged: dict[str, Any] = {}
-    sum_keys = [
-        "total_sessions_started",
-        "total_sessions_completed",
-        "total_flashcard_attempts",
-        "total_flashcard_retries",
-        "total_reader_saved_words",
-        "total_reading_completions",
-        "total_listening_completions",
-        "total_time_seconds",
-        "days_active",
-    ]
-    for key in sum_keys:
-        merged[key] = sum(s.get(key, 0) for s in summaries)
-
-    # Compute cohort-level rates from totals
-    if merged["total_sessions_started"] > 0:
-        merged["daily_session_completion_rate"] = (
-            merged["total_sessions_completed"] / merged["total_sessions_started"]
-        )
-    else:
-        merged["daily_session_completion_rate"] = None
-
-    if merged["total_flashcard_attempts"] > 0:
-        correct = sum(
-            round(s.get("flashcard_accuracy", 0) or 0 * s.get("total_flashcard_attempts", 0))
-            for s in summaries
-        )
-        merged["flashcard_accuracy"] = correct / merged["total_flashcard_attempts"] if merged["total_flashcard_attempts"] else None
-    else:
-        merged["flashcard_accuracy"] = None
-
-    merged["participant_count"] = len(summaries)
-    return merged
 
 
 def _parse_session_dates(*dataframes: pd.DataFrame) -> None:

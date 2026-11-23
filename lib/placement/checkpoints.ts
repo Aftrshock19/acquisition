@@ -3,8 +3,8 @@
  *
  * Eleven log-spaced rank centers spanning the full Spanish frequency table
  * (~34k entries). The diagnostic hops between checkpoints rather than walking
- * row-by-row, so 8–24 items can place a learner anywhere from rank 250 to
- * the top of the bank.
+ * row-by-row, so 7–26 items (with DEFAULT_PLACEMENT_CONFIG) can place a
+ * learner anywhere from rank 250 to the top of the bank.
  *
  * Each checkpoint has a window the item picker uses when sampling a real
  * baseline_item_bank row near that checkpoint's center.

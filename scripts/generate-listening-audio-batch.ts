@@ -119,13 +119,14 @@ async function processOne(task: Task): Promise<void> {
     console.log(
       `  [ok]   ${name} — ${audioBytes.length} bytes, ${requestCount} TTS chunk${requestCount > 1 ? "s" : ""}`,
     );
-  } catch (err: any) {
-    stats.failed.push({ file: name, error: err?.message ?? String(err) });
+  } catch (err: unknown) {
+    const message = (err as Error | null | undefined)?.message ?? String(err);
+    stats.failed.push({ file: name, error: message });
     stats.processed++;
     try {
       if (fs.existsSync(task.tmpFile)) fs.unlinkSync(task.tmpFile);
     } catch {}
-    console.error(`  [fail] ${name} — ${err?.message ?? err}`);
+    console.error(`  [fail] ${name} — ${message}`);
   }
 }
 

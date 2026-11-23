@@ -27,17 +27,25 @@ function renderTyping(props: {
   );
 }
 
+// Text labels of every <button> in the markup. Asserting on these rather than
+// the raw HTML avoids false matches such as the input's spellCheck attribute.
+function buttonLabels(html: string): string[] {
+  return [...html.matchAll(/<button\b[^>]*>([^<]*)<\/button>/g)].map(
+    (match) => match[1],
+  );
+}
+
 describe("TypingFlashcardCard — Show answer flow", () => {
   it("shows 'Show answer' when input is empty and onReveal is provided", () => {
     const html = renderTyping({ value: "", onReveal: () => {} });
-    expect(html).toContain("Show answer");
+    expect(buttonLabels(html)).toEqual(["Show answer"]);
     expect(html).toContain("Press Enter to show answer");
-    expect(html).not.toContain("Check");
+    expect(html).not.toContain("Press Enter to check");
   });
 
   it("shows 'Check' when input has text", () => {
     const html = renderTyping({ value: "hola", onReveal: () => {} });
-    expect(html).toContain("Check");
+    expect(buttonLabels(html)).toEqual(["Check"]);
     expect(html).toContain("Press Enter to check");
     expect(html).not.toContain("Show answer");
   });

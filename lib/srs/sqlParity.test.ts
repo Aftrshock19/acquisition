@@ -6,8 +6,9 @@
  * for tests and documentation.  If the two diverge, scheduling bugs happen
  * silently at runtime while tests stay green.
  *
- * This test reads the authoritative SQL migration file and extracts key
- * numeric constants via regex, then asserts they match the TS exports.
+ * This test reads the LIVE definition of each SQL function (the last
+ * migration, by filename, that creates it) and extracts key numeric constants
+ * via regex, then asserts they match the TS exports.
  * It catches real drift — e.g., someone updates a difficulty delta in SQL
  * but forgets to update the TS reference.
  *
@@ -19,6 +20,12 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect } from "vitest";
+import { getAppSessionTimeZone } from "@/lib/analytics/date";
+import {
+  getDailySessionProgressState,
+  resolveDailySessionStage,
+} from "@/lib/loop/dailySessionStage";
+import { getLiveFunctionDefinition, MIGRATIONS_DIR } from "./migrationSql.testSupport";
 import {
   MAX_STABILITY_DAYS,
   DEFAULT_DIFFICULTY,
@@ -45,27 +52,34 @@ import {
 } from "./scheduler";
 
 // ---------------------------------------------------------------------------
-// Load the authoritative SQL migration
+// Load the live record_review definition (latest migration that creates it)
 // ---------------------------------------------------------------------------
 
-const SQL_PATH = resolve(
-  __dirname,
-  "../../supabase/migrations/20260410160001_srs_v2_scheduler.sql",
-);
-const sql = readFileSync(SQL_PATH, "utf-8");
+const liveRecordReview = getLiveFunctionDefinition("record_review");
 
 /**
- * Extract the SRS v2 scheduler section from the SQL (after the "SRS v2:
- * deterministic scheduler update" comment through the END of the function).
+ * The scheduler section: from the v_difficulty_before snapshot (which holds
+ * the COALESCE(difficulty, 0.55) default) through the end of the function.
  */
 function getSrsV2Section(): string {
-  const marker = "SRS v2: deterministic scheduler update";
-  const idx = sql.indexOf(marker);
-  if (idx === -1) throw new Error(`Could not find "${marker}" in SQL`);
-  return sql.slice(idx);
+  const marker = "v_difficulty_before :=";
+  const idx = liveRecordReview.definition.indexOf(marker);
+  if (idx === -1) throw new Error(`Could not find "${marker}" in record_review`);
+  return liveRecordReview.definition.slice(idx);
 }
 
 const srsSection = getSrsV2Section();
+
+describe("live definition lookup", () => {
+  it("record_review parity runs against the newest migration defining it", () => {
+    // Guard against silently testing a superseded body again: the lookup
+    // must never resolve to anything older than the scheduler_outcome fix.
+    expect(
+      liveRecordReview.migration >=
+        "20261102120000_daily_loop_completion_and_scheduler_outcome.sql",
+    ).toBe(true);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Helpers: extract numeric constants from SQL by pattern
@@ -248,11 +262,15 @@ describe("learned_level parity", () => {
 // Scheduling: next_due intervals
 // ---------------------------------------------------------------------------
 describe("next_due interval parity", () => {
-  it("first clean: next_due = now + 2 days", () => {
+  it("clean paths: next_due = now + stability days (first clean: 2 for a new word)", () => {
+    // The live adaptive RPC schedules every clean path from v_new_stability
+    // (GREATEST(stability, 2) on first clean, then the adaptive multiplier),
+    // not from a literal '2 days'.
     assertSqlContains(
-      /v_now\s*\+\s*interval\s*'2 days'/,
-      "first clean: +2 days",
+      /v_new_next_due\s*:=\s*v_now\s*\+\s*\(v_new_stability\s*\|\|\s*' days'\)::interval/,
+      "clean: now + v_new_stability days",
     );
+    expect(FIRST_CLEAN_STABILITY_DAYS).toBe(2);
   });
 
   it("rescued: next_due = now + 1 day", () => {
@@ -268,10 +286,7 @@ describe("next_due interval parity", () => {
 // Queue: get_daily_queue uses UNION ALL (overlap risk documented)
 // ---------------------------------------------------------------------------
 describe("get_daily_queue structure", () => {
-  const queueSql = readFileSync(
-    resolve(__dirname, "../../supabase/migrations/20260410160003_workload_policy.sql"),
-    "utf-8",
-  );
+  const queueSql = getLiveFunctionDefinition("get_daily_queue").definition;
 
   it("uses UNION ALL between reviews and new words", () => {
     expect(queueSql).toContain("UNION ALL");
@@ -287,6 +302,174 @@ describe("get_daily_queue structure", () => {
     expect(queueSql).toContain("stability_days");
     expect(queueSql).toContain("difficulty");
     expect(queueSql).toContain("srs_state");
-    expect(queueSql).toMatch(/ORDER BY.*DESC/s);
+    expect(queueSql).toMatch(/ORDER BY[\s\S]*DESC/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Daily-loop stage rule (contract A): SQL CASE == resolveDailySessionStage
+// ---------------------------------------------------------------------------
+describe("daily_sessions stage rule parity", () => {
+  const body = liveRecordReview.definition;
+
+  it("SQL counts attempts (main + retry) and honours flashcards_skipped_at", () => {
+    const caseBlock = body.match(/v_session_stage\s*:=\s*CASE([\s\S]*?)END;/);
+    expect(caseBlock).not.toBeNull();
+    const branches = caseBlock![1].replace(/\s+/g, " ").trim();
+    expect(branches).toBe(
+      "WHEN COALESCE(v_session.flashcard_attempts_count, 0) < COALESCE(v_session.assigned_flashcard_count, 0) " +
+        "AND v_session.flashcards_skipped_at IS NULL THEN 'flashcards' " +
+        "WHEN NOT COALESCE(v_session.reading_done, false) THEN 'reading' " +
+        "WHEN NOT COALESCE(v_session.listening_done, false) THEN 'listening' " +
+        "ELSE 'completed'",
+    );
+    expect(body).toMatch(
+      /v_session\.completed\s*:=\s*\(\s*v_session_stage\s*=\s*'completed'\s*\)/,
+    );
+  });
+
+  // Mirror of the SQL CASE above, evaluated on raw row values.
+  function sqlStage(row: {
+    flashcard_attempts_count: number;
+    assigned_flashcard_count: number;
+    flashcards_skipped_at: string | null;
+    reading_done: boolean;
+    listening_done: boolean;
+  }) {
+    if (
+      row.flashcard_attempts_count < row.assigned_flashcard_count &&
+      row.flashcards_skipped_at === null
+    ) {
+      return "flashcards";
+    }
+    if (!row.reading_done) return "reading";
+    if (!row.listening_done) return "listening";
+    return "completed";
+  }
+
+  it("TS resolveDailySessionStage agrees with the SQL CASE on every combination", () => {
+    for (const attempts of [0, 9, 10, 11]) {
+      for (const completedMain of [0, 7, 10]) {
+        for (const skipped of [null, "2026-11-02T10:00:00.000Z"]) {
+          for (const reading_done of [false, true]) {
+            for (const listening_done of [false, true]) {
+              const row = {
+                assigned_flashcard_count: 10,
+                flashcard_attempts_count: attempts,
+                flashcard_completed_count: Math.min(completedMain, attempts),
+                flashcards_skipped_at: skipped,
+                reading_done,
+                listening_done,
+              };
+              expect(resolveDailySessionStage(getDailySessionProgressState(row))).toBe(
+                sqlStage(row),
+              );
+            }
+          }
+        }
+      }
+    }
+  });
+
+  it("flashcards_completed_at and completed_at are first-reached and never cleared", () => {
+    expect(body).toMatch(
+      /IF\s+v_session_stage\s*<>\s*'flashcards'\s+AND\s+v_session\.flashcards_completed_at\s+IS\s+NULL\s+THEN\s+v_session\.flashcards_completed_at\s*:=\s*v_now;/,
+    );
+    expect(body).toMatch(
+      /IF\s+v_session\.completed\s+AND\s+v_session\.completed_at\s+IS\s+NULL\s+THEN\s+v_session\.completed_at\s*:=\s*v_now;/,
+    );
+    expect(body).not.toMatch(/flashcards_completed_at\s*:=\s*NULL/i);
+    expect(body).not.toMatch(/completed_at\s*:=\s*NULL/i);
+  });
+
+  it("session date: loaded app-day (today or yesterday) in the app session time zone", () => {
+    const tz = body.match(/v_app_today\s+date\s*:=\s*\(now\(\)\s+AT\s+TIME\s+ZONE\s+'([^']+)'\)::date/);
+    expect(tz).not.toBeNull();
+    expect(tz![1]).toBe("Europe/London");
+    if (!process.env.APP_SESSION_TIME_ZONE) {
+      expect(getAppSessionTimeZone()).toBe(tz![1]);
+    }
+    expect(body).toMatch(
+      /WHEN\s+p_session_date\s+IN\s*\(\s*v_app_today\s*,\s*v_app_today\s*-\s*1\s*\)\s+THEN\s+p_session_date\s+ELSE\s+v_app_today/,
+    );
+    expect(body).not.toMatch(/v_now::date/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// scheduler_outcome: written on every branch, values allowed by the CHECK
+// ---------------------------------------------------------------------------
+describe("scheduler_outcome parity", () => {
+  const body = liveRecordReview.definition;
+  const checkSql = readFileSync(
+    resolve(MIGRATIONS_DIR, "20260410160002_srs_v2_cleanup.sql"),
+    "utf-8",
+  );
+
+  function allowedOutcomes(): string[] {
+    const check = checkSql.match(
+      /review_events_scheduler_outcome_check\s+CHECK\s*\(\s*scheduler_outcome\s+IS\s+NULL\s+OR\s+scheduler_outcome\s+IN\s*\(([^)]*)\)/,
+    );
+    expect(check).not.toBeNull();
+    return [...check![1].matchAll(/'([^']+)'/g)].map((m) => m[1]).sort();
+  }
+
+  it("each scheduler branch assigns its outcome label", () => {
+    expect(body).toMatch(
+      /IF\s+v_is_first_ever\s+THEN\s+v_scheduler_outcome\s*:=\s*'first_clean_success';/,
+    );
+    expect(body).toMatch(
+      /ELSIF\s+v_is_second_clean\s+THEN\s+v_scheduler_outcome\s*:=\s*'second_clean_success';/,
+    );
+    expect(body).toMatch(
+      /ELSE\s+v_scheduler_outcome\s*:=\s*'later_clean_review';\s+v_growth\s*:=/,
+    );
+    expect(body).toMatch(
+      /ELSIF\s+v_correct\s+AND\s+NOT\s+p_first_try\s+THEN\s+v_scheduler_outcome\s*:=\s*'rescued_success';/,
+    );
+    expect(body).toMatch(
+      /ELSE\s+v_scheduler_outcome\s*:=\s*'incorrect_lapse';\s+v_new_difficulty\s*:=\s*LEAST\(0\.95/,
+    );
+  });
+
+  it("assigned labels are exactly the CHECK-allowed values", () => {
+    const assigned = [
+      ...body.matchAll(/v_scheduler_outcome\s*:=\s*'([^']+)'/g),
+    ].map((m) => m[1]);
+    expect([...new Set(assigned)].sort()).toEqual(allowedOutcomes());
+  });
+
+  /** Split on commas that are not inside parentheses or quotes. */
+  function splitTopLevel(list: string): string[] {
+    const parts: string[] = [];
+    let depth = 0;
+    let inQuote = false;
+    let current = "";
+    for (const ch of list) {
+      if (ch === "'") inQuote = !inQuote;
+      if (!inQuote && ch === "(") depth += 1;
+      if (!inQuote && ch === ")") depth -= 1;
+      if (!inQuote && depth === 0 && ch === ",") {
+        parts.push(current.trim());
+        current = "";
+        continue;
+      }
+      current += ch;
+    }
+    parts.push(current.trim());
+    return parts;
+  }
+
+  it("the review_events INSERT writes scheduler_outcome", () => {
+    const insert = body.match(
+      /INSERT INTO public\.review_events\s*\(([\s\S]*?)\)\s*VALUES\s*\(([\s\S]*?)\);/,
+    );
+    expect(insert).not.toBeNull();
+    const columns = splitTopLevel(insert![1]);
+    const values = splitTopLevel(insert![2]);
+    expect(columns.length).toBe(values.length);
+    const idx = columns.indexOf("scheduler_outcome");
+    expect(idx).toBeGreaterThan(-1);
+    expect(values[idx]).toBe("v_scheduler_outcome");
   });
 });

@@ -46,9 +46,13 @@ To isolate the first flashcard session after placement:
 ```sql
 -- Baseline completion timestamp lives on user_settings (snapshot of the
 -- latest completed run) and on baseline_test_runs.completed_at.
+-- daily_sessions.session_date is a calendar date in the app session time
+-- zone (APP_SESSION_TIME_ZONE, default 'Europe/London'), so bucket
+-- completed_at in the same zone. Using UTC moves placements finished
+-- between 00:00 and 01:00 BST onto the previous day.
 select
   ds.*,
-  (ds.session_date = (btr.completed_at at time zone 'utc')::date)
+  (ds.session_date = (btr.completed_at at time zone 'Europe/London')::date)
     as is_post_baseline_day_one
 from daily_sessions ds
 join user_settings us on us.user_id = ds.user_id
@@ -65,6 +69,11 @@ Relevant fields for this join:
 - `user_settings.current_frontier_rank` / `_low` / `_high` — the frontier in
   effect at read time (may have been recalibrated; see
   `placement_last_recalibrated_at` and `placement_recalibration_trace`).
+- `user_settings.placement_baseline_at` — when the current starting
+  estimate was established (placement completion, self-certification,
+  beginner start or discard). Recalibration measures `daysSinceBaseline`
+  from it and never writes it; `placement_last_recalibrated_at` is only the
+  "last ran" marker. Added and backfilled by migration `20261102120100`.
 - `baseline_test_runs.completed_at` — canonical baseline completion time.
 
 ## Recalibration semantics
@@ -76,11 +85,21 @@ Immediately after placement there is no evidence, so the frontier on day
 1 is always the baseline estimate. Analysts should expect the frontier
 column to evolve over the first week.
 
+During the pilot, `daysSinceBaseline` was measured from
+`placement_last_recalibrated_at`, which each recalibration overwrote. For a
+participant practising daily it stayed at about one day, so the gain
+(`0.18 * max(0.3, exp(-days/4))`) never decayed and the status never
+reached `'stable'`. Frontier trajectories in pilot data therefore moved
+faster than the documented decay implies.
+
 ## Retry semantics in review_events
 
 In-session retries after an incorrect answer are persisted with
 `queue_source = 'retry'` and `first_try = false`. Accuracy aggregates that
-want "one attempt per card per session" should filter to `first_try = true`.
+want "one attempt per card per session" should filter to
+`queue_source = 'main'`. The exported retention proxy (review-card
+correctness) and mean inter-review interval already do this: they use only
+`queue_kind = 'review' AND queue_source = 'main'`.
 The retry budget is bounded by `MAX_RETRIES` (see `lib/srs/retryQueue.ts`);
 pending retries survive page refresh via `localStorage` but are never
 written to the database until the user actually submits the retry.

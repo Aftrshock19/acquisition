@@ -10,7 +10,11 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
-import { recordReview, loadMoreFlashcards } from "@/app/actions/srs";
+import {
+  recordReview,
+  loadMoreFlashcards,
+  skipFlashcardsAfterSession,
+} from "@/app/actions/srs";
 import {
   FLASHCARD_SAVE_FALLBACK,
   toSafeUserMessage,
@@ -35,6 +39,10 @@ import {
   TYPE_LABELS,
   type UnifiedQueueCard,
 } from "@/components/srs/logic/buildUnifiedQueue";
+import {
+  getExtendedSessionCap,
+  shouldPersistFlashcardsSkip,
+} from "@/components/srs/logic/sessionCap";
 import {
   getNormalReviewOutcome,
   getNormalReviewResultLabel,
@@ -204,13 +212,25 @@ export function TodaySession({
   const [newWordsExhausted, setNewWordsExhausted] = useState(false);
   const [unlimitedMode, setUnlimitedMode] = useState(false);
   const seenWordIdsRef = useRef<Set<string>>(new Set());
+  // Attempts already submitted today (main + retry). Must use the same unit
+  // as the server stage rule (flashcard_attempts_count < assigned) so the
+  // session cap below and daily_sessions.stage agree on when the target is met.
   const initialCompletedCount = Math.max(
     0,
-    initialDailySession?.flashcard_completed_count ??
+    initialDailySession?.flashcard_attempts_count ??
+      initialDailySession?.flashcard_completed_count ??
       initialDailySession?.reviews_done ??
       0,
   );
   const normalizedInitialCompleted = Math.max(0, Math.floor(initialCompletedCount));
+  // Pin every review to the day this session was loaded on, so a sitting
+  // that crosses midnight is not split across two daily_sessions rows.
+  const sessionDate = initialDailySession?.session_date ?? null;
+  // dailyLimit is the stored daily target; "Do more flashcards" on the
+  // practice-complete screen raises this sitting's cap above it.
+  const [extendedCap, setExtendedCap] = useState(0);
+  const sessionCap = Math.max(dailyLimit, extendedCap);
+  const skipPersistRequestedRef = useRef(false);
 
   const [mainIndex, setMainIndex] = useState(0);
   const [mainCompletedCount, setMainCompletedCount] = useState(0);
@@ -281,6 +301,8 @@ export function TodaySession({
     setMainIndex(0);
     setMainCompletedCount(0);
     setTotalAnswered(0);
+    setExtendedCap(0);
+    skipPersistRequestedRef.current = false;
     retryQueueRef.current.reset();
 
     // Sweep stale persisted retries (other users / other dates) and rehydrate
@@ -345,7 +367,7 @@ export function TodaySession({
 
   useEffect(() => {
     return () => {
-      router.refresh();
+      router.refresh(); // perf-ok: unmount only; recordReview skips revalidatePath("/today") to keep the session intact, so leaving must drop the stale cached /today payload
     };
   }, [router]);
 
@@ -522,7 +544,11 @@ export function TodaySession({
     setExtraCards((prev) => [...prev, ...newCards]);
 
     if (!prefetch) {
-      // Immediate mode: start practicing the first new card now
+      // Immediate mode: start practicing the first new card now. Point the
+      // main cursor at it too: a session that ended at the cap left the
+      // cursor on the last answered card, so the next advance would have
+      // replayed newCards[0] instead of moving on to newCards[1].
+      setMainIndex(allCards.length);
       beginCard(newCards[0], "main");
       setCurrentRetryIndex(0);
       setPhase("prompt");
@@ -532,9 +558,10 @@ export function TodaySession({
   const handleLoadMoreRef = useRef(handleLoadMore);
   handleLoadMoreRef.current = handleLoadMore;
   const allExhausted = reviewsExhausted && newWordsExhausted;
+  const attemptsSoFar = normalizedInitialCompleted + totalAnswered;
   const targetRemaining = manualTargetMode
-    ? dailyLimit - normalizedInitialCompleted - totalAnswered
-    : dailyLimit - normalizedInitialCompleted - mainCompletedCount;
+    ? sessionCap - attemptsSoFar
+    : sessionCap - normalizedInitialCompleted - mainCompletedCount;
 
   // --- Prefetch: load next chunk while user still has cards to practice ---
   const PREFETCH_THRESHOLD = 10;
@@ -571,6 +598,30 @@ export function TodaySession({
       void handleLoadMoreRef.current(chunk);
     }
   }, [phase, unlimitedMode, loadingMore, shouldAutoLoadChunk, targetRemaining]);
+
+  // --- Ended below target with nothing left to load: persist the skip ---
+  // The practice-complete screen's "Go to reading" is a plain link, so the
+  // row would otherwise stay stage='flashcards' (attempts < stored target)
+  // and reading/listening could never complete the day.
+  const shouldPersistSkip =
+    queue.length > 0 &&
+    shouldPersistFlashcardsSkip({
+      phase,
+      unlimitedMode,
+      loadingMore,
+      willAutoLoad: shouldAutoLoadChunk,
+      attempts: attemptsSoFar,
+      dailyLimit,
+    });
+
+  useEffect(() => {
+    if (!shouldPersistSkip || skipPersistRequestedRef.current) return;
+    skipPersistRequestedRef.current = true;
+    void skipFlashcardsAfterSession(sessionDate).catch(() => {
+      // Best-effort: /today offers "Continue to reading" for a pending,
+      // empty queue, which persists the same skip.
+    });
+  }, [shouldPersistSkip, sessionDate]);
 
   function renderNormalCard(
     card: Extract<UnifiedQueueCard, { cardType: "normal" }>,
@@ -631,10 +682,13 @@ export function TodaySession({
     const rq = retryQueueRef.current;
 
     // Session cap: retries count toward the session total. Once
-    // normalizedInitialCompleted + totalAnswered hits dailyLimit the session
+    // normalizedInitialCompleted + totalAnswered hits the cap the session
     // ends, any pending retries are dropped (they are already logged in
-    // review_events and will resurface tomorrow via SRS).
-    if (normalizedInitialCompleted + totalAnswered >= dailyLimit) {
+    // review_events and will resurface tomorrow via SRS). dailyLimit is the
+    // stored assigned_flashcard_count that record_review counts the same
+    // attempts against, so the server has left stage='flashcards' by this
+    // point (sessionCap only exceeds it after "Do more flashcards").
+    if (attemptsSoFar >= sessionCap) {
       endSession();
       return;
     }
@@ -727,6 +781,7 @@ export function TodaySession({
         msSpent: Date.now() - startedAtRef.current,
         userAnswer,
         expected,
+        sessionDate,
       });
 
       if (!result.ok) {
@@ -937,6 +992,7 @@ export function TodaySession({
             ? current.lemma
             : (current.definition ?? current.lemma),
         ],
+        sessionDate,
       });
 
       if (!result.ok) {
@@ -999,7 +1055,7 @@ export function TodaySession({
   // phase already reflects the current card — no +1 trick needed.
   const progressTotal = allExhausted
     ? Math.max(1, normalizedInitialCompleted + totalDelivered)
-    : Math.max(1, dailyLimit);
+    : Math.max(1, sessionCap);
   const completedCount = Math.min(
     progressTotal,
     normalizedInitialCompleted + totalAnswered,
@@ -1105,7 +1161,15 @@ export function TodaySession({
               reviewsExhausted={reviewsExhausted}
               newWordsExhausted={newWordsExhausted}
               loadingMore={loadingMore}
-              onLoadMore={(count) => void handleLoadMore(count)}
+              onLoadMore={(count) => {
+                // Client-only extra practice: the stored daily target is not
+                // raised (ExtendFlashcardsPanel / extendFlashcardsSession
+                // does that), only this sitting's cap.
+                setExtendedCap(
+                  getExtendedSessionCap(sessionCap, attemptsSoFar, count),
+                );
+                void handleLoadMore(count);
+              }}
               onStartUnlimited={() => {
                 setUnlimitedMode(true);
                 void handleLoadMore(12);

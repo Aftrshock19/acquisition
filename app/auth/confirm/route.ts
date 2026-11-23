@@ -2,9 +2,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { getAppUrl } from "@/lib/url";
-
-const GENERIC_ERROR =
-  "This confirmation link is no longer valid. Try signing in — if your email is already confirmed it will work. Otherwise, request a new confirmation email below. If you still cannot get in, email du22662@bristol.ac.uk.";
+import { LOGIN_ERROR_LINK_INVALID } from "@/lib/errors/userMessages";
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
@@ -23,17 +21,17 @@ export async function GET(request: NextRequest) {
   };
 
   if (!tokenHash) {
-    return loginRedirect({ error: GENERIC_ERROR });
+    return loginRedirect({ error: LOGIN_ERROR_LINK_INVALID });
   }
 
   if (type !== "email") {
     console.warn(`[auth/confirm] rejected non-email type=${type}`);
-    return loginRedirect({ error: GENERIC_ERROR });
+    return loginRedirect({ error: LOGIN_ERROR_LINK_INVALID });
   }
 
   const supabase = await createSupabaseServerClient();
   if (!supabase) {
-    return loginRedirect({ error: GENERIC_ERROR });
+    return loginRedirect({ error: LOGIN_ERROR_LINK_INVALID });
   }
 
   const { error } = await supabase.auth.verifyOtp({
@@ -43,7 +41,7 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     console.warn(`[auth/confirm] verifyOtp failed: ${error.message}`);
-    return loginRedirect({ error: GENERIC_ERROR });
+    return loginRedirect({ error: LOGIN_ERROR_LINK_INVALID });
   }
 
   // Clear the session that verifyOtp just established in this browser/webview.

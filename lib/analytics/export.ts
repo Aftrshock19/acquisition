@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { getAppSessionTimeZone } from "@/lib/analytics/date";
 import { EXPORT_FORMAT_VERSION, METRIC_DEFINITIONS } from "@/lib/analytics/metricDefinitions";
+import { isLoopCompleted } from "@/lib/analytics/service";
 import type { AnalyticsBundle } from "@/lib/analytics/types";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -27,6 +28,7 @@ const CSV_FIELD_ORDER: Record<Exclude<ExportDataset, "all">, string[]> = {
     "session_date",
     "session_started",
     "session_completed",
+    "loop_completed",
     "stage",
     "assigned_flashcard_count",
     "assigned_new_words_count",
@@ -67,6 +69,7 @@ const CSV_FIELD_ORDER: Record<Exclude<ExportDataset, "all">, string[]> = {
     "last_resumed_at",
     "resume_count",
     "flashcards_completed_at",
+    "flashcards_skipped_at",
     "reading_opened_at",
     "reading_completed_at",
     "reading_time_seconds",
@@ -93,6 +96,7 @@ const CSV_FIELD_ORDER: Record<Exclude<ExportDataset, "all">, string[]> = {
     "listening_asset_id",
     "completed",
     "completed_at",
+    "loop_completed",
     "created_at",
     "updated_at",
   ],
@@ -275,16 +279,22 @@ export function getExportRows(
   anonymousUserId: string,
 ) {
   if (dataset === "daily_aggregates") {
+    // session_completed already holds the research loop_completed value;
+    // the explicit column lets analysis code assert it reads the new field.
     return bundle.dailyAggregates.map((row) => ({
       anonymous_user_id: anonymousUserId,
       ...row,
+      loop_completed: row.session_completed,
     }));
   }
 
   if (dataset === "sessions") {
+    // `completed` stays the raw DB flag; loop_completed is the derived
+    // research definition.
     return bundle.sessions.map((row) => ({
       anonymous_user_id: anonymousUserId,
       ...row,
+      loop_completed: isLoopCompleted(row),
     }));
   }
 

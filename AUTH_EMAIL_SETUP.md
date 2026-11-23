@@ -68,6 +68,46 @@ PWA context.
 `Site URL` (above) must be `https://languageacquisition.net` because
 `{{ .SiteURL }}` in the template expands to that value.
 
+### PKCE verifier cookie deleted by the proxy (fixed November 2026)
+
+The "code verifier not found" failures on `/auth/callback` were most
+likely caused by the app, not by email webviews. `proxy.ts` deleted every
+`sb-*auth-token*` cookie whenever `getUser()` returned no user. That
+includes `sb-<ref>-auth-token-code-verifier`, which is set at sign-up,
+resend and password reset and is what `/auth/callback` needs to exchange
+the emailed `?code=`. A visitor holding only that cookie lost it on their
+next request. `LoginForm` calls `router.refresh()` straight after
+sign-up, so the verifier was gone before the email was even opened,
+including in the same browser. The same rule logged users out on any transient
+Supabase Auth error (network, 502/503/504), because auth-js returns
+those errors rather than throwing them.
+
+The proxy now:
+
+- skips the check when there is no session cookie, so verifier-only
+  visitors are left alone;
+- never deletes `*-code-verifier` cookies, including when auth-js
+  clears one along with an invalid session;
+- clears session cookies only for a definitive invalid session:
+  `refresh_token_not_found`, `refresh_token_already_used`,
+  `session_not_found`, `session_expired`, `bad_jwt`, `user_not_found`,
+  or a session cookie that cannot be read;
+- keeps cookies for retryable, network or unrecognised errors and logs
+  `[proxy] supabase auth unavailable` instead. auth-js signs the session
+  out by itself when a token refresh fails with any non-retryable error,
+  such as a GoTrue 500 or a Cloudflare 52x page. The proxy therefore holds
+  back cookie writes until it has classified the error and discards that
+  sign-out, adding `(discarded auth-js sign-out)` to the log line. A
+  session rotated in the same request is still saved.
+
+The webview explanation above still applies when the link opens in a
+different browser from the one used to sign up. The token-hash flow
+remains the fix for that case.
+
+`/login?error=` now takes a short code (`link_invalid`) rather than
+message text. The login page shows only the fixed message for a known
+code and ignores anything else.
+
 ### Other email templates
 
 Other templates (password reset, magic link, etc.) still use

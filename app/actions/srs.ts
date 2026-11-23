@@ -5,7 +5,24 @@ import {
   createSupabaseServerClient,
   getSupabaseServerContextFast,
 } from "@/lib/supabase/server";
-import { getTodayDailySessionRow, getTodaySessionDate } from "@/lib/loop/dailySessions";
+import {
+  getDailySessionRowForDate,
+  getTodayDailySessionRow,
+  getTodaySessionDate,
+} from "@/lib/loop/dailySessions";
+import {
+  buildExtendedProgress,
+  buildSkippedProgress,
+  getDailySessionCompleted,
+  getDailySessionProgressState,
+  getFlashcardAttemptsCount,
+  getInitialAssignedFlashcardCount,
+  resolveCompletedAt,
+  resolveDailySessionStage,
+  resolveFlashcardsCompletedAt,
+  type DailySessionProgressState,
+} from "@/lib/loop/dailySessionStage";
+import { isValidSessionDate, shiftSessionDate } from "@/lib/analytics/date";
 import {
   getListeningAssetById,
   getListeningAssetForTextId,
@@ -97,15 +114,6 @@ export type FlashcardDebugSnapshot = {
   dailySession: DailySessionRow | null;
   currentUserWord: Record<string, unknown> | null;
   lastReviewEvent: Record<string, unknown> | null;
-};
-
-type DailySessionProgressState = {
-  assignedFlashcardCount: number;
-  assignedNewWordsCount: number;
-  assignedReviewCardsCount: number;
-  flashcardCompletedCount: number;
-  readingDone: boolean;
-  listeningDone: boolean;
 };
 
 const SESSION_RESUME_THRESHOLD_MS = 15 * 60 * 1000;
@@ -416,12 +424,9 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
   ]);
   const __perfParallelDone = performance.now();
   const effective = resolveEffectiveSettings(settings, recommended);
-  const completedToday = Math.max(
-    0,
-    existingDailySession?.flashcard_completed_count ??
-      existingDailySession?.reviews_done ??
-      0,
-  );
+  // Flashcard units count every submitted answer (main + retry), matching the
+  // client session cap and the record_review stage rule.
+  const attemptsToday = getFlashcardAttemptsCount(existingDailySession);
   const existingAssignedCount = Math.max(
     0,
     existingDailySession?.assigned_flashcard_count ?? 0,
@@ -429,7 +434,11 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
   const sessionTargetCount = existingAssignedCount > 0
     ? existingAssignedCount
     : effective.effectiveDailyLimit;
-  const remainingDailyLimit = Math.max(0, sessionTargetCount - completedToday);
+  // A "Continue to reading" skip ends today's flashcard stage even though
+  // the target was not reached; do not serve a fresh queue afterwards.
+  const remainingDailyLimit = existingDailySession?.flashcards_skipped_at
+    ? 0
+    : Math.max(0, sessionTargetCount - attemptsToday);
 
   const variant: SchedulerVariant =
     settings.scheduler_variant === "adaptive" ? "adaptive" : "baseline";
@@ -535,6 +544,14 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
     },
     isManualMode ? "manual" : "recommended",
     recommended.recommendedDailyLimit,
+    // Only used when today's row is created: a manual target is stored in
+    // full (e.g. 100), not as the first 50-card chunk, so a reload mid-way
+    // keeps the target via existingAssignedCount above.
+    getInitialAssignedFlashcardCount({
+      isUserDrivenTarget,
+      sessionTargetCount,
+      loadedCardCount: session.dueReviews.length + session.newWords.length,
+    }),
   );
 
   console.log(
@@ -544,12 +561,21 @@ export async function getTodayFlashcards(lang: string): Promise<TodayFlashcardsR
       `queue=${Math.round(__perfQueueDone - __perfPreQueue)}ms ` +
       `upsert=${Math.round(performance.now() - __perfQueueDone)}ms`,
   );
+  // The client session cap must be the target record_review counts attempts
+  // against. On the first load in recommended mode the stored target is the
+  // queue actually assigned, often smaller than effectiveDailyLimit; capping
+  // the client at the larger number let it keep serving cards after the
+  // server had left stage='flashcards' (and a reload then dropped them).
+  const storedTarget = dailySession?.assigned_flashcard_count ?? 0;
   return {
     ok: true,
     session,
     dailySession,
     workloadPolicy,
-    effectiveSettings,
+    effectiveSettings: {
+      ...effectiveSettings,
+      dailyLimit: storedTarget > 0 ? storedTarget : sessionTargetCount,
+    },
     savedWords,
   };
 }
@@ -778,6 +804,7 @@ export async function recordReview(
     const grade = resolveGrade(payload);
     const queueSource = payload.queueSource ?? "main";
     const retryScheduledFor = payload.retryScheduledFor ?? null;
+    const sessionDate = resolveReviewSessionDate(payload.sessionDate);
 
     // Run settings + speculative adaptive wordState fetch in parallel. wordState
     // is a cheap single-row query and is discarded in baseline variant; this
@@ -835,7 +862,7 @@ export async function recordReview(
       p_user_answer: payload.userAnswer ?? "",
       p_expected: payload.expected ?? [],
       p_card_type: payload.cardType ?? "cloze",
-      p_session_date: getTodaySessionDate(),
+      p_session_date: sessionDate,
       p_queue_kind: payload.queueKind ?? null,
       p_queue_source: queueSource,
       p_shown_at: payload.shownAt ?? null,
@@ -863,7 +890,6 @@ export async function recordReview(
     // check. All failures here are logged but do not fail the action — the
     // review was already persisted by the RPC above.
     if (queueSource !== "retry" && settings.daily_plan_mode === "recommended") {
-      const sessionDate = getTodaySessionDate();
       const { data: sessionRow, error: sessionLookupError } = await supabase
         .from("daily_sessions")
         .select(
@@ -932,6 +958,19 @@ export async function recordReview(
       error: error instanceof Error ? error.message : "Failed to record review",
     };
   }
+}
+
+// The client passes the session_date of the daily_sessions row it loaded so a
+// sitting that runs past midnight keeps writing to the day it started on.
+// Only today or yesterday (app session time zone) is accepted; record_review
+// applies the same window server-side.
+function resolveReviewSessionDate(requested: string | null | undefined): string {
+  const today = getTodaySessionDate();
+  if (!isValidSessionDate(requested)) return today;
+  if (requested === today || requested === shiftSessionDate(today, -1)) {
+    return requested;
+  }
+  return today;
 }
 
 function resolveGrade(payload: RecordReviewPayload): Grade {
@@ -1021,98 +1060,6 @@ export async function recordExposure(
   return { ok: true };
 }
 
-// INVARIANT: once a daily_sessions row exists, assignedFlashcardCount must be
-// returned as-is from the existing row. Do not max it against completed
-// counts. The "Do more flashcards" path legitimately mutates the column via
-// extendFlashcardsSession, but any other code path reaching this helper with
-// an existing row must preserve the value. The other five upsert call sites
-// (extendFlashcardsSession, completeReadingStep, completeListeningStep,
-// markReadingOpened, markListeningOpened, markListeningPlaybackStarted) all
-// pass the result of this helper through to their own upsert payloads,
-// relying on this preservation. If you change this helper back to max
-// semantics, you silently corrupt research data across all six call sites.
-function getDailySessionProgressState(
-  current:
-    | {
-        assigned_flashcard_count?: number | null;
-        assigned_new_words_count?: number | null;
-        assigned_review_cards_count?: number | null;
-        flashcard_completed_count?: number | null;
-        new_words_count?: number | null;
-        reviews_done?: number | null;
-        reading_done?: boolean | null;
-        listening_done?: boolean | null;
-      }
-    | null,
-  fallbackCounts?: {
-    assignedFlashcardCount?: number;
-    assignedNewWordsCount?: number;
-    assignedReviewCardsCount?: number;
-  },
-): DailySessionProgressState {
-  const assignedFlashcardCount = Math.max(
-    0,
-    current?.assigned_flashcard_count ??
-      current?.new_words_count ??
-      fallbackCounts?.assignedFlashcardCount ??
-      0,
-  );
-  const assignedNewWordsCount = Math.max(
-    0,
-    current?.assigned_new_words_count ?? fallbackCounts?.assignedNewWordsCount ?? 0,
-  );
-  const assignedReviewCardsCount = Math.max(
-    0,
-    current?.assigned_review_cards_count ??
-      fallbackCounts?.assignedReviewCardsCount ??
-      0,
-  );
-  const flashcardCompletedCount = Math.max(
-    0,
-    current?.flashcard_completed_count ?? current?.reviews_done ?? 0,
-  );
-
-  const hasExistingAssigned =
-    current?.assigned_flashcard_count != null || current?.new_words_count != null;
-
-  return {
-    assignedFlashcardCount: hasExistingAssigned
-      ? assignedFlashcardCount
-      : Math.max(
-          assignedFlashcardCount,
-          flashcardCompletedCount,
-          assignedNewWordsCount + assignedReviewCardsCount,
-        ),
-    assignedNewWordsCount,
-    assignedReviewCardsCount,
-    flashcardCompletedCount,
-    readingDone: current?.reading_done ?? false,
-    listeningDone: current?.listening_done ?? false,
-  };
-}
-
-function resolveDailySessionStage(
-  state: DailySessionProgressState,
-): DailySessionRow["stage"] {
-  if (state.flashcardCompletedCount < state.assignedFlashcardCount) {
-    return "flashcards";
-  }
-
-  if (!state.readingDone) {
-    return "reading";
-  }
-
-  if (!state.listeningDone) {
-    return "listening";
-  }
-
-  return "completed";
-}
-
-function getDailySessionCompleted(state: DailySessionProgressState) {
-  return resolveDailySessionStage(state) === "completed";
-}
-
 function getNextPathForDailySession(
   dailySession: Pick<
     DailySessionRow,
@@ -1172,6 +1119,7 @@ async function upsertDailySession(
   adaptive?: AdaptiveDailySessionPatch,
   dailyTargetMode?: "recommended" | "manual",
   recommendedTargetAtCreation?: number,
+  initialAssignedFlashcardCount?: number,
 ): Promise<DailySessionRow | null> {
   const { supabase, user } = await getSupabaseServerContextFast();
   if (!supabase || !user) return null;
@@ -1180,7 +1128,8 @@ async function upsertDailySession(
   const now = new Date().toISOString();
   const assignedReviewCardsCount = session.dueReviews.length;
   const assignedNewWordsCount = session.newWords.length;
-  const assignedFlashcardCount = assignedReviewCardsCount + assignedNewWordsCount;
+  const assignedFlashcardCount =
+    initialAssignedFlashcardCount ?? assignedReviewCardsCount + assignedNewWordsCount;
   const progress = getDailySessionProgressState(
     existingDailySession,
     {
@@ -1199,10 +1148,11 @@ async function upsertDailySession(
         SESSION_RESUME_THRESHOLD_MS,
   );
   const completed = getDailySessionCompleted(progress);
-  const flashcardsCompletedAt =
-    progress.assignedFlashcardCount === 0 || progress.flashcardCompletedCount >= progress.assignedFlashcardCount
-      ? existingDailySession?.flashcards_completed_at ?? now
-      : existingDailySession?.flashcards_completed_at ?? null;
+  const flashcardsCompletedAt = resolveFlashcardsCompletedAt(
+    existingDailySession?.flashcards_completed_at,
+    progress,
+    now,
+  );
 
   // These columns capture state at session creation and must never be rewritten.
   // upsertDailySession runs on every /today render (settings save, loop-stage
@@ -1256,6 +1206,10 @@ async function upsertDailySession(
           : existingDailySession?.last_resumed_at ?? null,
         resume_count:
           (existingDailySession?.resume_count ?? 0) + (shouldResume ? 1 : 0),
+        // flashcards_skipped_at is deliberately absent from every upsert
+        // payload except skip/extend: ON CONFLICT DO UPDATE only sets payload
+        // columns, so it carries forward untouched while `stage` above is
+        // derived from it via getDailySessionProgressState.
         flashcards_completed_at: flashcardsCompletedAt,
         reading_done: existingDailySession?.reading_done ?? false,
         reading_text_id: existingDailySession?.reading_text_id ?? null,
@@ -1280,9 +1234,7 @@ async function upsertDailySession(
         listening_time_seconds:
           existingDailySession?.listening_time_seconds ?? 0,
         completed,
-        completed_at: completed
-          ? existingDailySession?.completed_at ?? now
-          : existingDailySession?.completed_at ?? null,
+        completed_at: resolveCompletedAt(existingDailySession?.completed_at, progress, now),
         ...insertOnlySnapshot,
       },
       { onConflict: "user_id,session_date" },
@@ -1323,14 +1275,17 @@ export async function extendFlashcardsSession(
   if (!currentDailySession.flashcards_completed_at) {
     return { ok: false, reason: "flashcards_not_complete" };
   }
-  const fromCompleted = currentDailySession.stage === "completed";
 
+  // Raises the target to `count` attempts beyond what has been done and
+  // clears any earlier skip, so the derived stage is 'flashcards' and
+  // completed=false purely for routing. flashcards_completed_at and
+  // completed_at are first-reached timestamps and are kept as they are, so
+  // research metrics still see the day as completed.
   const currentProgress = getDailySessionProgressState(currentDailySession);
-  const nextProgress: DailySessionProgressState = {
-    ...currentProgress,
-    assignedFlashcardCount: currentProgress.assignedFlashcardCount + count,
-    assignedNewWordsCount: currentProgress.assignedNewWordsCount + count,
-  };
+  const nextProgress: DailySessionProgressState = buildExtendedProgress(
+    currentProgress,
+    count,
+  );
   const stage = resolveDailySessionStage(nextProgress);
   const now = new Date().toISOString();
   const sessionDate = getTodaySessionDate();
@@ -1357,13 +1312,14 @@ export async function extendFlashcardsSession(
         flashcard_retry_count: currentDailySession.flashcard_retry_count ?? 0,
         started_at: currentDailySession.started_at ?? now,
         last_active_at: now,
-        flashcards_completed_at: null,
-        reading_done: fromCompleted,
+        flashcards_skipped_at: null,
+        flashcards_completed_at: currentDailySession.flashcards_completed_at,
+        reading_done: nextProgress.readingDone,
         reading_text_id: currentDailySession.reading_text_id,
         reading_opened_at: currentDailySession.reading_opened_at,
         reading_completed_at: currentDailySession.reading_completed_at,
         reading_time_seconds: currentDailySession.reading_time_seconds ?? 0,
-        listening_done: fromCompleted,
+        listening_done: nextProgress.listeningDone,
         listening_asset_id: currentDailySession.listening_asset_id,
         listening_opened_at: currentDailySession.listening_opened_at,
         listening_playback_started_at:
@@ -1378,8 +1334,8 @@ export async function extendFlashcardsSession(
         listening_playback_rate: currentDailySession.listening_playback_rate,
         listening_time_seconds:
           currentDailySession.listening_time_seconds ?? 0,
-        completed: false,
-        completed_at: fromCompleted ? currentDailySession.completed_at : null,
+        completed: getDailySessionCompleted(nextProgress),
+        completed_at: currentDailySession.completed_at,
       },
       { onConflict: "user_id,session_date" },
     );
@@ -1399,7 +1355,7 @@ export async function extendFlashcardsSession(
   // already succeeded and the user-facing flow must not be blocked.
   const { data: userSettingsRow, error: userSettingsLookupError } = await supabase
     .from("user_settings")
-    .select("daily_plan_mode")
+    .select("daily_plan_mode,manual_daily_card_limit")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -1409,10 +1365,20 @@ export async function extendFlashcardsSession(
       userSettingsLookupError,
     );
   } else if (userSettingsRow) {
-    const dailyPlanMode = (userSettingsRow as { daily_plan_mode: "recommended" | "manual" | null })
-      .daily_plan_mode;
+    const { daily_plan_mode: dailyPlanMode, manual_daily_card_limit: manualDailyCardLimit } =
+      userSettingsRow as {
+        daily_plan_mode: "recommended" | "manual" | null;
+        manual_daily_card_limit: number | null;
+      };
 
-    if (dailyPlanMode === "manual") {
+    // The mirror only ever raises the preference. After a "Continue to
+    // reading" skip the extended target is re-based on attempts and can sit
+    // below it: the user ran out of words, they did not lower their limit.
+    if (
+      dailyPlanMode === "manual" &&
+      (manualDailyCardLimit == null ||
+        nextProgress.assignedFlashcardCount > manualDailyCardLimit)
+    ) {
       const { error: manualLimitError } = await supabase
         .from("user_settings")
         .update({ manual_daily_card_limit: nextProgress.assignedFlashcardCount })
@@ -1442,24 +1408,77 @@ export async function extendFlashcardsSession(
   return { ok: true };
 }
 
+// Persist a "Continue to reading" skip as flashcards_skipped_at. Writing
+// stage alone is undone by the next /today render, because
+// upsertDailySession re-derives stage from the counters; the derivation
+// honours this column. No-op (returns true) when flashcards are not pending.
+async function persistFlashcardsSkip(
+  supabase: NonNullable<Awaited<ReturnType<typeof getSupabaseServerContextFast>>["supabase"]>,
+  userId: string,
+  currentDailySession: DailySessionRow | null,
+): Promise<boolean> {
+  const nextProgress = currentDailySession
+    ? buildSkippedProgress(getDailySessionProgressState(currentDailySession))
+    : null;
+  if (!currentDailySession || !nextProgress) return true;
+
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("daily_sessions")
+    .update({
+      stage: resolveDailySessionStage(nextProgress),
+      flashcards_skipped_at: currentDailySession.flashcards_skipped_at ?? now,
+      flashcards_completed_at: resolveFlashcardsCompletedAt(
+        currentDailySession.flashcards_completed_at,
+        nextProgress,
+        now,
+      ),
+      completed: getDailySessionCompleted(nextProgress),
+      completed_at: resolveCompletedAt(
+        currentDailySession.completed_at,
+        nextProgress,
+        now,
+      ),
+      last_active_at: now,
+    })
+    .eq("user_id", userId)
+    .eq("session_date", currentDailySession.session_date);
+
+  return !error;
+}
+
 export async function skipFlashcardsToReading() {
   const { supabase, user, error: authError } = await getSupabaseServerContextFast();
   if (!supabase || authError || !user) return;
 
-  const now = new Date().toISOString();
-  const sessionDate = getTodaySessionDate();
-
-  await supabase
-    .from("daily_sessions")
-    .update({
-      stage: "reading",
-      flashcards_completed_at: now,
-      last_active_at: now,
-    })
-    .eq("user_id", user.id)
-    .eq("session_date", sessionDate);
+  const currentDailySession = await getTodayDailySessionRow(supabase, user.id);
+  await persistFlashcardsSkip(supabase, user.id, currentDailySession);
 
   revalidatePath("/today");
+}
+
+/**
+ * TodaySession's counterpart of skipFlashcardsToReading: the sitting reached
+ * its practice-complete screen below today's target with nothing left to
+ * load (e.g. a manual target larger than the word supply). Its "Go to
+ * reading" link does not run the skip, so without this the row would stay
+ * stage='flashcards' and reading/listening could never complete the day.
+ * Targets the row the session was loaded for (today or yesterday only, as
+ * for record_review). Intentionally NO revalidatePath('/today'): that would
+ * remount the page and replace the practice-complete summary.
+ */
+export async function skipFlashcardsAfterSession(
+  sessionDate?: string | null,
+): Promise<{ ok: boolean }> {
+  const { supabase, user, error: authError } = await getSupabaseServerContextFast();
+  if (!supabase || authError || !user) return { ok: false };
+
+  const currentDailySession = await getDailySessionRowForDate(
+    supabase,
+    user.id,
+    resolveReviewSessionDate(sessionDate),
+  );
+  return { ok: await persistFlashcardsSkip(supabase, user.id, currentDailySession) };
 }
 
 export async function completeReadingStep({
@@ -1535,12 +1554,11 @@ export async function completeReadingStep({
             currentDailySession?.flashcard_retry_count ?? 0,
           started_at: currentDailySession?.started_at ?? now,
           last_active_at: now,
-          flashcards_completed_at:
-            currentDailySession?.flashcards_completed_at ??
-            (nextProgress.assignedFlashcardCount === 0 ||
-            nextProgress.flashcardCompletedCount >= nextProgress.assignedFlashcardCount
-              ? now
-              : null),
+          flashcards_completed_at: resolveFlashcardsCompletedAt(
+            currentDailySession?.flashcards_completed_at,
+            nextProgress,
+            now,
+          ),
           reading_done: true,
           reading_text_id: textId,
           reading_opened_at: currentDailySession?.reading_opened_at ?? now,
@@ -1586,9 +1604,11 @@ export async function completeReadingStep({
               ? 0
               : currentDailySession?.listening_time_seconds ?? 0,
           completed: getDailySessionCompleted(nextProgress),
-          completed_at: getDailySessionCompleted(nextProgress)
-            ? currentDailySession?.completed_at ?? now
-            : currentDailySession?.completed_at ?? null,
+          completed_at: resolveCompletedAt(
+            currentDailySession?.completed_at,
+            nextProgress,
+            now,
+          ),
         },
         { onConflict: "user_id,session_date" },
       )
@@ -1805,12 +1825,11 @@ export async function completeListeningStep({
             currentDailySession?.flashcard_retry_count ?? 0,
           started_at: currentDailySession?.started_at ?? now,
           last_active_at: now,
-          flashcards_completed_at:
-            currentDailySession?.flashcards_completed_at ??
-            (nextProgress.assignedFlashcardCount === 0 ||
-            nextProgress.flashcardCompletedCount >= nextProgress.assignedFlashcardCount
-              ? now
-              : null),
+          flashcards_completed_at: resolveFlashcardsCompletedAt(
+            currentDailySession?.flashcards_completed_at,
+            nextProgress,
+            now,
+          ),
           reading_done: nextProgress.readingDone,
           reading_text_id:
             currentDailySession?.reading_text_id ?? listeningAsset.textId,
@@ -1843,9 +1862,11 @@ export async function completeListeningStep({
             currentDailySession?.listening_time_seconds ?? 0,
           ),
           completed: getDailySessionCompleted(nextProgress),
-          completed_at: getDailySessionCompleted(nextProgress)
-            ? currentDailySession?.completed_at ?? now
-            : currentDailySession?.completed_at ?? null,
+          completed_at: resolveCompletedAt(
+            currentDailySession?.completed_at,
+            nextProgress,
+            now,
+          ),
         },
         { onConflict: "user_id,session_date" },
       )
@@ -1950,9 +1971,9 @@ export async function uncompleteListeningStep({
           listening_completed_at: null,
           stage,
           completed: getDailySessionCompleted(nextProgress),
-          completed_at: getDailySessionCompleted(nextProgress)
-            ? currentDailySession.completed_at
-            : null,
+          // completed_at records the first time the loop was finished and is
+          // never cleared; only the live completed flag/stage step back.
+          completed_at: currentDailySession.completed_at,
         })
         .eq("user_id", user.id)
         .eq("session_date", getTodaySessionDate());
