@@ -5,18 +5,17 @@ import {
   shouldRedirectToIntro,
   shouldRedirectToPlacement,
 } from "@/lib/onboarding/state";
-import { getAppUrl } from "@/lib/url";
-
-const GENERIC_ERROR =
-  "This confirmation link is no longer valid. Try signing in — if your email is already confirmed it will work. Otherwise, request a new confirmation email below. If you still cannot get in, email du22662@bristol.ac.uk.";
+import { getAppUrl, getSafeRedirectPath } from "@/lib/url";
+import { LOGIN_ERROR_LINK_INVALID } from "@/lib/errors/userMessages";
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
-  const next = url.searchParams.get("next") ?? "/";
   const errorParam = url.searchParams.get("error_description");
 
   const origin = getAppUrl();
+  // Only same-origin relative paths, to prevent an open redirect.
+  const next = getSafeRedirectPath(url.searchParams.get("next"), origin);
 
   // Diagnostic: log every hit to identify prefetcher double-hits
   console.log(
@@ -26,7 +25,7 @@ export async function GET(request: NextRequest) {
   if (errorParam) {
     console.warn(`[auth/callback] provider error: ${errorParam}`);
     const loginUrl = new URL("/login", origin);
-    loginUrl.searchParams.set("error", GENERIC_ERROR);
+    loginUrl.searchParams.set("error", LOGIN_ERROR_LINK_INVALID);
     return NextResponse.redirect(loginUrl);
   }
 
@@ -56,7 +55,7 @@ export async function GET(request: NextRequest) {
             `[auth/callback] no existing session — redirecting to login`,
           );
           const loginUrl = new URL("/login", origin);
-          loginUrl.searchParams.set("error", GENERIC_ERROR);
+          loginUrl.searchParams.set("error", LOGIN_ERROR_LINK_INVALID);
           return NextResponse.redirect(loginUrl);
         }
       }
@@ -72,7 +71,5 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL("/placement", origin));
   }
 
-  // Only allow relative paths for the `next` redirect to prevent open redirect
-  const safeDest = next.startsWith("/") ? next : "/";
-  return NextResponse.redirect(new URL(safeDest, origin));
+  return NextResponse.redirect(new URL(next, origin));
 }

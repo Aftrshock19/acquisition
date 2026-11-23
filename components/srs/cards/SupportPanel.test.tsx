@@ -47,11 +47,12 @@ describe("SupportPanel", () => {
         englishSentence="I have to fight."
       />,
     );
-    // Row layout with wrap, vertically centered, spaced apart — not stacked column.
+    // Row layout with wrap, text baselines aligned, spaced apart — not stacked column.
     expect(html).toContain("flex-row");
     expect(html).toContain("flex-wrap");
-    expect(html).toContain("items-center");
+    expect(html).toContain("items-baseline");
     expect(html).toContain("justify-between");
+    expect(html).not.toContain("flex-col");
     // No horizontal-centering classes snuck in.
     expect(html).not.toContain("justify-center");
     expect(html).not.toContain("mx-auto");
@@ -61,7 +62,6 @@ describe("SupportPanel", () => {
     expect(html).toContain("flex-1");
     expect(html).toContain("shrink-0");
     expect(html).toContain("whitespace-nowrap");
-    expect(html).toContain("self-start");
     // Toggle renders after translation in DOM order.
     const translationIdx = html.indexOf("to fight");
     const toggleIdx = html.indexOf("Show sentence");
@@ -154,7 +154,10 @@ describe("SupportPanel", () => {
     expect(html).toContain("blur-[7px]");
     // Mask character count equals the translation length so its width
     // naturally matches the revealed text — no explicit inline-size clamp.
-    expect(html).toContain("m".repeat(longTranslation.length));
+    expect(html).toContain("·".repeat(longTranslation.length));
+    expect(html).not.toContain("·".repeat(longTranslation.length + 1));
+    // The hidden translation itself is not in the DOM until revealed.
+    expect(html).not.toContain(longTranslation);
     // Inner span wraps instead of forcing a horizontal line.
     expect(html).toContain("whitespace-normal");
     expect(html).toContain("break-words");

@@ -3980,3 +3980,6 @@ ACQUISITION_IMPLEMENTATION_REFERENCE_CORRECTED.md
 
 # Dissertation analysis exports (do not commit)
 dose_analysis_export*.csv
+
+# Dead sign-up codes (feature removed in fb490bd); keep out of the repo.
+signup-codes.csv

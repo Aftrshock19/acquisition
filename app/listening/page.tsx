@@ -12,9 +12,17 @@ import { getSupabaseUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { UserSettingsRow } from "@/lib/settings/types";
 
+// Request timing for the [perf] logs. An async server component renders once
+// per request on the server, so reading the clock is safe; keeping the reads in
+// this helper keeps them out of the component body.
+function startPerfTimer(): () => number {
+  const start = performance.now();
+  return () => Math.round(performance.now() - start);
+}
+
 export default async function ListeningPage() {
-  const __perfPageStart = performance.now();
-  const __perfAuthStart = performance.now();
+  const __perfPageElapsed = startPerfTimer();
+  const __perfAuthElapsed = startPerfTimer();
   const supabase = await createSupabaseServerClient();
 
   if (!supabase) {
@@ -49,7 +57,7 @@ export default async function ListeningPage() {
 
   const { user, error } = await getSupabaseUser(supabase);
   console.log(
-    `[perf] /listening auth total=${Math.round(performance.now() - __perfAuthStart)}ms`,
+    `[perf] /listening auth total=${__perfAuthElapsed()}ms`,
   );
 
   if (error) {
@@ -83,11 +91,11 @@ export default async function ListeningPage() {
 
   let assets: ListeningIndexAsset[] = [];
 
-  const __perfAssetsStart = performance.now();
+  const __perfAssetsElapsed = startPerfTimer();
   try {
     assets = await getListeningIndexData(supabase);
     console.log(
-      `[perf] /listening assets total=${Math.round(performance.now() - __perfAssetsStart)}ms rows=${assets.length}`,
+      `[perf] /listening assets total=${__perfAssetsElapsed()}ms rows=${assets.length}`,
     );
   } catch (loadError) {
     return (
@@ -116,7 +124,7 @@ export default async function ListeningPage() {
     );
   }
 
-  const __perfSettingsProgressStart = performance.now();
+  const __perfSettingsProgressElapsed = startPerfTimer();
   const [settingsRow, progressRows] = await Promise.all([
     supabase
       .from("user_settings")
@@ -131,7 +139,7 @@ export default async function ListeningPage() {
       .then((r) => r.data as { asset_id: string; status: string; updated_at: string }[] | null),
   ]);
   console.log(
-    `[perf] /listening settings+progress total=${Math.round(performance.now() - __perfSettingsProgressStart)}ms`,
+    `[perf] /listening settings+progress total=${__perfSettingsProgressElapsed()}ms`,
   );
 
   if (!settingsRow) {
@@ -147,7 +155,7 @@ export default async function ListeningPage() {
 
   let dailyRec: Awaited<ReturnType<typeof getOrCreateDailyRecommendation>> | null = null;
   let dailyRecError = false;
-  const __perfDailyRecStart = performance.now();
+  const __perfDailyRecElapsed = startPerfTimer();
   try {
     dailyRec = await getOrCreateDailyRecommendation(
       supabase,
@@ -160,10 +168,10 @@ export default async function ListeningPage() {
     console.error("[listening] getOrCreateDailyRecommendation failed", err);
   }
   console.log(
-    `[perf] /listening dailyRec total=${Math.round(performance.now() - __perfDailyRecStart)}ms`,
+    `[perf] /listening dailyRec total=${__perfDailyRecElapsed()}ms`,
   );
   console.log(
-    `[perf] /listening page total=${Math.round(performance.now() - __perfPageStart)}ms user=${user.id.slice(0, 8)}`,
+    `[perf] /listening page total=${__perfPageElapsed()}ms user=${user.id.slice(0, 8)}`,
   );
 
   const recommendedAsset = dailyRec

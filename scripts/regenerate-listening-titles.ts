@@ -147,10 +147,13 @@ async function callHaiku(content: string, temperature: number): Promise<string> 
         .trim();
       if (!text) throw new Error("empty response");
       return text;
-    } catch (err: any) {
-      const status = err?.status ?? err?.statusCode;
+    } catch (err: unknown) {
+      const apiErr = err as { status?: number; statusCode?: number } | null | undefined;
+      const status = apiErr?.status ?? apiErr?.statusCode;
       const retriable =
-        status === 429 || status === 529 || (status >= 500 && status < 600);
+        status === 429 ||
+        status === 529 ||
+        (status !== undefined && status >= 500 && status < 600);
       if (retriable && quotaAttempt < QUOTA_BACKOFF.length) {
         const wait = QUOTA_BACKOFF[quotaAttempt]! + Math.random() * 1000;
         quotaAttempt++;
@@ -189,10 +192,10 @@ async function proposeTitleForRow(row: OrphanRow): Promise<Proposed> {
   let attempt1Raw: string;
   try {
     attempt1Raw = await callHaiku(row.content, 0.7);
-  } catch (err: any) {
+  } catch (err: unknown) {
     stats.rejected++;
     stats.rejectionReasons.push(
-      `stage${row.stage_index} ${row.passage_mode} #${row.passage_number}: api err ${err?.message ?? err}`,
+      `stage${row.stage_index} ${row.passage_mode} #${row.passage_number}: api err ${(err as Error | null | undefined)?.message ?? err}`,
     );
     return { row, oldTitle, newTitle: oldTitle, kept: true };
   }
@@ -210,10 +213,10 @@ async function proposeTitleForRow(row: OrphanRow): Promise<Proposed> {
   let attempt2Raw: string;
   try {
     attempt2Raw = await callHaiku(row.content, 0.9);
-  } catch (err: any) {
+  } catch (err: unknown) {
     stats.rejected++;
     stats.rejectionReasons.push(
-      `stage${row.stage_index} ${row.passage_mode} #${row.passage_number}: retry api err ${err?.message ?? err}`,
+      `stage${row.stage_index} ${row.passage_mode} #${row.passage_number}: retry api err ${(err as Error | null | undefined)?.message ?? err}`,
     );
     return { row, oldTitle, newTitle: oldTitle, kept: true };
   }

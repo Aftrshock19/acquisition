@@ -11,18 +11,9 @@ type Artefact = {
   description: string;
 };
 
+// Aggregate tables only. Per-participant tables were taken down after the
+// study ended; they remain in git history at 988806c.
 const artefacts: Artefact[] = [
-  {
-    file: "h1_participant_scores.csv",
-    title: "H1 Participant Scores",
-    description:
-      "How each H1 participant scored before and after using Acquisition.",
-  },
-  {
-    file: "engagement_profile.csv",
-    title: "Engagement Profile",
-    description: "How often each H1 participant used the app during the study.",
-  },
   {
     file: "h1_anchor_form_summary.csv",
     title: "Anchor and Form-Specific Checks",
@@ -36,22 +27,10 @@ const artefacts: Artefact[] = [
       "A small descriptive check of whether higher app use tended to go with larger score gains.",
   },
   {
-    file: "interest_enjoyment_ratings.csv",
-    title: "Interest and Enjoyment Ratings (IMI)",
-    description:
-      "How participants rated Acquisition and their past Duolingo experience for interest and enjoyment.",
-  },
-  {
     file: "corrected_imi.csv",
     title: "Corrected Interest and Enjoyment Ratings (IMI)",
     description:
       "The same interest and enjoyment comparison with participants who were suitable for the analysis.",
-  },
-  {
-    file: "usability_scores.csv",
-    title: "Usability Scores (SUS)",
-    description:
-      "How participants rated Acquisition’s ease of use on the SUS scale.",
   },
 ];
 

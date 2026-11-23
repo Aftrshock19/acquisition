@@ -59,3 +59,25 @@ export function toSafeUserMessage(
   if (raw.length <= 140 && !/["{}<>]/.test(raw)) return raw;
   return fallback;
 }
+
+// Auth routes redirect to /login?error=<code>. The login page renders only the
+// fixed copy mapped here, so a crafted link cannot put arbitrary text on it.
+export const LOGIN_ERROR_LINK_INVALID = "link_invalid";
+
+const LOGIN_ERROR_MESSAGES = new Map<string, string>([
+  [
+    LOGIN_ERROR_LINK_INVALID,
+    "This confirmation link is no longer valid. Try signing in — if your email is already confirmed it will work. Otherwise, request a new confirmation email below. If you still cannot get in, email du22662@bristol.ac.uk.",
+  ],
+]);
+
+/**
+ * Maps a `/login?error=` value to its fixed message; unknown values (and
+ * repeated params, which arrive as arrays) map to null and are not shown.
+ */
+export function loginErrorMessage(
+  code: string | string[] | null | undefined,
+): string | null {
+  if (typeof code !== "string") return null;
+  return LOGIN_ERROR_MESSAGES.get(code) ?? null;
+}

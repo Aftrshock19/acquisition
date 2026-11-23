@@ -119,9 +119,23 @@ describe("coverage graph helper", () => {
       expect(p).toBeLessThanOrEqual(1);
     }
     // Softened mapping still pulls top-100 well above the linear position
-    // (100/5000 = 0.02) without being as aggressive as pure log.
-    expect(bucketXPosition(100)).toBeGreaterThan(0.3);
-    expect(bucketXPosition(100)).toBeLessThan(0.55);
+    // (100/5000 = 0.02) without being as aggressive as pure log. The axis is
+    // pure log-rank raised to one fixed exponent > 1, so derive that exponent
+    // from the curve instead of pinning the tuning constant.
+    const linear = (b: number) => b / COVERAGE_MAX_RANK;
+    const pureLog = (b: number) => Math.log(b) / Math.log(COVERAGE_MAX_RANK);
+    const exponent =
+      Math.log(bucketXPosition(100)) / Math.log(pureLog(100));
+    expect(exponent).toBeGreaterThan(1);
+    for (const b of TOP_N_BUCKETS.filter((n) => n < COVERAGE_MAX_RANK)) {
+      expect(Math.log(bucketXPosition(b)) / Math.log(pureLog(b))).toBeCloseTo(
+        exponent,
+        9,
+      );
+      expect(bucketXPosition(b)).toBeGreaterThan(linear(b));
+      expect(bucketXPosition(b)).toBeLessThan(pureLog(b));
+    }
+    expect(bucketXPosition(100)).toBeGreaterThan(5 * linear(100));
     expect(bucketXPosition(5000)).toBeCloseTo(1);
   });
 

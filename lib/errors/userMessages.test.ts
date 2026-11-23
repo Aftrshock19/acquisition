@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   FLASHCARD_EXTEND_FALLBACK,
   FLASHCARD_SAVE_FALLBACK,
+  LOGIN_ERROR_LINK_INVALID,
+  loginErrorMessage,
   looksLikeRawInfraError,
   toSafeUserMessage,
 } from "./userMessages";
@@ -82,5 +84,32 @@ describe("toSafeUserMessage", () => {
     expect(toSafeUserMessage(long, FLASHCARD_SAVE_FALLBACK)).toBe(
       FLASHCARD_SAVE_FALLBACK,
     );
+  });
+});
+
+describe("loginErrorMessage", () => {
+  it("maps the link_invalid code to the existing confirmation copy", () => {
+    expect(loginErrorMessage(LOGIN_ERROR_LINK_INVALID)).toBe(
+      "This confirmation link is no longer valid. Try signing in — if your email is already confirmed it will work. Otherwise, request a new confirmation email below. If you still cannot get in, email du22662@bristol.ac.uk.",
+    );
+  });
+
+  it("ignores arbitrary text so links cannot inject copy", () => {
+    expect(
+      loginErrorMessage(
+        "Your account is locked. Call +44 20 0000 0000 to unlock it.",
+      ),
+    ).toBeNull();
+    expect(loginErrorMessage("LINK_INVALID")).toBeNull();
+  });
+
+  it("ignores prototype keys, arrays and missing values", () => {
+    expect(loginErrorMessage("constructor")).toBeNull();
+    expect(loginErrorMessage("__proto__")).toBeNull();
+    expect(loginErrorMessage("toString")).toBeNull();
+    expect(loginErrorMessage([LOGIN_ERROR_LINK_INVALID, "x"])).toBeNull();
+    expect(loginErrorMessage(undefined)).toBeNull();
+    expect(loginErrorMessage(null)).toBeNull();
+    expect(loginErrorMessage("")).toBeNull();
   });
 });

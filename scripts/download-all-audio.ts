@@ -86,8 +86,8 @@ async function downloadOne(
       console.log(`  [${idx + 1}/${total}] downloaded`);
     }
     return true;
-  } catch (err: any) {
-    console.error(`  [${idx + 1}/${total}] ERROR ${filename}: ${err.message}`);
+  } catch (err: unknown) {
+    console.error(`  [${idx + 1}/${total}] ERROR ${filename}: ${(err as Error).message}`);
     return false;
   }
 }

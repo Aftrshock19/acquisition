@@ -100,19 +100,26 @@ describe("McqCard", () => {
     expect(html).toContain("house");
   });
 
-  it("does not blur translation in word MCQ even when hideTranslation=true", () => {
-    const html = renderMcq(wordMcqCard, { hideTranslation: true });
-    expect(html).not.toContain('aria-label="Reveal translation"');
-    expect(html).not.toContain("blur-[7px]");
-    expect(html).toContain("house");
-  });
+  // Word MCQ asks for the English meaning of the lemma (buildMcqOptions uses
+  // the translation as the correct option), so the support panel is omitted
+  // entirely: showing the translation would give the answer away.
+  const meaningMcqCard: Extract<UnifiedQueueCard, { cardType: "mcq" }> = {
+    ...wordMcqCard,
+    options: ["house", "dog", "cat", "book"],
+    correctOption: "house",
+  };
 
-  it("does not blur translation in word MCQ when hideTranslation=false", () => {
-    const html = renderMcq(wordMcqCard, { hideTranslation: false });
-    expect(html).not.toContain('aria-label="Reveal translation"');
-    expect(html).not.toContain("blur-[7px]");
-    expect(html).toContain("house");
-  });
+  for (const hideTranslation of [true, false]) {
+    it(`does not reveal the translation outside the options in word MCQ (hideTranslation=${hideTranslation})`, () => {
+      const html = renderMcq(meaningMcqCard, { hideTranslation });
+      expect(html).not.toContain('aria-label="Reveal translation"');
+      expect(html).not.toContain("blur-[7px]");
+      expect(html).not.toContain("Show sentence");
+      // The answer appears exactly once: as its own option button.
+      expect(html.match(/house/g)?.length ?? 0).toBe(1);
+      expect(html).toContain(">house</button>");
+    });
+  }
 });
 
 describe("McqCard — I don't know flow", () => {

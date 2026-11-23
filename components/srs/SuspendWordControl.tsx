@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { suspendWord, unsuspendWord } from "@/app/actions/srs";
 
 type Phase = "idle" | "suspending" | "suspended" | "restoring";
@@ -20,11 +20,15 @@ export function SuspendWordControl({ wordId }: { wordId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  // Reset to idle when the card changes.
-  useEffect(() => {
+  // Reset to idle when the card changes. Adjusting state during render (rather
+  // than in an effect) means the previous card's phase is never shown for the
+  // new one: https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [phaseWordId, setPhaseWordId] = useState(wordId);
+  if (phaseWordId !== wordId) {
+    setPhaseWordId(wordId);
     setPhase("idle");
     setError(null);
-  }, [wordId]);
+  }
 
   const busy = isPending || phase === "suspending" || phase === "restoring";
 
